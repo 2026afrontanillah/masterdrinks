@@ -1733,10 +1733,32 @@ app.get('/api/admin/configuracion', (req, res) => {
   }
 });
 
+// Devuelve las IPv4 de la red local (WiFi) de este equipo.
+function localAddresses() {
+  const nets = require('os').networkInterfaces();
+  const found = [];
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) found.push(net.address);
+    }
+  }
+  return found;
+}
+
 // Server Initialization
-app.listen(PORT, () => {
+// 0.0.0.0 explícito: la tablet que hace de servidor tiene que aceptar las
+// conexiones de las demás por WiFi, no solo las de sí misma.
+app.listen(PORT, '0.0.0.0', () => {
+  const ips = localAddresses();
   console.log(`\n==================================================`);
-  console.log(`🚀 POS & Admin System successfully started!`);
-  console.log(`👉 Access the web application at: http://localhost:${PORT}`);
+  console.log(`🚀 MasterDrinks POS iniciado`);
+  console.log(`   En esta misma tablet:  http://localhost:${PORT}`);
+  if (ips.length) {
+    console.log(`\n   👉 En las OTRAS tablets, abre en el navegador:`);
+    ips.forEach(ip => console.log(`      http://${ip}:${PORT}`));
+  } else {
+    console.log(`\n   ⚠ Sin red detectada: conecta el WiFi y reinicia.`);
+  }
+  console.log(`\n   Ctrl+C para detener.`);
   console.log(`==================================================\n`);
 });
