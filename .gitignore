@@ -1,11 +1,20 @@
 # Dependencias: se reinstalan con `npm install` en cada equipo
 node_modules/
 
-# Base de datos local.
-# NO se versiona: el servidor la crea y la siembra sola en el primer arranque
-# (productos, barras, cajeros, meseros y métodos de pago).
-# Si necesitas llevarte una base ya configurada a la tablet, copia A MANO los
-# TRES archivos (.db, -wal y -shm), nunca solo el .db.
+# Base de datos local: datos de operación, NO de código.
+#
+# Se queda fuera del repositorio por una razón concreta: durante el evento este
+# archivo contiene las ventas reales de la tablet. Si estuviera versionado, un
+# `git pull` para traer un arreglo de código intentaría sobreescribirlo. Git no
+# sabe fusionar un binario, solo reemplazarlo.
+#
+# En el primer arranque el servidor la crea y la siembra solo (barras, cajeros,
+# meseros, categorías, productos y métodos de pago). La semilla vive dentro de
+# server.js, así que ESA sí viaja por git.
+#
+# Para respaldarla o llevarla a otro equipo: detén el servidor con Ctrl+C y
+# copia únicamente pos_evento.db. Al cerrarse vuelca el -wal dentro del .db y
+# lo deja completo. Copiarlo con el servidor encendido da una base a medias.
 pos_evento.db
 pos_evento.db-wal
 pos_evento.db-shm

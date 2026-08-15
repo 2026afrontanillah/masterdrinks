@@ -1745,6 +1745,29 @@ function localAddresses() {
   return found;
 }
 
+// Cierre ordenado (Ctrl+C en Termux, o cuando Android mata el proceso).
+// Sin esto el archivo -wal se queda con ventas dentro y el .db por sí solo
+// está incompleto: copiarlo para respaldo daría una base a medias.
+let cerrando = false;
+function cerrarOrdenado(senal) {
+  if (cerrando) return;
+  cerrando = true;
+  console.log(`\n${senal} recibido: guardando la base...`);
+  try {
+    // Vuelca el WAL dentro del .db y lo deja como archivo único y completo.
+    sqlite.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    db.close();
+    console.log('✅ Base cerrada. Ya puedes copiar pos_evento.db sin riesgo.');
+  } catch (err) {
+    console.error('⚠ Error al cerrar la base:', err.message);
+  }
+  process.exit(0);
+}
+
+['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(senal => {
+  process.on(senal, () => cerrarOrdenado(senal));
+});
+
 // Server Initialization
 // 0.0.0.0 explícito: la tablet que hace de servidor tiene que aceptar las
 // conexiones de las demás por WiFi, no solo las de sí misma.
