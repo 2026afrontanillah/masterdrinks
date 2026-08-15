@@ -1,0 +1,24 @@
+# Dependencias: se reinstalan con `npm install` en cada equipo
+node_modules/
+
+# Base de datos local.
+# NO se versiona: el servidor la crea y la siembra sola en el primer arranque
+# (productos, barras, cajeros, meseros y métodos de pago).
+# Si necesitas llevarte una base ya configurada a la tablet, copia A MANO los
+# TRES archivos (.db, -wal y -shm), nunca solo el .db.
+pos_evento.db
+pos_evento.db-wal
+pos_evento.db-shm
+*.db-journal
+
+# Configuración por equipo. PORT y MESERO_PIN_SCOPE tienen valores por defecto,
+# así que la app arranca igual sin este archivo.
+.env
+
+# Copia antigua e incompleta del proyecto que quedó anidada por error
+/masterdrinks/
+
+# Basura del sistema
+Thumbs.db
+desktop.ini
+.DS_Store

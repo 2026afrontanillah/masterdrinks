@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Sistema POS y Administrativo Premium para festivales y eventos musicales.">
+    <title>MasterDrinks POS | Sistema de Ventas</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Background Glow Blobs -->
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+
+    <!-- 1. GENERAL LOGIN VIEW -->
+    <main id="login-view" class="auth-container">
+        <div class="glass-card auth-card">
+            <header class="auth-header">
+                <div class="logo-container">🍹</div>
+                <h1 class="gradient-text">MasterDrinks POS</h1>
+                <p class="auth-subtitle">Ingresa tus credenciales para acceder al sistema</p>
+            </header>
+            <form id="login-form" class="auth-form">
+                <div class="form-group">
+                    <label for="login-username">Usuario</label>
+                    <input type="text" id="login-username" placeholder="Ej. cajero_norte_1" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Contraseña</label>
+                    <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="primary-btn full-btn">Iniciar Sesión</button>
+            </form>
+            <div id="login-error" class="error-msg hide"></div>
+        </div>
+    </main>
+
+    <!-- 2. WAITER LOCK SECURITY MODAL -->
+    <div id="waiter-lock-modal" class="modal-overlay hide">
+        <div class="glass-card modal-card animate-pop" style="position: relative;">
+            <!-- Top corner back button to exit cashier session -->
+            <button id="logout-cajero-btn" class="modal-close-btn" title="Cerrar Cajero / Volver al Login">←</button>
+
+            <div class="modal-header">
+                <span class="security-icon">🔒</span>
+                <h2>Verificación de Mesero</h2>
+                <p>Ingresa tu clave de mesero para iniciar la comanda</p>
+            </div>
+            <div class="cajero-badge">
+                <span class="label">Cajero Activo:</span>
+                <span id="active-cajero-name" class="val">Ana Torres</span>
+            </div>
+            <div class="pin-container-wrapper">
+                <!-- PIN Display Dots -->
+                <div class="pin-dots-container" id="pin-dots">
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                </div>
+                
+                <!-- PIN Keyboard Grid -->
+                <div class="pin-keyboard">
+                    <button class="pin-btn" data-key="1">1</button>
+                    <button class="pin-btn" data-key="2">2</button>
+                    <button class="pin-btn" data-key="3">3</button>
+                    <button class="pin-btn" data-key="4">4</button>
+                    <button class="pin-btn" data-key="5">5</button>
+                    <button class="pin-btn" data-key="6">6</button>
+                    <button class="pin-btn" data-key="7">7</button>
+                    <button class="pin-btn" data-key="8">8</button>
+                    <button class="pin-btn" data-key="9">9</button>
+                    <button class="pin-btn system" id="pin-clear">C</button>
+                    <button class="pin-btn" data-key="0">0</button>
+                    <button class="pin-btn system" id="pin-back">⌫</button>
+                </div>
+            </div>
+            <div id="waiter-error" class="error-msg hide"></div>
+        </div>
+    </div>
+
+    <!-- 3. MAIN POS SALES PORTAL -->
+    <div id="pos-view" class="portal-container hide">
+        <!-- Top Navigation -->
+        <header class="top-nav">
+            <div class="nav-branding">
+                <span class="logo">🍹</span>
+                <div>
+                    <h2>MasterDrinks POS</h2>
+                    <span id="pos-barra-name" class="barra-badge">Barra Norte</span>
+                </div>
+            </div>
+            <div class="session-info">
+                <div class="user-pill">
+                    <span class="role">Cajero</span>
+                    <strong id="pos-cajero-label">Ana Torres</strong>
+                </div>
+                <div class="user-pill">
+                    <span class="role">Mesero</span>
+                    <strong id="pos-mesero-label">Juan Pérez</strong>
+                </div>
+                <button id="printer-test-btn" class="icon-btn" title="Probar y configurar la impresora">🖨️</button>
+                <button id="lock-pos-btn" class="icon-btn" title="Bloquear / Cambiar Mesero">🔒</button>
+            </div>
+        </header>
+
+        <div class="pos-layout">
+            <!-- Left Panel: Category Filters -->
+            <aside class="pos-sidebar">
+                <p class="sidebar-title">Categorías</p>
+                <div id="category-list" class="category-menu">
+                    <!-- Categories added dynamically -->
+                </div>
+            </aside>
+
+            <!-- Center Panel: Products Grid -->
+            <main class="pos-main">
+                <div class="search-header">
+                    <input type="text" id="product-search" placeholder="Buscar producto...">
+                </div>
+                <div id="product-grid" class="product-grid">
+                    <!-- Products rendered dynamically -->
+                </div>
+            </main>
+
+            <!-- Right Panel: Shopping Cart -->
+            <aside class="pos-cart">
+                <div class="cart-header">
+                    <h3>Carrito de Compras</h3>
+                    <button id="clear-cart" class="clear-btn">Vaciar</button>
+                </div>
+
+                <div id="cart-items" class="cart-items-container">
+                    <!-- Cart items rendered dynamically -->
+                    <div class="empty-cart-msg">El carrito está vacío</div>
+                </div>
+
+                <!-- Notes -->
+                <div class="cart-notes">
+                    <label for="cart-observations">Observaciones</label>
+                    <textarea id="cart-observations" placeholder="Ej. Sin hielo, hamburguesa sin cebolla..."></textarea>
+                </div>
+
+                <!-- Order Totals -->
+                <div class="cart-totals">
+                    <div class="total-row">
+                        <span>Total:</span>
+                        <strong id="cart-total-amount">0.00 Bs.</strong>
+                    </div>
+                </div>
+
+                <!-- Split Payment Controller -->
+                <div class="payment-section">
+                    <p class="section-title">Registro de Pagos</p>
+                    <div class="payment-input-group">
+                        <select id="payment-method-select">
+                            <option value="1">Efectivo</option>
+                            <option value="2">Tarjeta</option>
+                            <option value="3">Código QR</option>
+                            <option value="4">Transferencia</option>
+                        </select>
+                        <input type="number" id="payment-amount-input" min="0" placeholder="Monto" step="0.01">
+                        <button id="add-payment-btn" class="secondary-btn">+</button>
+                    </div>
+
+                    <!-- Payments List -->
+                    <div id="payments-list" class="payments-list">
+                        <!-- Added payments -->
+                    </div>
+
+                    <div class="payment-summary">
+                        <div class="summary-row">
+                            <span>Pagado:</span>
+                            <span id="paid-amount-label">0.00 Bs.</span>
+                        </div>
+                        <div class="summary-row remaining">
+                            <span>Restante:</span>
+                            <strong id="remaining-amount-label">0.00 Bs.</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="finalize-order-btn" class="primary-btn full-btn" disabled>Finalizar Comanda</button>
+            </aside>
+        </div>
+    </div>
+
+    <!-- 4. ADMIN CONTROL PORTAL -->
+    <div id="admin-view" class="portal-container hide">
+        <div class="admin-layout">
+            <!-- Sidebar -->
+            <aside class="admin-sidebar">
+                <div class="admin-branding">
+                    <span class="logo">⚡</span>
+                    <div>
+                        <h2>Panel Admin</h2>
+                        <span id="admin-role-badge" class="admin-role-badge">ADMINISTRADOR</span>
+                    </div>
+                </div>
+                <div class="admin-user-info">
+                    <span class="user-name" id="admin-user-name">Administrador Principal</span>
+                </div>
+                <nav class="admin-nav">
+                    <button class="nav-tab-btn active" data-tab="tab-dashboard">📊 Dashboard</button>
+                    <button class="nav-tab-btn" data-tab="tab-comandas">📝 Comandas / Anulaciones</button>
+                    <button class="nav-tab-btn" data-tab="tab-crear-producto">🛍️ Productos & Categorías</button>
+                    <button class="nav-tab-btn" data-tab="tab-crear-personal">👥 Personal & Barras</button>
+                    <button class="nav-tab-btn" data-tab="tab-stock">📦 Ajustar Stock</button>
+                    <button class="nav-tab-btn" data-tab="tab-inventario">📋 Reporte de Stock</button>
+                    <button class="nav-tab-btn" data-tab="tab-auditoria">🔍 Logs & Auditoría</button>
+                </nav>
+                <div class="sidebar-footer">
+                    <button id="admin-logout-btn" class="danger-btn full-btn">Cerrar Sesión</button>
+                </div>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="admin-main">
+                <!-- Tab: Dashboard -->
+                <section id="tab-dashboard" class="tab-content">
+                    <h1 class="page-title">Resumen del Evento</h1>
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <h3>Ventas Totales</h3>
+                            <strong id="kpi-total-sales">0.00 Bs.</strong>
+                            <p class="desc">Recaudado acumulado</p>
+                        </div>
+                        <div class="kpi-card">
+                            <h3>Comandas Procesadas</h3>
+                            <strong id="kpi-total-orders">0</strong>
+                            <p class="desc">Pedidos registrados</p>
+                        </div>
+                        <div class="kpi-card danger">
+                            <h3>Comandas Anuladas</h3>
+                            <strong id="kpi-voided-orders">0</strong>
+                            <p class="desc">Cancelaciones supervisadas</p>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-details">
+                        <div class="glass-card">
+                            <h2>Ventas por Barra</h2>
+                            <div id="barras-sales-chart" class="sales-bar-list">
+                                <!-- Rendered dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tab: Comandas -->
+                <section id="tab-comandas" class="tab-content hide">
+                    <h1 class="page-title">Historial de Comandas</h1>
+                    
+                    <!-- Search Filter for orders -->
+                    <div class="search-header" style="max-width: 450px; margin-bottom: 20px;">
+                        <input type="text" id="comanda-search-input" placeholder="🔍 Buscar por Nº comanda (#) o mesero...">
+                    </div>
+
+                    <div id="comandas-cards-container" class="comandas-cards-grid">
+                        <!-- Miniature ticket cards rendered dynamically -->
+                    </div>
+                </section>
+
+                <!-- Tab: Crear Producto & Categoría -->
+                <section id="tab-crear-producto" class="tab-content hide">
+                    <h1 class="page-title">Gestión de Catálogo</h1>
+                    <div class="admin-grid-forms">
+                        <!-- Create Category Form -->
+                        <div class="glass-card form-card">
+                            <h2>Nueva Categoría</h2>
+                            <form id="form-create-category">
+                                <div class="form-group">
+                                    <label for="cat-name">Nombre de Categoría</label>
+                                    <input type="text" id="cat-name" placeholder="Ej. Licores" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="cat-desc">Descripción</label>
+                                    <input type="text" id="cat-desc" placeholder="Ej. Medidas y botellas de destilados">
+                                </div>
+                                <div class="form-group">
+                                    <label for="cat-type">Tipo Global</label>
+                                    <select id="cat-type">
+                                        <option value="BEBIDA">Bebida</option>
+                                        <option value="COMIDA">Comida</option>
+                                        <option value="OTRO">Otro</option>
+                                    </select>
+                                </div>
+                                <button type="submit" class="primary-btn">Crear Categoría</button>
+                            </form>
+                        </div>
+
+                        <!-- Create Product Form -->
+                        <div class="glass-card form-card">
+                            <h2>Nuevo Producto</h2>
+                            <form id="form-create-product">
+                                <div class="form-group">
+                                    <label for="prod-cat">Categoría</label>
+                                    <select id="prod-cat" required>
+                                        <!-- Populated dynamically -->
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="prod-name">Nombre del Producto</label>
+                                    <input type="text" id="prod-name" placeholder="Ej. Ron Flor de Caña 7 Años" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="prod-desc">Descripción</label>
+                                    <input type="text" id="prod-desc" placeholder="Ej. Medida de 50 ml con mezclador">
+                                </div>
+                                <div class="form-group">
+                                    <label for="prod-type">Tipo de Producto</label>
+                                    <select id="prod-type">
+                                        <option value="BEBIDA_ALCOHOLICA">Bebida Alcohólica</option>
+                                        <option value="BEBIDA_NO_ALCOHOLICA">Bebida No Alcohólica</option>
+                                        <option value="COMIDA">Comida</option>
+                                        <option value="OTRO">Otro</option>
+                                    </select>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="prod-price">Precio de Venta (Bs.)</label>
+                                        <input type="number" id="prod-price" min="0" step="0.5" placeholder="0.00" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="prod-stock">Stock Inicial</label>
+                                        <input type="number" id="prod-stock" min="0" placeholder="100" required>
+                                    </div>
+                                </div>
+                                <button type="submit" class="primary-btn">Crear Producto</button>
+                            </form>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tab: Crear Personal & Barras -->
+                <section id="tab-crear-personal" class="tab-content hide">
+                    <h1 class="page-title">Personal & Puntos de Venta</h1>
+                    <div class="admin-grid-forms">
+                        <!-- Create Barra -->
+                        <div class="glass-card form-card">
+                            <h2>Nueva Barra</h2>
+                            <form id="form-create-barra">
+                                <div class="form-group">
+                                    <label for="bar-name">Nombre de Barra</label>
+                                    <input type="text" id="bar-name" placeholder="Ej. Barra VIP" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="bar-desc">Descripción</label>
+                                    <input type="text" id="bar-desc" placeholder="Ej. Barra exclusiva sector VIP">
+                                </div>
+                                <div class="form-group">
+                                    <label for="bar-location">Ubicación física</label>
+                                    <input type="text" id="bar-location" placeholder="Ej. Terraza Alta Oeste" required>
+                                </div>
+                                <button type="submit" class="primary-btn">Crear Barra</button>
+                            </form>
+                        </div>
+
+                        <!-- Create Cajero -->
+                        <div class="glass-card form-card">
+                            <h2>Nuevo Cajero</h2>
+                            <form id="form-create-cajero">
+                                <div class="form-group">
+                                    <label for="caj-barra">Barra Asignada</label>
+                                    <select id="caj-barra" required>
+                                        <!-- Populated dynamically -->
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="caj-name">Nombre Completo</label>
+                                    <input type="text" id="caj-name" placeholder="Ej. Sofía Méndez" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="caj-user">Usuario de Acceso</label>
+                                    <input type="text" id="caj-user" placeholder="Ej. cajero_vip_1" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="caj-pass">Contraseña</label>
+                                    <input type="password" id="caj-pass" placeholder="••••••••" required>
+                                </div>
+                                <button type="submit" class="primary-btn">Registrar Cajero</button>
+                            </form>
+                        </div>
+
+                        <!-- Create Mesero -->
+                        <div class="glass-card form-card">
+                            <h2>Nuevo Mesero</h2>
+                            <form id="form-create-mesero">
+                                <div class="form-group">
+                                    <label for="mes-cajero">Cajero a Rendir Cuentas</label>
+                                    <select id="mes-cajero" required>
+                                        <!-- Populated dynamically -->
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="mes-name">Nombre Completo</label>
+                                    <input type="text" id="mes-name" placeholder="Ej. Daniel Rojas" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="mes-user">Usuario de Acceso</label>
+                                    <input type="text" id="mes-user" placeholder="Ej. mesero_vip_1" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="mes-pass">Contraseña (PIN)</label>
+                                    <input type="password" id="mes-pass" placeholder="Ej. 1234" required>
+                                </div>
+                                <button type="submit" class="primary-btn">Registrar Mesero</button>
+                            </form>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tab: Stock Movement -->
+                <section id="tab-stock" class="tab-content hide">
+                    <h1 class="page-title">Ajustes de Inventario</h1>
+                    <div class="glass-card form-card max-w-md">
+                        <h2>Registrar Movimiento de Stock</h2>
+                        <form id="form-adjust-stock">
+                            <div class="form-group">
+                                <label for="stock-product">Seleccionar Producto</label>
+                                <select id="stock-product" required>
+                                    <!-- Populated dynamically -->
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="stock-type">Tipo de Movimiento</label>
+                                <select id="stock-type">
+                                    <option value="ENTRADA">Entrada (Añadir Stock)</option>
+                                    <option value="SALIDA">Salida (Retirar / Merma)</option>
+                                    <option value="AJUSTE">Ajuste (Reemplazar Stock total)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="stock-qty">Cantidad</label>
+                                <input type="number" id="stock-qty" min="1" placeholder="Ej. 50" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="stock-reason">Motivo del Ajuste</label>
+                                <input type="text" id="stock-reason" placeholder="Ej. Abastecimiento de medianoche" required>
+                            </div>
+                            <button type="submit" class="primary-btn">Guardar Movimiento</button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- Tab: Auditoría -->
+                <section id="tab-auditoria" class="tab-content hide">
+                    <h1 class="page-title">Registros del Evento</h1>
+                    <div class="admin-grid-forms">
+                        <div class="glass-card table-section">
+                            <h2>Movimientos de Stock</h2>
+                            <div class="table-container max-h-96">
+                                <table class="admin-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Producto</th>
+                                            <th>Tipo</th>
+                                            <th>Cantidad</th>
+                                            <th>Previo</th>
+                                            <th>Nuevo</th>
+                                            <th>Fecha/Hora</th>
+                                            <th>Motivo</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="movs-table-body">
+                                        <!-- Content -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="glass-card table-section">
+                            <h2>Auditoría de Administradores</h2>
+                            <div class="table-container max-h-96">
+                                <table class="admin-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Admin</th>
+                                            <th>Acción</th>
+                                            <th>Detalle</th>
+                                            <th>Fecha/Hora</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="audits-table-body">
+                                        <!-- Content -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tab: Inventario General -->
+                <section id="tab-inventario" class="tab-content hide">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h1 class="page-title" style="margin: 0;">Reporte de Stock de Productos</h1>
+                        <div style="display: flex; gap: 8px;">
+                            <button id="print-inventory-btn" class="primary-btn">🖨️ Imprimir (RawBT)</button>
+                            <button id="print-inventory-browser-btn" class="secondary-btn">Por navegador</button>
+                        </div>
+                    </div>
+                    
+                    <div class="glass-card table-section">
+                        <div class="table-container">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Categoría</th>
+                                        <th>Producto</th>
+                                        <th>Stock Actual</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inventory-table-body">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Pagination controls -->
+                        <div class="pagination-container" style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
+                            <span id="inventory-page-info" style="font-size: 0.9rem; color: var(--text-secondary);">Mostrando página 1 de 1</span>
+                            <div class="pagination-buttons" style="display: flex; gap: 8px;">
+                                <button id="inventory-prev-btn" class="secondary-btn" style="padding: 6px 12px; font-size: 0.85rem;">Anterior</button>
+                                <button id="inventory-next-btn" class="secondary-btn" style="padding: 6px 12px; font-size: 0.85rem;">Siguiente</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- 5. TICKET PREVIEW & PRINT MODAL -->
+    <!-- Los dos tickets se generan desde el mismo modelo que se envía a la
+         impresora, así que esta vista previa es carácter por carácter lo que
+         saldrá por el papel. -->
+    <div id="print-modal" class="modal-overlay hide">
+        <div class="print-container">
+            <h2 class="print-title">🖨️ Comanda lista para imprimir</h2>
+
+            <div class="tickets-row">
+                <!-- Copia del Cajero -->
+                <div class="thermal-ticket animate-slide-up">
+                    <div class="ticket-body" id="ticket-cajero-body"></div>
+                </div>
+
+                <!-- Copia del Mesero / Preparación -->
+                <div class="thermal-ticket animate-slide-up delay-1">
+                    <div class="ticket-body" id="ticket-mesero-body"></div>
+                </div>
+            </div>
+
+            <div id="print-status" class="print-status hide"></div>
+
+            <div class="print-actions">
+                <button id="print-rawbt-btn" class="primary-btn">🖨️ Imprimir (RawBT)</button>
+                <button id="print-browser-btn" class="secondary-btn">Imprimir por navegador</button>
+                <button id="printer-settings-btn" class="secondary-btn" title="Configuración de impresora">⚙️ Impresora</button>
+                <button id="dismiss-print-btn" class="secondary-btn">Continuar</button>
+            </div>
+
+            <!-- Ajustes de impresora: se guardan en la tablet -->
+            <div id="printer-settings" class="printer-settings hide">
+                <h3>Configuración de impresora</h3>
+                <div class="printer-settings-grid">
+                    <div class="form-group">
+                        <label for="cfg-width">Ancho de papel</label>
+                        <select id="cfg-width">
+                            <option value="32">58 mm (32 columnas)</option>
+                            <option value="48">80 mm (48 columnas)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg-encoding">Acentos</label>
+                        <select id="cfg-encoding">
+                            <option value="cp850">CP850 (con acentos y ñ)</option>
+                            <option value="ascii">Sin acentos (compatible)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg-mode">Forma de envío</label>
+                        <select id="cfg-mode">
+                            <option value="rawbt">rawbt: (recomendado)</option>
+                            <option value="intent">intent:// (alternativo)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg-single">Trabajos de impresión</label>
+                        <select id="cfg-single">
+                            <option value="1">Los 2 tickets juntos</option>
+                            <option value="0">Uno por ticket</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg-cut">Corte de papel</label>
+                        <select id="cfg-cut">
+                            <option value="1">Cortar al terminar</option>
+                            <option value="0">No cortar</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg-auto">Al cerrar una venta</label>
+                        <select id="cfg-auto">
+                            <option value="0">Esperar a que pulse Imprimir</option>
+                            <option value="1">Imprimir automáticamente</option>
+                        </select>
+                    </div>
+                </div>
+                <p class="printer-hint">
+                    Conecta la impresora a la tablet por cable USB OTG y ábrela una vez en
+                    <strong>RawBT</strong> para elegirla como dispositivo. Si no sale nada, prueba
+                    a cambiar la forma de envío a <strong>intent://</strong>.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 6. VOID ORDER MODAL CONFIRMATION -->
+    <div id="void-confirm-modal" class="modal-overlay hide">
+        <div class="glass-card modal-card animate-pop">
+            <div class="modal-header">
+                <span class="security-icon">⚠️</span>
+                <h2>Confirmar Anulación</h2>
+                <p>Estás a punto de anular la Comanda <strong id="void-order-id-label">#1</strong></p>
+            </div>
+            <form id="void-order-form">
+                <input type="hidden" id="void-order-id-input">
+                <div class="form-group">
+                    <label for="void-reason">Motivo de Anulación</label>
+                    <input type="text" id="void-reason" placeholder="Ej. Cambio de pedido del cliente" required>
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" id="cancel-void-btn" class="secondary-btn">Cancelar</button>
+                    <button type="submit" class="danger-btn">Anular Comanda</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Impresión térmica (ESC/POS + RawBT) -->
+    <script src="rawbt.js"></script>
+    <!-- Main Client-side logic script -->
+    <script src="app.js"></script>
+</body>
+</html>
