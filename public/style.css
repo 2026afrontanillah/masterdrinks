@@ -28,6 +28,17 @@
     --font-heading: 'Outfit', sans-serif;
     --font-body: 'Plus Jakarta Sans', sans-serif;
     --font-mono: 'Share Tech Mono', monospace;
+
+    /* Curvas de movimiento.
+       Las de serie (ease, ease-out) son demasiado blandas y el movimiento se
+       nota apagado. Estas arrancan rápido, que es lo que hace que la tablet
+       parezca responder en el instante en que la tocas.
+       Nunca ease-in en la interfaz: empieza lento justo cuando el ojo mira. */
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+    /* Alto mínimo de cualquier cosa que se toque con el dedo. */
+    --touch: 44px;
 }
 
 /* Reset */
@@ -149,17 +160,25 @@ body::after {
     border-radius: 12px;
     cursor: pointer;
     box-shadow: 0 4px 15px rgba(236, 72, 153, 0.2);
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    transition: transform 160ms var(--ease-out),
+                box-shadow 250ms ease,
+                background 250ms ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.primary-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-neon-pink);
-    background: var(--gradient-btn-hover);
+@media (hover: hover) and (pointer: fine) {
+    .primary-btn:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-neon-pink);
+        background: var(--gradient-btn-hover);
+    }
 }
 
+/* Con el dedo no hay :hover, así que sin esto el botón principal —el que cobra—
+   no daba ninguna señal de haber recibido el toque. */
 .primary-btn:active:not(:disabled) {
-    transform: translateY(0);
+    transform: scale(0.97);
+    transition-duration: 100ms;
 }
 
 .primary-btn:disabled {
@@ -178,12 +197,17 @@ body::after {
     padding: 10px 20px;
     border-radius: 12px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: transform 140ms var(--ease-out), background 200ms ease, border-color 200ms ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .secondary-btn:hover {
     background: rgba(255, 255, 255, 0.12);
     border-color: rgba(255, 255, 255, 0.2);
+}
+
+.secondary-btn:active {
+    transform: scale(0.97);
 }
 
 .danger-btn {
@@ -195,13 +219,20 @@ body::after {
     padding: 12px 24px;
     border-radius: 12px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: transform 140ms var(--ease-out), background 200ms ease, box-shadow 200ms ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.danger-btn:hover {
-    background: #dc2626;
-    box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
-    transform: translateY(-2px);
+@media (hover: hover) and (pointer: fine) {
+    .danger-btn:hover {
+        background: #dc2626;
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+        transform: translateY(-2px);
+    }
+}
+
+.danger-btn:active {
+    transform: scale(0.97);
 }
 
 .text-btn {
@@ -231,13 +262,20 @@ body::after {
     display: flex;
     justify-content: center;
     align-items: center;
-    transition: all 0.2s ease;
+    transition: transform 140ms var(--ease-out), background 200ms ease, border-color 200ms ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.icon-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.2);
-    transform: scale(1.05);
+@media (hover: hover) and (pointer: fine) {
+    .icon-btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.2);
+        transform: scale(1.05);
+    }
+}
+
+.icon-btn:active {
+    transform: scale(0.92);
 }
 
 .full-btn {
@@ -272,7 +310,7 @@ body::after {
     border-radius: 12px;
     font-family: var(--font-body);
     font-size: 0.95rem;
-    transition: all 0.3s ease;
+    transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease;
 }
 
 .form-group input:focus,
@@ -485,10 +523,14 @@ select option {
     -webkit-user-select: none;
 }
 
-.pin-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.15);
-    transform: scale(1.05);
+/* En la tablet el toque dispara :hover y la tecla se quedaba agrandada después
+   de soltar, como si siguiera pulsada. */
+@media (hover: hover) and (pointer: fine) {
+    .pin-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.15);
+        transform: scale(1.05);
+    }
 }
 
 .pin-btn:active {
@@ -655,16 +697,25 @@ select option {
     font-size: 0.9rem;
     font-weight: 600;
     text-align: left;
+    min-height: var(--touch);
     padding: 12px 16px;
     border-radius: 12px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background 200ms ease, color 200ms ease,
+                border-color 200ms ease, transform 120ms var(--ease-out);
+    -webkit-tap-highlight-color: transparent;
 }
 
-.category-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-primary);
-    transform: translateX(2px);
+@media (hover: hover) and (pointer: fine) {
+    .category-btn:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-primary);
+        transform: translateX(2px);
+    }
+}
+
+.category-btn:active {
+    transform: scale(0.97);
 }
 
 .category-btn.active {
@@ -719,17 +770,97 @@ select option {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    transition: all 0.3s ease;
+    /* Propiedades concretas, no 'all': con 'all' el navegador anima también el
+       borde y la sombra al cambiar de stock, y se ve un parpadeo raro. */
+    transition: transform 160ms var(--ease-out),
+                border-color 200ms ease,
+                background 200ms ease,
+                box-shadow 200ms ease;
     cursor: pointer;
     position: relative;
     overflow: hidden;
+    /* Evita el destello azul de selección de Android al tocar rápido. */
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
 }
 
-.product-card:hover:not(.out-of-stock) {
-    transform: translateY(-4px);
-    border-color: rgba(255, 255, 255, 0.15);
-    background: rgba(18, 22, 35, 0.8);
-    box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+/* El levantar la tarjeta sólo tiene sentido con ratón. En una tablet el toque
+   dispara :hover y la tarjeta se queda levantada después de soltar. */
+@media (hover: hover) and (pointer: fine) {
+    .product-card:hover:not(.out-of-stock) {
+        transform: translateY(-4px);
+        border-color: rgba(255, 255, 255, 0.15);
+        background: rgba(18, 22, 35, 0.8);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+    }
+}
+
+/* Hundirse al pulsar es la única confirmación que tiene el cajero de que el
+   toque entró, antes incluso de mirar el carrito. */
+.product-card:active:not(.out-of-stock) {
+    transform: scale(0.97);
+    transition-duration: 100ms;
+}
+
+/* Cuántas unidades de este producto van ya en el carrito. */
+.product-card .cart-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 7px;
+    border-radius: 13px;
+    background: var(--gradient-primary);
+    color: #fff;
+    font-family: var(--font-heading);
+    font-size: 0.8rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 10px rgba(236, 72, 153, 0.4);
+    transition: transform 180ms var(--ease-out);
+}
+
+.product-card .cart-badge.bump {
+    animation: badge-bump 260ms var(--ease-out);
+}
+
+@keyframes badge-bump {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.28); }
+    100% { transform: scale(1); }
+}
+
+/* Entrada escalonada de la rejilla: las tarjetas aparecen en cascada en vez
+   de todas de golpe. Sólo al pintar la lista, nunca al tocar. */
+.product-card.enter {
+    animation: card-enter 260ms var(--ease-out) backwards;
+}
+
+@keyframes card-enter {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* Esqueleto mientras se descarga el catálogo: la rejilla ya tiene la forma
+   final, así que al llegar los datos nada salta de sitio. */
+.skeleton-card {
+    height: 148px;
+    border-radius: 16px;
+    background: linear-gradient(
+        100deg,
+        rgba(255, 255, 255, 0.04) 30%,
+        rgba(255, 255, 255, 0.09) 50%,
+        rgba(255, 255, 255, 0.04) 70%
+    );
+    background-size: 220% 100%;
+    animation: skeleton-sweep 1.2s linear infinite;
+}
+
+@keyframes skeleton-sweep {
+    to { background-position: -220% 0; }
 }
 
 .product-card .emoji {
@@ -855,6 +986,17 @@ select option {
     justify-content: space-between;
 }
 
+/* Sólo las líneas recién añadidas entran animadas: si se animaran todas en
+   cada repintado, subir una cantidad haría bailar el carrito entero. */
+.cart-item.enter {
+    animation: cart-item-enter 220ms var(--ease-out);
+}
+
+@keyframes cart-item-enter {
+    from { opacity: 0; transform: translateX(14px); }
+    to   { opacity: 1; transform: none; }
+}
+
 .cart-item-info {
     flex: 1;
 }
@@ -877,43 +1019,119 @@ select option {
     margin-left: 12px;
 }
 
+/* Antes medían 24 px. Con el dedo, y con prisa, eso es fallar el toque o
+   pulsar el de al lado: pasan al mínimo táctil de 44. */
 .cart-qty-btn {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
+    width: var(--touch);
+    height: var(--touch);
+    flex-shrink: 0;
+    border-radius: 10px;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: var(--text-primary);
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+    line-height: 1;
     display: flex;
     justify-content: center;
     align-items: center;
+    transition: transform 120ms var(--ease-out), background 200ms ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.cart-qty-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
+@media (hover: hover) and (pointer: fine) {
+    .cart-qty-btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+    }
+}
+
+.cart-qty-btn:active {
+    transform: scale(0.9);
 }
 
 .cart-item-controls .qty {
-    font-size: 0.9rem;
-    font-weight: 700;
-    min-width: 20px;
+    font-family: var(--font-heading);
+    font-size: 1.05rem;
+    font-weight: 800;
+    min-width: 26px;
     text-align: center;
 }
 
 .cart-item-controls .remove-item-btn {
+    width: var(--touch);
+    height: var(--touch);
+    flex-shrink: 0;
     border: none;
     background: none;
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 0.9rem;
-    padding: 4px;
-    margin-left: 4px;
+    font-size: 1.05rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 120ms var(--ease-out), color 200ms ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .cart-item-controls .remove-item-btn:hover {
     color: var(--danger);
+}
+
+.cart-item-controls .remove-item-btn:active {
+    transform: scale(0.9);
+}
+
+/* Contador de líneas junto al título del carrito. */
+.cart-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
+    margin-left: 8px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+    font-family: var(--font-heading);
+    font-size: 0.8rem;
+    font-weight: 800;
+    vertical-align: middle;
+}
+
+.cart-count.tiene {
+    background: var(--gradient-primary);
+    color: #fff;
+}
+
+/* Botón de limpiar la búsqueda, dentro del propio campo. */
+.search-header {
+    position: relative;
+}
+
+.search-clear-btn {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 200ms ease, color 200ms ease;
+}
+
+.search-clear-btn:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: var(--text-primary);
 }
 
 .cart-notes {
@@ -961,112 +1179,189 @@ select option {
     color: var(--text-primary);
 }
 
-/* POS Payment block */
-.payment-section {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    padding: 16px;
+/* ==========================================================================
+   MODAL DE COBRO
+   ==========================================================================
+   Una sola pantalla para cobrar: total, forma de pago y confirmar. El bloque
+   de "ir sumando pagos" que había antes en el carrito ya no existe. */
+.pay-sheet {
+    position: relative;
+    width: min(460px, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    padding: 28px 24px 24px;
+    border-radius: 24px;
+    background: rgba(18, 22, 35, 0.96);
+    border: 1px solid var(--card-border);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+}
+
+.pay-caption {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.pay-total {
+    text-align: center;
+    font-family: var(--font-heading);
+    font-size: 2.6rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 22px;
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Pestañas de forma de pago. En 5 columnas caben las cuatro formas simples
+   más el mixto sin que ninguna quede escondida en un desplegable. */
+.pay-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    padding: 5px;
+    border-radius: 16px;
+    background: rgba(0, 0, 0, 0.28);
     margin-bottom: 20px;
 }
 
-.payment-section .section-title {
-    font-size: 0.75rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-    margin-bottom: 10px;
-    letter-spacing: 0.5px;
-}
-
-.payment-input-group {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
-}
-
-.payment-input-group select {
-    flex: 1.3;
-    padding: 8px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: var(--text-primary);
-    font-size: 0.85rem;
-}
-
-.payment-input-group input {
-    flex: 1;
-    padding: 8px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: var(--text-primary);
-    font-size: 0.85rem;
-    min-width: 0;
-}
-
-.payment-input-group button {
-    padding: 8px 12px;
-    border-radius: 8px;
-    font-size: 1.1rem;
-    font-weight: 700;
-    line-height: 1;
-    background: var(--gradient-primary);
-    color: var(--text-primary);
-    border: none;
-    cursor: pointer;
-}
-
-.payments-list {
+.pay-tab {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-bottom: 12px;
-    max-height: 90px;
-    overflow-y: auto;
+    align-items: center;
+    gap: 4px;
+    /* 56 px: el dedo tiene que acertar a la primera con la barra llena. */
+    min-height: 56px;
+    padding: 8px 2px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.12s ease;
 }
 
-.payment-pill {
+.pay-tab span {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}
+
+.pay-tab:active { transform: scale(0.95); }
+
+.pay-tab.active {
+    background: var(--gradient-glass);
+    border-color: rgba(236, 72, 153, 0.45);
+    color: var(--text-primary);
+    box-shadow: 0 4px 16px rgba(236, 72, 153, 0.14);
+}
+
+.pay-panel {
+    margin-bottom: 18px;
+}
+
+.pay-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    display: block;
+}
+
+.pay-hint {
+    font-weight: 400;
+    opacity: 0.7;
+}
+
+.pay-input {
+    width: 100%;
+    min-height: 48px;
+    padding: 12px 14px;
+    margin-top: 10px;
+    border-radius: 12px;
     background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 8px;
-    padding: 6px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 1rem;
+}
+
+.pay-input:focus {
+    outline: none;
+    border-color: rgba(236, 72, 153, 0.45);
+}
+
+.pay-input.readonly {
+    background: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.3);
+    color: #c4b5fd;
+    font-weight: 700;
+    text-align: center;
+}
+
+/* Reparto del pago mixto: lo tecleado a la izquierda, lo que falta a la
+   derecha calculado solo, para no restar de cabeza. */
+.pay-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.pay-split-field label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.pay-split-field .pay-input {
+    margin-top: 6px;
+    text-align: center;
+}
+
+.pay-change {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 0.8rem;
-}
-
-.payment-pill button {
-    border: none;
-    background: none;
-    color: #ef4444;
-    cursor: pointer;
+    margin-top: 14px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.32);
     font-size: 0.85rem;
-    margin-left: 6px;
+    color: var(--text-secondary);
 }
 
-.payment-summary {
-    border-top: 1px dashed rgba(255, 255, 255, 0.08);
-    padding-top: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+.pay-change strong {
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
+    color: var(--warning);
+}
+
+.pay-error {
+    margin-bottom: 14px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.32);
+    color: #fca5a5;
     font-size: 0.85rem;
 }
 
-.summary-row {
-    display: flex;
-    justify-content: space-between;
+.pay-confirm {
+    min-height: 56px;
+    font-size: 1.05rem;
+    letter-spacing: 0.5px;
 }
 
-.summary-row.remaining {
-    font-size: 0.95rem;
-}
-
-.summary-row.remaining strong {
-    color: #10b981;
+@media (max-width: 420px) {
+    .pay-tabs { grid-template-columns: repeat(3, 1fr); }
+    .pay-total { font-size: 2.1rem; }
 }
 
 /* 4. ADMIN CONTROL PORTAL */
@@ -1708,6 +2003,285 @@ select option {
     gap: 8px;
 }
 
+/* ==========================================================================
+   AVISOS FLOTANTES
+   ==========================================================================
+   Sustituyen al alert() del navegador. Se apilan arriba a la derecha, sobre
+   todo lo demás, y no bloquean la caja: el cajero puede seguir cobrando
+   mientras el aviso se va solo. */
+.toast-stack {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: min(380px, calc(100vw - 40px));
+    pointer-events: none;
+}
+
+.toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    background: rgba(18, 22, 35, 0.92);
+    border: 1px solid var(--card-border);
+    border-left: 4px solid var(--info);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    color: var(--text-primary);
+    font-size: 0.92rem;
+    line-height: 1.35;
+    cursor: pointer;
+    animation: toast-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.toast-icon {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 0.78rem;
+    font-weight: 800;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.toast-text { flex: 1; }
+
+.toast-ok { border-left-color: var(--success); }
+.toast-ok .toast-icon { background: var(--success); color: #04120c; }
+.toast-error { border-left-color: var(--danger); }
+.toast-error .toast-icon { background: var(--danger); }
+.toast-warn { border-left-color: var(--warning); }
+.toast-warn .toast-icon { background: var(--warning); color: #1a1200; }
+.toast-info .toast-icon { background: var(--info); color: #01161a; }
+
+.toast-out {
+    animation: toast-out 0.22s ease forwards;
+}
+
+@keyframes toast-in {
+    from { opacity: 0; transform: translateX(40px) scale(0.96); }
+    to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes toast-out {
+    to { opacity: 0; transform: translateX(40px) scale(0.96); }
+}
+
+/* ==========================================================================
+   COBRO RÁPIDO EN EFECTIVO
+   ========================================================================== */
+.quick-cash-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.quick-cash-btn {
+    /* 44 px de alto: el mínimo para acertar con el dedo en una tablet. */
+    min-height: 44px;
+    padding: 8px 4px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.quick-cash-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.quick-cash-btn:active {
+    transform: scale(0.94);
+}
+
+.quick-cash-btn.exact {
+    background: rgba(16, 185, 129, 0.14);
+    border-color: rgba(16, 185, 129, 0.35);
+    color: #6ee7b7;
+    font-size: 0.85rem;
+}
+
+/* El cambio a devolver da un salto al recalcularse: es lo último que mira el
+   cajero antes de abrir el cajón y conviene que le llame la atención. */
+.change-pop {
+    animation: change-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes change-pop {
+    0%   { transform: scale(1); }
+    45%  { transform: scale(1.07); }
+    100% { transform: scale(1); }
+}
+
+/* Botón ocupado: mientras el servidor guarda la comanda no se puede volver a
+   pulsar, y las rayas en movimiento dejan claro que algo está pasando. */
+.primary-btn.is-busy {
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(139, 92, 246, 0.55) 0 12px,
+        rgba(139, 92, 246, 0.3) 12px 24px
+    );
+    background-size: 200% 100%;
+    animation: busy-stripes 0.8s linear infinite;
+    cursor: progress;
+    color: var(--text-primary);
+}
+
+@keyframes busy-stripes {
+    to { background-position: -48px 0; }
+}
+
+/* Respeta a quien tenga desactivadas las animaciones en el sistema. */
+/* Insignia de instancia: en qué servidor —y por tanto en qué barra— está esta
+   tablet. Va en ámbar y no en el color de marca para que se distinga de un
+   vistazo del resto de etiquetas: es un dato de montaje, no de la venta. */
+.instancia-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 3px 10px;
+    border-radius: 10px;
+    background: rgba(245, 158, 11, 0.16);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: var(--warning);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+
+.auth-header .instancia-badge {
+    margin-left: 0;
+    margin-top: 10px;
+    font-size: 0.8rem;
+}
+
+/* ==========================================================================
+   REPORTE DE CIERRE
+   ========================================================================== */
+.reporte-card {
+    margin-top: 20px;
+    padding: 24px;
+}
+
+.reporte-card h2 {
+    font-family: var(--font-heading);
+    font-size: 1.15rem;
+    margin-bottom: 8px;
+}
+
+.reporte-hint {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    max-width: 68ch;
+    margin-bottom: 18px;
+}
+
+.reporte-rango {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.reporte-rango .form-group {
+    margin-bottom: 0;
+    min-width: 150px;
+}
+
+.reporte-rango .secondary-btn,
+.reporte-acciones button {
+    min-height: var(--touch);
+}
+
+.reporte-preview {
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    font-size: 0.88rem;
+}
+
+.rep-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    padding: 5px 0;
+    color: var(--text-secondary);
+}
+
+.rep-row strong {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+.rep-row.destacada strong {
+    font-size: 1.3rem;
+    color: var(--success);
+}
+
+.rep-row.alerta strong {
+    color: var(--danger);
+}
+
+.rep-separador {
+    height: 1px;
+    background: var(--card-border);
+    margin: 10px 0;
+}
+
+.reporte-acciones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+/* Respeta a quien tenga desactivadas las animaciones en el sistema. Se quitan
+   los desplazamientos y los rebotes, no las transiciones de color: esas ayudan
+   a entender lo que pasa y no marean. El barrido del esqueleto también se va,
+   porque es movimiento constante. */
+@media (prefers-reduced-motion: reduce) {
+    .toast,
+    .toast-out,
+    .change-pop,
+    .primary-btn.is-busy,
+    .product-card.enter,
+    .product-card .cart-badge.bump,
+    .cart-item.enter,
+    .skeleton-card {
+        animation: none;
+    }
+
+    .product-card:active:not(.out-of-stock),
+    .cart-qty-btn:active,
+    .cart-item-controls .remove-item-btn:active,
+    .quick-cash-btn:active,
+    .pay-tab:active {
+        transform: none;
+    }
+}
+
 /* Responsive */
 @media (max-width: 1024px) {
     .pos-layout {
@@ -1725,8 +2299,30 @@ select option {
     .pos-layout {
         grid-template-columns: 1fr;
     }
+    /* En pantalla estrecha las categorías pasan a ser una tira horizontal que
+       se desliza con el dedo. Antes se ocultaban por completo y el cajero se
+       quedaba sin poder filtrar, teniendo que buscar entre todos los productos. */
     .pos-sidebar {
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 12px 16px;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+    .pos-sidebar .sidebar-title {
         display: none;
+    }
+    .category-menu {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 8px;
+    }
+    .category-btn {
+        white-space: nowrap;
+        min-height: 44px;
+    }
+    .category-btn:hover {
+        transform: none;
     }
     .admin-layout {
         grid-template-columns: 1fr;

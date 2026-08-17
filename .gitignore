@@ -20,6 +20,15 @@ pos_evento.db-wal
 pos_evento.db-shm
 *.db-journal
 
+# Copias desechables que crean las herramientas de tools/ para castigarlas sin
+# miedo. Se rehacen solas en cada ejecución.
+pos_evento.stress.db*
+pos_evento.logic.db*
+pos_evento.ui.db*
+# Bases de cada barra cuando se prueban varias instancias en el mismo equipo.
+barra_*.db*
+pos_evento.dos.db*
+
 # Configuración por equipo. PORT y MESERO_PIN_SCOPE tienen valores por defecto,
 # así que la app arranca igual sin este archivo.
 .env

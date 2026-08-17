@@ -25,6 +25,7 @@
                 <div class="logo-container">🍹</div>
                 <h1 class="gradient-text">MasterDrinks POS</h1>
                 <p class="auth-subtitle">Ingresa tus credenciales para acceder al sistema</p>
+                <span class="instancia-badge hide"></span>
             </header>
             <form id="login-form" class="auth-form">
                 <div class="form-group">
@@ -94,6 +95,10 @@
                 <div>
                     <h2>MasterDrinks POS</h2>
                     <span id="pos-barra-name" class="barra-badge">Barra Norte</span>
+                    <!-- Qué servidor atiende esta tablet. Con tres montajes
+                         idénticos y separados, saber en cuál estás no puede
+                         depender de la memoria de nadie. -->
+                    <span class="instancia-badge hide"></span>
                 </div>
             </div>
             <div class="session-info">
@@ -123,6 +128,8 @@
             <main class="pos-main">
                 <div class="search-header">
                     <input type="text" id="product-search" placeholder="Buscar producto...">
+                    <button type="button" id="search-clear-btn" class="search-clear-btn hide"
+                            aria-label="Limpiar búsqueda">✕</button>
                 </div>
                 <div id="product-grid" class="product-grid">
                     <!-- Products rendered dynamically -->
@@ -132,7 +139,7 @@
             <!-- Right Panel: Shopping Cart -->
             <aside class="pos-cart">
                 <div class="cart-header">
-                    <h3>Carrito de Compras</h3>
+                    <h3>Carrito <span id="cart-count" class="cart-count">0</span></h3>
                     <button id="clear-cart" class="clear-btn">Vaciar</button>
                 </div>
 
@@ -155,38 +162,9 @@
                     </div>
                 </div>
 
-                <!-- Split Payment Controller -->
-                <div class="payment-section">
-                    <p class="section-title">Registro de Pagos</p>
-                    <div class="payment-input-group">
-                        <select id="payment-method-select">
-                            <option value="1">Efectivo</option>
-                            <option value="2">Tarjeta</option>
-                            <option value="3">Código QR</option>
-                            <option value="4">Transferencia</option>
-                        </select>
-                        <input type="number" id="payment-amount-input" min="0" placeholder="Monto" step="0.01">
-                        <button id="add-payment-btn" class="secondary-btn">+</button>
-                    </div>
-
-                    <!-- Payments List -->
-                    <div id="payments-list" class="payments-list">
-                        <!-- Added payments -->
-                    </div>
-
-                    <div class="payment-summary">
-                        <div class="summary-row">
-                            <span>Pagado:</span>
-                            <span id="paid-amount-label">0.00 Bs.</span>
-                        </div>
-                        <div class="summary-row remaining">
-                            <span>Restante:</span>
-                            <strong id="remaining-amount-label">0.00 Bs.</strong>
-                        </div>
-                    </div>
-                </div>
-
-                <button id="finalize-order-btn" class="primary-btn full-btn" disabled>Finalizar Comanda</button>
+                <!-- El cobro no se arma aquí: este botón abre el modal donde se
+                     elige la forma de pago de una vez. -->
+                <button id="finalize-order-btn" class="primary-btn full-btn" disabled>💳 Cobrar ahora</button>
             </aside>
         </div>
     </div>
@@ -201,6 +179,7 @@
                     <div>
                         <h2>Panel Admin</h2>
                         <span id="admin-role-badge" class="admin-role-badge">ADMINISTRADOR</span>
+                        <span class="instancia-badge hide"></span>
                     </div>
                 </div>
                 <div class="admin-user-info">
@@ -249,6 +228,39 @@
                             <div id="barras-sales-chart" class="sales-bar-list">
                                 <!-- Rendered dynamically -->
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Reporte de cierre en PDF.
+                         El PDF lo arma el servidor leyendo la base, no esta
+                         pantalla: así las cifras del reporte y las de la base
+                         no pueden discrepar. -->
+                    <div class="glass-card reporte-card">
+                        <h2>📄 Reporte de cierre en PDF</h2>
+                        <p class="reporte-hint">
+                            Recaudación por forma de pago, por barra, por cajero y por mesero,
+                            productos vendidos, anulaciones y existencias al cierre. Se descarga
+                            como archivo, listo para mandar por WhatsApp.
+                        </p>
+
+                        <div class="reporte-rango">
+                            <div class="form-group">
+                                <label for="rep-desde">Desde</label>
+                                <input type="date" id="rep-desde">
+                            </div>
+                            <div class="form-group">
+                                <label for="rep-hasta">Hasta</label>
+                                <input type="date" id="rep-hasta">
+                            </div>
+                            <button type="button" id="rep-hoy-btn" class="secondary-btn">Hoy</button>
+                            <button type="button" id="rep-todo-btn" class="secondary-btn">Todo el evento</button>
+                        </div>
+
+                        <div id="rep-preview" class="reporte-preview hide"></div>
+
+                        <div class="reporte-acciones">
+                            <button type="button" id="rep-ver-btn" class="secondary-btn">Ver resumen</button>
+                            <button type="button" id="rep-pdf-btn" class="primary-btn">⬇️ Descargar PDF</button>
                         </div>
                     </div>
                 </section>
@@ -622,6 +634,70 @@
         </div>
     </div>
 
+    <!-- 5b. MODAL DE COBRO
+         Una sola pantalla para cobrar: el total arriba, la forma de pago en
+         pestañas y un único botón que confirma. Nada de ir sumando pagos de
+         uno en uno mientras hay cola en la barra. -->
+    <div id="payment-modal" class="modal-overlay hide">
+        <div class="pay-sheet animate-slide-up">
+            <button id="pay-close-btn" class="modal-close-btn" title="Volver al carrito">←</button>
+
+            <p class="pay-caption">Total a cobrar</p>
+            <p id="pay-total" class="pay-total">0.00 Bs.</p>
+
+            <div class="pay-tabs" id="pay-tabs">
+                <button type="button" class="pay-tab active" data-metodo="1">💵<span>Efectivo</span></button>
+                <button type="button" class="pay-tab" data-metodo="3">📱<span>QR</span></button>
+                <button type="button" class="pay-tab" data-metodo="2">💳<span>Tarjeta</span></button>
+                <button type="button" class="pay-tab" data-metodo="4">🏦<span>Transfer.</span></button>
+                <button type="button" class="pay-tab" data-metodo="mixto">🔀<span>Mixto</span></button>
+            </div>
+
+            <!-- EFECTIVO: con cuánto paga el cliente, para calcular el cambio -->
+            <div id="pay-panel-efectivo" class="pay-panel">
+                <p class="pay-label">¿Con cuánto paga? <span class="pay-hint">(opcional)</span></p>
+                <div class="quick-cash-row">
+                    <button type="button" class="quick-cash-btn exact" data-cash="exacto">Justo</button>
+                    <button type="button" class="quick-cash-btn" data-cash="20">20</button>
+                    <button type="button" class="quick-cash-btn" data-cash="50">50</button>
+                    <button type="button" class="quick-cash-btn" data-cash="100">100</button>
+                    <button type="button" class="quick-cash-btn" data-cash="200">200</button>
+                </div>
+                <input type="number" id="pay-recibido" class="pay-input" min="0" step="0.01"
+                       inputmode="decimal" placeholder="Otro monto recibido">
+                <div id="pay-change-box" class="pay-change hide">
+                    <span>Cambio a devolver</span>
+                    <strong id="pay-change-amount">0.00 Bs.</strong>
+                </div>
+            </div>
+
+            <!-- MIXTO: se escribe el efectivo y el resto se completa solo -->
+            <div id="pay-panel-mixto" class="pay-panel hide">
+                <div class="pay-split">
+                    <div class="pay-split-field">
+                        <label for="pay-mixto-efectivo">💵 Efectivo</label>
+                        <input type="number" id="pay-mixto-efectivo" class="pay-input" min="0" step="0.01"
+                               inputmode="decimal" placeholder="0.00">
+                    </div>
+                    <div class="pay-split-field">
+                        <label for="pay-mixto-resto" id="pay-mixto-resto-label">Falta en QR</label>
+                        <input type="number" id="pay-mixto-resto" class="pay-input readonly" readonly tabindex="-1">
+                    </div>
+                </div>
+                <label class="pay-label" for="pay-mixto-metodo">Cobrar el resto con</label>
+                <select id="pay-mixto-metodo" class="pay-input">
+                    <option value="3">📱 Código QR</option>
+                    <option value="2">💳 Tarjeta</option>
+                    <option value="4">🏦 Transferencia</option>
+                </select>
+            </div>
+
+            <div id="pay-error" class="pay-error hide"></div>
+
+            <button id="pay-confirm-btn" class="primary-btn full-btn pay-confirm">CONFIRMAR PAGO</button>
+        </div>
+    </div>
+
     <!-- 6. VOID ORDER MODAL CONFIRMATION -->
     <div id="void-confirm-modal" class="modal-overlay hide">
         <div class="glass-card modal-card animate-pop">
@@ -643,6 +719,10 @@
             </form>
         </div>
     </div>
+
+    <!-- Avisos flotantes. Sustituyen a alert(), que en Android abre un diálogo
+         del sistema: bloquea la caja y tapa la pantalla en plena venta. -->
+    <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
     <!-- Impresión térmica (ESC/POS + RawBT) -->
     <script src="rawbt.js"></script>

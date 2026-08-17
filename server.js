@@ -5,6 +5,8 @@ const path = require('path');
 // un binario nativo: no hay que compilar nada, así que el mismo código corre en
 // Windows y en la tablet Android con Termux, que es la que hace de servidor.
 const { DatabaseSync } = require('node:sqlite');
+// Generador de PDF propio, sin dependencias: ver el comentario de lib/pdf.js.
+const { construirPdfCierre, nombreArchivoReporte } = require('./lib/reporte-cierre');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,7 +40,11 @@ app.get('/wallpaper.png', (req, res) => {
   res.redirect('/Wallpaper.jpg');
 });
 
-const dbFile = path.join(__dirname, 'pos_evento.db');
+// DB_FILE permite arrancar contra otra base sin tocar la del evento: es lo que
+// usa la prueba de carga (tools/stress-test.js) para castigar una copia.
+const dbFile = process.env.DB_FILE
+  ? path.resolve(__dirname, process.env.DB_FILE)
+  : path.join(__dirname, 'pos_evento.db');
 const sqlite = new DatabaseSync(dbFile);
 
 // ---------------------------------------------------------------------------
@@ -164,10 +170,30 @@ const nowSql = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 // out of the totals that end up printed on the ticket.
 const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
-// Meseros authenticate with a short PIN only. 'cajero' (default) requires the PIN to
-// belong to a waiter assigned to the cashier that is logged in; 'evento' accepts any
-// active waiter of the event. Change here if the event needs floating waiters.
-const MESERO_PIN_SCOPE = process.env.MESERO_PIN_SCOPE || 'cajero';
+// Meseros authenticate with a short PIN only. 'servidor' (default) accepts any active
+// waiter in this database: every cashier and every tablet hanging off this server is
+// the same operation, so splitting them by till or by bar only locks out waiters who
+// happen to be serving at another tablet. The narrower scopes are still available:
+// 'barra' (waiters of the same bar as the logged-in cashier), 'cajero' (only the ones
+// assigned to that cashier) and 'evento'. Note that a PIN must be unique inside
+// whatever scope is chosen — /api/admin/meseros enforces exactly that same scope.
+const MESERO_PIN_SCOPE = process.env.MESERO_PIN_SCOPE || 'servidor';
+
+// Identidad de esta instancia. Cada barra levanta su propio servidor con su
+// propia base, y las tres son iguales por fuera: sin esto habría tres comandas
+// #1 circulando la misma noche y, al juntar las bases, nadie sabría cuál es
+// cuál. El prefijo se antepone al número en tickets, pantalla e informes.
+const INSTANCIA = (() => {
+  const nombre = (process.env.INSTANCIA || '').trim() || 'Principal';
+  // Si no se indica prefijo, se usa la primera letra del nombre: Norte -> N.
+  const bruto = (process.env.PREFIJO || nombre.charAt(0)).trim().toUpperCase();
+  // Sólo letras y dígitos, máximo 3: acaba impreso en papel de 32 columnas.
+  const prefijo = (bruto.replace(/[^A-Z0-9]/g, '') || 'X').slice(0, 3);
+  return { nombre, prefijo };
+})();
+
+/** Número de comanda tal como lo ve la gente: N-47 en vez de 47. */
+const refComanda = id => INSTANCIA.prefijo + '-' + id;
 
 // Turns raw SQLite errors into something a cashier can act on.
 function friendlyDbError(err, entidad) {
@@ -223,6 +249,11 @@ const pool = {
     }
   },
   
+  // ⚠ NO USAR para escribir. Este adaptador expone beginTransaction/commit tal
+  // como los pedía el código de MySQL, pero aquí sólo hay UNA conexión SQLite:
+  // abrir una transacción por fuera de withTransaction() la mete dentro de la
+  // que esté corriendo, y el COMMIT de una acaba confirmando el trabajo a medias
+  // de la otra. Para cualquier escritura transaccional usa withTransaction().
   getConnection: (callback) => {
     const conn = {
       query: (sql, params, cb) => {
@@ -585,6 +616,25 @@ function initializeDatabase() {
     ensureColumn('producto', 'creado_por_admin', 'INTEGER');
     ensureColumn('producto', 'fecha_creacion', 'TEXT');
 
+    // Identidad de esta instancia, grabada DENTRO de la propia base.
+    //
+    // Cada barra corre su propio servidor con su propio archivo .db, y los tres
+    // archivos son idénticos por fuera. Si al final de la noche se juntan sin
+    // más, no habría forma de saber qué venta salió de qué barra: los números
+    // de comanda empiezan en 1 en las tres. Guardando aquí el nombre y el
+    // prefijo, el archivo se explica solo aunque se copie a otro equipo meses
+    // después, y la herramienta de fusión puede etiquetar cada fila.
+    db.run(`CREATE TABLE IF NOT EXISTS instancia (
+      clave TEXT PRIMARY KEY,
+      valor TEXT
+    )`);
+    db.run(`INSERT INTO instancia (clave, valor) VALUES ('nombre', ?)
+            ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.nombre]);
+    db.run(`INSERT INTO instancia (clave, valor) VALUES ('prefijo', ?)
+            ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.prefijo]);
+    db.run(`INSERT INTO instancia (clave, valor) VALUES ('primer_arranque', ?)
+            ON CONFLICT(clave) DO NOTHING`, [nowSql()]);
+
     // Check if database is empty by querying events count
     db.get("SELECT COUNT(*) as count FROM evento", (err, row) => {
       if (err) {
@@ -805,18 +855,40 @@ app.post('/api/login/mesero', (req, res) => {
     }
     return res.status(401).json({ success: false, message: 'Contraseña del mesero incorrecta' });
   } else {
-    const { id_cajero, id_evento } = req.body;
+    const { id_cajero, id_barra, id_evento } = req.body;
 
-    let query = `SELECT id_mesero, nombre, id_cajero FROM mesero WHERE password = ? AND activo = 1`;
+    // mesero has no id_barra of its own: the bar is the one of the cashier it reports to.
+    let query = `
+      SELECT m.id_mesero, m.nombre, m.id_cajero, c.id_barra
+      FROM mesero m
+      JOIN cajero c ON m.id_cajero = c.id_cajero
+      WHERE m.password = ? AND m.activo = 1
+    `;
     const params = [password];
+    // Tells the failure branch below whether a rejection could mean "right PIN, wrong
+    // tablet" (a scope was applied) or simply "no such PIN" (the default, unscoped).
+    let fueraDeAlcance = null;
 
-    if (MESERO_PIN_SCOPE === 'cajero' && id_cajero) {
+    if (MESERO_PIN_SCOPE === 'barra' && (id_barra || id_cajero)) {
+      // Any tablet of this bar must open for any of its waiters, whichever till they
+      // were assigned to. When the tablet only knows its cashier, derive the bar here.
+      if (id_barra) {
+        query += ` AND c.id_barra = ?`;
+        params.push(id_barra);
+      } else {
+        query += ` AND c.id_barra = (SELECT id_barra FROM cajero WHERE id_cajero = ?)`;
+        params.push(id_cajero);
+      }
+      fueraDeAlcance = 'Ese PIN es de un mesero de otra barra.';
+    } else if (MESERO_PIN_SCOPE === 'cajero' && id_cajero) {
       // A waiter reports to one cashier (mesero.id_cajero); only their PINs open this till.
-      query += ` AND id_cajero = ?`;
+      query += ` AND m.id_cajero = ?`;
       params.push(id_cajero);
+      fueraDeAlcance = 'Ese PIN es de un mesero de otra caja.';
     } else if (MESERO_PIN_SCOPE === 'evento' && id_evento) {
-      query += ` AND id_evento = ?`;
+      query += ` AND m.id_evento = ?`;
       params.push(id_evento);
+      fueraDeAlcance = 'Ese PIN es de un mesero de otro evento.';
     }
 
     pool.query(query, params, (err, results) => {
@@ -831,9 +903,32 @@ app.post('/api/login/mesero', (req, res) => {
           message: 'PIN duplicado entre meseros. Avisa al administrador.'
         });
       }
-      return res.status(401).json({ success: false, message: 'Contraseña del mesero incorrecta' });
+
+      // Nothing matched. Under the default scope that can only mean the PIN does not
+      // exist; under a narrower one it may be a valid PIN typed on the wrong tablet,
+      // and saying so saves the cashier from retyping a PIN that was never going to work.
+      if (!fueraDeAlcance) {
+        return res.status(401).json({ success: false, message: 'Contraseña del mesero incorrecta' });
+      }
+      pool.query(
+        `SELECT m.id_mesero FROM mesero m WHERE m.password = ? AND m.activo = 1`,
+        [password],
+        (errAny, anyRows) => {
+          if (!errAny && anyRows.length > 0) {
+            return res.status(401).json({ success: false, message: fueraDeAlcance });
+          }
+          return res.status(401).json({ success: false, message: 'Contraseña del mesero incorrecta' });
+        }
+      );
     });
   }
+});
+
+// Quién es este servidor. Lo consulta la tablet nada más cargar para saber qué
+// barra está atendiendo y cómo numerar sus comandas. Es público a propósito:
+// lo necesita el POS antes de que nadie inicie sesión.
+app.get('/api/instancia', (req, res) => {
+  res.json({ nombre: INSTANCIA.nombre, prefijo: INSTANCIA.prefijo });
 });
 
 // ==========================================
@@ -950,11 +1045,40 @@ app.post('/api/comanda', (req, res) => {
       const wanted = new Map();
       for (const item of items) {
         const idProd = parseInt(item.id_producto, 10);
-        const qty = parseInt(item.cantidad, 10);
-        if (!idProd || !Number.isFinite(qty) || qty <= 0) {
+        // Number en vez de parseInt: parseInt('1.5') daba 1 y la comanda se
+        // guardaba con una unidad menos sin avisar a nadie. Aquí no se vende
+        // media cerveza: si la cantidad no es entera, la comanda no pasa.
+        const qty = Number(item.cantidad);
+        if (!idProd || !Number.isInteger(qty) || qty <= 0) {
           throw new BusinessError('Cantidad inválida en la comanda.');
         }
         wanted.set(idProd, (wanted.get(idProd) || 0) + qty);
+      }
+
+      // Cada pago se valida por separado ANTES de sumarlos. Sumar a ciegas dejaba
+      // pasar dos cosas: un monto no numérico convertía el total pagado en NaN, y
+      // como toda comparación con NaN es falsa, la comprobación de "los pagos
+      // cubren el total" no saltaba y la venta se guardaba con un pago NaN; y un
+      // monto negativo podía compensar a otro inflado para cuadrar la suma.
+      const metodosValidos = new Set(
+        (await dbAll('SELECT id_metodo_pago FROM metodo_pago WHERE activo = 1'))
+          .map(m => m.id_metodo_pago)
+      );
+      const pagosLimpios = [];
+      for (const pay of metodos_pago) {
+        const idMetodo = parseInt(pay && pay.id_metodo_pago, 10);
+        const monto = Number(pay && pay.monto);
+        if (!metodosValidos.has(idMetodo)) {
+          throw new BusinessError('Forma de pago desconocida en la comanda.');
+        }
+        if (!Number.isFinite(monto) || monto <= 0) {
+          throw new BusinessError('Hay un monto de pago inválido en la comanda.');
+        }
+        pagosLimpios.push({
+          id_metodo_pago: idMetodo,
+          monto: round2(monto),
+          referencia: pay.referencia ? String(pay.referencia).slice(0, 120) : ''
+        });
       }
 
       const ids = [...wanted.keys()];
@@ -976,7 +1100,7 @@ app.post('/api/comanda', (req, res) => {
         lines.push({ idProd, qty, precio, subtotal, nombre: prod.nombre });
       }
 
-      const pagado = round2(metodos_pago.reduce((sum, p) => sum + Number(p.monto || 0), 0));
+      const pagado = round2(pagosLimpios.reduce((sum, p) => sum + p.monto, 0));
       if (pagado + 0.001 < total) {
         throw new BusinessError(
           `Los pagos (${pagado.toFixed(2)} Bs.) no cubren el total (${total.toFixed(2)} Bs.).`
@@ -1016,11 +1140,11 @@ app.post('/api/comanda', (req, res) => {
         );
       }
 
-      for (const pay of metodos_pago) {
+      for (const pay of pagosLimpios) {
         await dbRun(
           `INSERT INTO pago_comanda (id_comanda, id_metodo_pago, monto, fecha_hora, referencia, estado)
            VALUES (?, ?, ?, ?, ?, 'APROBADO')`,
-          [comId, pay.id_metodo_pago, round2(Number(pay.monto)), nowSql(), pay.referencia || '']
+          [comId, pay.id_metodo_pago, pay.monto, nowSql(), pay.referencia]
         );
       }
 
@@ -1040,6 +1164,9 @@ app.post('/api/comanda', (req, res) => {
         res.json({
           success: true,
           id_comanda: result.id_comanda,
+          // Referencia que se canta en la barra y se imprime en el ticket.
+          ref_comanda: refComanda(result.id_comanda),
+          instancia: INSTANCIA.nombre,
           total: result.total,
           items: result.lines.map(l => ({
             id_producto: l.idProd,
@@ -1349,16 +1476,31 @@ app.post('/api/admin/productos', (req, res) => {
 
     return res.json({ success: true, id_producto: newProdId });
   } else {
+    // Un precio con letras se colaba como NaN y el producto quedaba invendible:
+    // toda comanda que lo incluyera daba un total NaN. Y un precio negativo
+    // habría restado del total de la comanda.
+    const precio = Number(precio_venta);
+    const stockInicial = Number(stock_actual || 0);
+    if (!nombre || !String(nombre).trim()) {
+      return res.status(400).json({ success: false, message: 'El producto necesita un nombre.' });
+    }
+    if (!Number.isFinite(precio) || precio <= 0) {
+      return res.status(400).json({ success: false, message: 'El precio debe ser un número mayor que cero.' });
+    }
+    if (!Number.isInteger(stockInicial) || stockInicial < 0) {
+      return res.status(400).json({ success: false, message: 'El stock inicial debe ser un número entero de 0 o más.' });
+    }
+
     // Real MySQL Insertion
     const query = `INSERT INTO producto (id_categoria, nombre, descripcion, tipo_producto, precio_venta, stock_actual, creado_por_admin, fecha_creacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-    pool.query(query, [id_categoria, nombre, descripcion, tipo_producto, round2(precio_venta), parseInt(stock_actual || 0, 10), id_admin, nowStr], (err, result) => {
+    pool.query(query, [id_categoria, String(nombre).trim(), descripcion, tipo_producto, round2(precio), stockInicial, id_admin, nowStr], (err, result) => {
       if (err) return res.status(400).json({ success: false, message: friendlyDbError(err, 'producto') });
       const newProdId = result.insertId;
 
       // Log Stock movement
-      if (parseInt(stock_actual) > 0) {
+      if (stockInicial > 0) {
         const queryMov = `INSERT INTO movimiento_stock (id_producto, id_admin, tipo_movimiento, cantidad, stock_anterior, stock_nuevo, motivo) VALUES (?, ?, 'ENTRADA', ?, 0, ?, 'Carga inicial de stock')`;
-        pool.query(queryMov, [newProdId, id_admin, stock_actual, stock_actual], (errMov) => {
+        pool.query(queryMov, [newProdId, id_admin, stockInicial, stockInicial], (errMov) => {
           if (errMov) console.error(errMov);
         });
       }
@@ -1491,10 +1633,21 @@ app.post('/api/admin/meseros', (req, res) => {
   } else {
     // The PIN is the waiter's only credential, so it has to be unique within the scope
     // that /api/login/mesero searches, otherwise sales get attributed to the wrong person.
-    const scopeSql = MESERO_PIN_SCOPE === 'cajero'
-      ? 'SELECT id_mesero FROM mesero WHERE password = ? AND id_cajero = ? AND activo = 1'
-      : 'SELECT id_mesero FROM mesero WHERE password = ? AND activo = 1';
-    const scopeParams = MESERO_PIN_SCOPE === 'cajero' ? [password, id_cajero] : [password];
+    let scopeSql;
+    let scopeParams;
+    if (MESERO_PIN_SCOPE === 'barra') {
+      scopeSql = `SELECT m.id_mesero FROM mesero m
+                  JOIN cajero c ON m.id_cajero = c.id_cajero
+                  WHERE m.password = ? AND m.activo = 1
+                    AND c.id_barra = (SELECT id_barra FROM cajero WHERE id_cajero = ?)`;
+      scopeParams = [password, id_cajero];
+    } else if (MESERO_PIN_SCOPE === 'cajero') {
+      scopeSql = 'SELECT id_mesero FROM mesero WHERE password = ? AND id_cajero = ? AND activo = 1';
+      scopeParams = [password, id_cajero];
+    } else {
+      scopeSql = 'SELECT id_mesero FROM mesero WHERE password = ? AND activo = 1';
+      scopeParams = [password];
+    }
 
     pool.query(scopeSql, scopeParams, (errDup, dup) => {
       if (errDup) return res.status(500).json({ success: false, message: errDup.message });
@@ -1565,62 +1718,227 @@ app.post('/api/admin/stock/movimiento', (req, res) => {
 
     return res.json({ success: true, stock_nuevo: newStock });
   } else {
-    // Real MySQL manual stock update
-    pool.getConnection((err, conn) => {
-      if (err) return res.status(500).json({ error: err.message });
-      conn.beginTransaction(errTrans => {
-        if (errTrans) { conn.release(); return res.status(500).json({ error: errTrans.message }); }
+    // Ajuste manual de stock.
+    //
+    // Antes esta ruta abría su propia transacción con pool.getConnection() +
+    // beginTransaction, saltándose la cola de withTransaction. Con una sola
+    // conexión SQLite eso era una bomba: si un admin ajustaba stock mientras una
+    // caja estaba cerrando una venta, el BEGIN de aquí caía dentro de la
+    // transacción de la venta y el COMMIT (o el ROLLBACK) de una se llevaba por
+    // delante el trabajo a medias de la otra. Ahora hace cola como todo lo demás.
+    withTransaction(async () => {
+      const tipo = String(tipo_movimiento || '').toUpperCase();
+      if (!['ENTRADA', 'SALIDA', 'AJUSTE'].includes(tipo)) {
+        throw new BusinessError('Tipo de movimiento no válido.');
+      }
 
-        // Get actual stock
-        conn.query('SELECT stock_actual, nombre FROM producto WHERE id_producto = ?', [id_producto], (errGet, resProd) => {
-          if (errGet || resProd.length === 0) {
-            return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Producto no encontrado' }); });
-          }
-          const prevStock = resProd[0].stock_actual;
-          const prodName = resProd[0].nombre;
-          let newStock = prevStock;
+      // Sin esto, una cantidad vacía o con letras dejaba stock_actual en NaN y
+      // el producto quedaba invendible hasta corregirlo a mano en la base.
+      const cant = Number(cantidad);
+      if (!Number.isFinite(cant) || !Number.isInteger(cant) || cant < 0) {
+        throw new BusinessError('La cantidad debe ser un número entero de 0 o más.');
+      }
+      if (tipo !== 'AJUSTE' && cant === 0) {
+        throw new BusinessError('La cantidad tiene que ser mayor que cero.');
+      }
+      if (!motivo || !String(motivo).trim()) {
+        throw new BusinessError('Indica el motivo del movimiento.');
+      }
 
-          if (tipo_movimiento === 'ENTRADA') newStock += parseInt(cantidad);
-          else if (tipo_movimiento === 'SALIDA') newStock = Math.max(0, newStock - parseInt(cantidad));
-          else if (tipo_movimiento === 'AJUSTE') newStock = parseInt(cantidad);
+      const prod = await dbGet('SELECT stock_actual, nombre FROM producto WHERE id_producto = ?', [id_producto]);
+      if (!prod) throw new BusinessError('Producto no encontrado.', 404);
 
-          const diff = newStock - prevStock;
+      const prevStock = prod.stock_actual;
+      let newStock = prevStock;
+      if (tipo === 'ENTRADA') newStock = prevStock + cant;
+      else if (tipo === 'SALIDA') newStock = Math.max(0, prevStock - cant);
+      else newStock = cant;
 
-          // Update stock in producto
-          conn.query('UPDATE producto SET stock_actual = ? WHERE id_producto = ?', [newStock, id_producto], (errUpd) => {
-            if (errUpd) {
-              return conn.rollback(() => { conn.release(); res.status(500).json({ error: errUpd.message }); });
-            }
+      await dbRun('UPDATE producto SET stock_actual = ? WHERE id_producto = ?', [newStock, id_producto]);
 
-            // Log movement
-            const insMov = `INSERT INTO movimiento_stock (id_producto, id_admin, tipo_movimiento, cantidad, stock_anterior, stock_nuevo, motivo) VALUES (?, ?, ?, ?, ?, ?, ?)`;
-            conn.query(insMov, [id_producto, id_admin, tipo_movimiento, Math.abs(diff), prevStock, newStock, motivo], (errMov, resMov) => {
-              if (errMov) {
-                return conn.rollback(() => { conn.release(); res.status(500).json({ error: errMov.message }); });
-              }
+      await dbRun(
+        `INSERT INTO movimiento_stock (id_producto, id_admin, tipo_movimiento, cantidad, stock_anterior, stock_nuevo, motivo, fecha_hora)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id_producto, id_admin, tipo, Math.abs(newStock - prevStock), prevStock, newStock, motivo, nowSql()]
+      );
 
-              // Audit Log
-              const detail = `Ajuste manual de stock de ${prodName} (${tipo_movimiento}): stock cambió de ${prevStock} a ${newStock}. Motivo: ${motivo}`;
-              const insAudit = 'INSERT INTO auditoria_admin (id_admin, id_evento, accion, entidad, id_registro, detalle) VALUES (?, ?, ?, ?, ?, ?)';
-              conn.query(insAudit, [id_admin, id_evento || 1, 'MODIFICAR_STOCK', 'producto', id_producto, detail], (errAudit) => {
-                if (errAudit) {
-                  return conn.rollback(() => { conn.release(); res.status(500).json({ error: errAudit.message }); });
-                }
+      await dbRun(
+        `INSERT INTO auditoria_admin (id_admin, id_evento, accion, entidad, id_registro, detalle, fecha_hora)
+         VALUES (?, ?, 'MODIFICAR_STOCK', 'producto', ?, ?, ?)`,
+        [
+          id_admin,
+          id_evento || 1,
+          id_producto,
+          `Ajuste manual de stock de ${prod.nombre} (${tipo}): stock cambió de ${prevStock} a ${newStock}. Motivo: ${motivo}`,
+          nowSql()
+        ]
+      );
 
-                conn.commit(errCommit => {
-                  if (errCommit) {
-                    return conn.rollback(() => { conn.release(); res.status(500).json({ error: errCommit.message }); });
-                  }
-                  conn.release();
-                  return res.json({ success: true, stock_nuevo: newStock });
-                });
-              });
-            });
-          });
-        });
+      return newStock;
+    })
+      .then(stock_nuevo => res.json({ success: true, stock_nuevo }))
+      .catch(err => {
+        if (err instanceof BusinessError) {
+          return res.status(err.status).json({ success: false, message: err.message });
+        }
+        console.error('Error al ajustar stock:', err);
+        res.status(500).json({ success: false, message: 'No se pudo ajustar el stock.' });
       });
-    });
   }
+});
+
+// ==========================================
+// 4b. API: REPORTE DE CIERRE
+// ==========================================
+// Todas las cifras salen de SQL, no de lo que tenga cargado el navegador: el
+// panel de admin sólo trae las comandas de una en una y sumar allí daría
+// números distintos según cuándo se abrió la pestaña.
+//
+// Las comandas anuladas quedan fuera de la recaudación pero se listan aparte,
+// que es justo lo que se revisa al cuadrar la caja.
+
+// Rango de fechas en el formato en que se guarda fecha_hora ('AAAA-MM-DD HH:MM:SS').
+function rangoFechas(query) {
+  const soloFecha = /^\d{4}-\d{2}-\d{2}$/;
+  const desde = soloFecha.test(query.desde || '') ? query.desde + ' 00:00:00' : '0000-01-01 00:00:00';
+  const hasta = soloFecha.test(query.hasta || '') ? query.hasta + ' 23:59:59' : '9999-12-31 23:59:59';
+  return { desde, hasta, todo: !soloFecha.test(query.desde || '') && !soloFecha.test(query.hasta || '') };
+}
+
+async function construirReporte(query) {
+  const { desde, hasta, todo } = rangoFechas(query);
+  const P = [desde, hasta];
+
+  const evento = await dbGet('SELECT nombre_evento, fecha_evento, lugar FROM evento LIMIT 1');
+
+  const resumen = await dbGet(`
+    SELECT
+      COUNT(*)                                                     AS comandas,
+      COALESCE(SUM(CASE WHEN estado_pago != 'ANULADO' THEN total END), 0)      AS recaudado,
+      SUM(CASE WHEN estado_pago != 'ANULADO' THEN 1 ELSE 0 END)    AS validas,
+      SUM(CASE WHEN estado_pago  = 'ANULADO' THEN 1 ELSE 0 END)    AS anuladas,
+      COALESCE(SUM(CASE WHEN estado_pago  = 'ANULADO' THEN total END), 0)      AS importe_anulado
+    FROM comanda WHERE fecha_hora BETWEEN ? AND ?
+  `, P);
+
+  const unidades = await dbGet(`
+    SELECT COALESCE(SUM(d.cantidad), 0) AS n
+    FROM detalle_comanda d JOIN comanda c ON c.id_comanda = d.id_comanda
+    WHERE c.estado_pago != 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
+  `, P);
+
+  const porMetodo = await dbAll(`
+    SELECT mp.nombre AS metodo, COUNT(*) AS operaciones, COALESCE(SUM(p.monto), 0) AS importe
+    FROM pago_comanda p
+    JOIN comanda c    ON c.id_comanda = p.id_comanda
+    JOIN metodo_pago mp ON mp.id_metodo_pago = p.id_metodo_pago
+    WHERE p.estado = 'APROBADO' AND c.estado_pago != 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
+    GROUP BY mp.id_metodo_pago ORDER BY importe DESC
+  `, P);
+
+  const porBarra = await dbAll(`
+    SELECT b.nombre_barra AS barra, COUNT(*) AS comandas, COALESCE(SUM(c.total), 0) AS importe
+    FROM comanda c JOIN barra b ON b.id_barra = c.id_barra
+    WHERE c.estado_pago != 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
+    GROUP BY b.id_barra ORDER BY importe DESC
+  `, P);
+
+  const porCajero = await dbAll(`
+    SELECT cj.nombre AS cajero, b.nombre_barra AS barra,
+           COUNT(*) AS comandas, COALESCE(SUM(c.total), 0) AS importe
+    FROM comanda c
+    JOIN cajero cj ON cj.id_cajero = c.id_cajero
+    JOIN barra b   ON b.id_barra   = cj.id_barra
+    WHERE c.estado_pago != 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
+    GROUP BY cj.id_cajero ORDER BY importe DESC
+  `, P);
+
+  const porMesero = await dbAll(`
+    SELECT m.nombre AS mesero, COUNT(*) AS comandas, COALESCE(SUM(c.total), 0) AS importe
+    FROM comanda c JOIN mesero m ON m.id_mesero = c.id_mesero
+    WHERE c.estado_pago != 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
+    GROUP BY m.id_mesero ORDER BY importe DESC
+  `, P);
+
+  const productos = await dbAll(`
+    SELECT p.nombre AS producto, cat.nombre AS categoria,
+           SUM(d.cantidad) AS unidades, COALESCE(SUM(d.subtotal), 0) AS importe
+    FROM detalle_comanda d
+    JOIN comanda c  ON c.id_comanda  = d.id_comanda
+    JOIN producto p ON p.id_producto = d.id_producto
+    LEFT JOIN categoria_producto cat ON cat.id_categoria = p.id_categoria
+    WHERE c.estado_pago != 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
+    GROUP BY p.id_producto ORDER BY importe DESC
+  `, P);
+
+  const anuladas = await dbAll(`
+    SELECT c.id_comanda, c.total, c.fecha_anulacion, c.motivo_anulacion,
+           a.nombre AS admin, m.nombre AS mesero
+    FROM comanda c
+    LEFT JOIN administrador_evento a ON a.id_admin = c.anulada_por_admin
+    LEFT JOIN mesero m ON m.id_mesero = c.id_mesero
+    WHERE c.estado_pago = 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
+    ORDER BY c.id_comanda DESC
+  `, P);
+
+  const stock = await dbAll(`
+    SELECT p.nombre AS producto, cat.nombre AS categoria, p.stock_actual, p.precio_venta
+    FROM producto p
+    LEFT JOIN categoria_producto cat ON cat.id_categoria = p.id_categoria
+    WHERE p.activo = 1 ORDER BY p.stock_actual ASC, p.nombre ASC
+  `);
+
+  const validas = Number(resumen.validas) || 0;
+  return {
+    evento,
+    // El cierre lleva la barra en la cabecera y en el nombre del archivo: con
+    // tres instancias, tres PDFs iguales sin identificar son inservibles.
+    instancia: INSTANCIA,
+    rango: { desde: query.desde || null, hasta: query.hasta || null, todo },
+    generado: nowSql(),
+    resumen: {
+      comandas: Number(resumen.comandas) || 0,
+      validas,
+      anuladas: Number(resumen.anuladas) || 0,
+      recaudado: round2(resumen.recaudado),
+      importe_anulado: round2(resumen.importe_anulado),
+      unidades: Number(unidades.n) || 0,
+      ticket_medio: validas > 0 ? round2(Number(resumen.recaudado) / validas) : 0
+    },
+    porMetodo, porBarra, porCajero, porMesero, productos, anuladas, stock
+  };
+}
+
+app.get('/api/admin/reporte', (req, res) => {
+  if (useMockDb) {
+    return res.status(503).json({ success: false, message: 'El reporte necesita la base de datos real.' });
+  }
+  construirReporte(req.query)
+    .then(datos => res.json(datos))
+    .catch(err => {
+      console.error('Error al construir el reporte:', err);
+      res.status(500).json({ success: false, message: 'No se pudo generar el reporte.' });
+    });
+});
+
+app.get('/api/admin/reporte.pdf', (req, res) => {
+  if (useMockDb) {
+    return res.status(503).send('El reporte necesita la base de datos real.');
+  }
+  construirReporte(req.query)
+    .then(datos => {
+      const pdf = construirPdfCierre(datos);
+      // 'attachment' para que Android lo guarde como archivo y se pueda mandar
+      // por WhatsApp, en vez de abrirlo dentro de la pestaña del POS.
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoReporte(datos)}"`);
+      res.setHeader('Content-Length', pdf.length);
+      res.send(pdf);
+    })
+    .catch(err => {
+      console.error('Error al generar el PDF:', err);
+      res.status(500).send('No se pudo generar el PDF.');
+    });
 });
 
 // GET AUDIT LOG & STOCK LOGS & BARRAS
@@ -1773,14 +2091,27 @@ function cerrarOrdenado(senal) {
 // conexiones de las demás por WiFi, no solo las de sí misma.
 app.listen(PORT, '0.0.0.0', () => {
   const ips = localAddresses();
+  // La barra va lo primero y en grande. Con dos o tres tablets servidor
+  // idénticas encima de la mesa, este cartel es la forma más rápida de saber
+  // cuál tienes delante antes de tocar nada.
+  const rotulo = INSTANCIA.nombre.toUpperCase();
   console.log(`\n==================================================`);
+  console.log(`   B A R R A :   ${rotulo}`);
+  console.log(`   Comandas de esta barra: ${INSTANCIA.prefijo}-1, ${INSTANCIA.prefijo}-2, ...`);
+  console.log(`==================================================`);
   console.log(`🚀 MasterDrinks POS iniciado`);
   console.log(`   En esta misma tablet:  http://localhost:${PORT}`);
   if (ips.length) {
-    console.log(`\n   👉 En las OTRAS tablets, abre en el navegador:`);
+    console.log(`\n   👉 En las OTRAS tablets de la barra ${INSTANCIA.nombre}:`);
     ips.forEach(ip => console.log(`      http://${ip}:${PORT}`));
   } else {
-    console.log(`\n   ⚠ Sin red detectada: conecta el WiFi y reinicia.`);
+    console.log(`\n   ⚠ Sin red detectada: enciende el WiFi/hotspot y reinicia.`);
+  }
+  if (INSTANCIA.nombre === 'Principal') {
+    // Aviso, no error: en un montaje de una sola barra es correcto.
+    console.log(`\n   ⚠ Esta instancia no tiene nombre de barra propio.`);
+    console.log(`     Si montas varias barras, pon INSTANCIA y PREFIJO en el .env`);
+    console.log(`     o las tres numerarán sus comandas igual.`);
   }
   console.log(`\n   Ctrl+C para detener.`);
   console.log(`==================================================\n`);

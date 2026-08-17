@@ -187,90 +187,178 @@ window.ThermalPrinter = (function () {
     return lines;
   }
 
+  // Pareja etiqueta/importe en una sola línea, sin re-partir el texto. A
+  // diferencia de twoCol respeta los espacios de sangría, porque no pasa por
+  // el troceado en palabras; se usa cuando ya se sabe que la etiqueta es corta.
+  function padPair(left, right, width) {
+    left = String(left);
+    right = String(right);
+    const gap = width - left.length - right.length;
+    return gap >= 1 ? left + ' '.repeat(gap) + right : left + ' ' + right;
+  }
+
   const divider = width => '-'.repeat(width);
+  // Separador fuerte: marca el principio y el final de un bloque, mientras que
+  // el de guiones separa filas dentro del mismo bloque. Con dos grosores el
+  // ticket se lee de un vistazo aunque esté impreso en papel barato.
+  const rule = width => '='.repeat(width);
+
+  // Etiqueta a la izquierda y valor alineado en una columna fija. Si el valor
+  // no cabe, sigue debajo sangrado hasta esa misma columna.
+  function kv(label, value, width, labelWidth) {
+    const lw = labelWidth || 9;
+    const pad = ' '.repeat(lw);
+    return wrap(String(value), width - lw)
+      .map((line, i) => (i === 0 ? String(label).padEnd(lw) : pad) + line);
+  }
+
+  // Título de sección: el texto seguido de guiones hasta el borde, para que se
+  // distinga de una línea normal sin gastar una línea entera en un separador.
+  function sectionTitle(text, width) {
+    const t = String(text) + ' ';
+    return t.length >= width ? t : t + '-'.repeat(width - t.length);
+  }
 
   // ---------------------------------------------------------------------
   // Descripción del ticket como lista de "ops"
   // ---------------------------------------------------------------------
-  // op = { text, align: 'left'|'center', bold: bool, tall: bool }
-  const op = (text, extra) => Object.assign({ text: text, align: 'left', bold: false, tall: false }, extra || {});
+  // op = { text, align: 'left'|'center', bold: bool, tall: bool, wide: bool }
+  // 'wide' duplica el ancho de cada carácter, así que el texto sólo dispone de
+  // la mitad de columnas: úsalo únicamente en titulares cortos y centrados.
+  const op = (text, extra) =>
+    Object.assign({ text: text, align: 'left', bold: false, tall: false, wide: false }, extra || {});
 
   const money = n => Number(n || 0).toFixed(2);
+  const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+  /**
+   * Cabecera común: marca, barra y número de comanda a doble tamaño.
+   * El número es lo que se canta en la barra y lo que se busca al reimprimir,
+   * así que va lo más grande que permite el papel.
+   */
+  function buildHeaderOps(model, settings, subtitulo) {
+    const w = settings.width;
+    const ops = [];
+
+    ops.push(op(rule(w)));
+    ops.push(op('MASTERDRINKS', { align: 'center', bold: true, tall: true, wide: true }));
+    ops.push(op(model.barra, { align: 'center' }));
+    ops.push(op(rule(w)));
+    // La referencia lleva el prefijo de la barra (N-47): con tres servidores
+    // independientes, el número solo no distingue una comanda de otra.
+    ops.push(op('COMANDA ' + (model.ref || '#' + model.id),
+      { align: 'center', bold: true, tall: true, wide: true }));
+    ops.push(op(subtitulo, { align: 'center', bold: true }));
+    ops.push(op(divider(w)));
+
+    return ops;
+  }
+
+  function buildFooterOps(model, settings, cierre) {
+    const w = settings.width;
+    const ops = [];
+
+    ops.push(op(divider(w)));
+    cierre.forEach(linea => ops.push(op(linea.text, { align: 'center', bold: !!linea.bold })));
+    ops.push(op(rule(w)));
+
+    return ops;
+  }
 
   /** Ticket de cobro (copia del cajero). */
   function buildCajeroOps(model, settings) {
     const w = settings.width;
-    const ops = [];
+    const ops = buildHeaderOps(model, settings, 'COPIA CAJERO');
 
-    ops.push(op('*** MASTERDRINKS ***', { align: 'center', bold: true, tall: true }));
-    ops.push(op(model.barra, { align: 'center' }));
-    ops.push(op('COPIA CAJERO', { align: 'center' }));
-    ops.push(op(divider(w)));
+    kv('Fecha', model.fecha, w).forEach(l => ops.push(op(l)));
+    kv('Cajero', model.cajero, w).forEach(l => ops.push(op(l)));
+    kv('Mesero', model.mesero, w).forEach(l => ops.push(op(l)));
 
-    ops.push(op('Comanda: #' + model.id));
-    ops.push(op('Fecha: ' + model.fecha));
-    ops.push(op('Cajero: ' + model.cajero));
-    ops.push(op('Mesero: ' + model.mesero));
-    ops.push(op(divider(w)));
+    ops.push(op(sectionTitle('DETALLE', w), { bold: true }));
 
-    twoCol('Cant Prod', 'Total', w).forEach(l => ops.push(op(l, { bold: true })));
-    ops.push(op(divider(w)));
-
+    // Dos líneas por producto: el nombre entero arriba y debajo, sangrado,
+    // "cantidad x precio ....... importe". Así el nombre nunca compite por el
+    // sitio con las cifras y se ve el precio unitario, que antes no salía.
     model.items.forEach(item => {
-      // Sangría de 4 = ancho de "2 x ", para alinear la continuación del nombre.
-      twoCol(item.cantidad + ' x ' + item.nombre, money(item.subtotal), w, 4)
-        .forEach(l => ops.push(op(l)));
+      wrap(item.nombre, w).forEach(l => ops.push(op(l)));
+      const unitario = item.precio_unitario != null
+        ? money(item.precio_unitario)
+        : money(Number(item.subtotal || 0) / Math.max(1, Number(item.cantidad || 1)));
+      ops.push(op(padPair('  ' + item.cantidad + ' x ' + unitario, money(item.subtotal), w)));
     });
+
     ops.push(op(divider(w)));
 
-    twoCol('TOTAL:', money(model.total) + ' Bs.', w).forEach(l => ops.push(op(l, { bold: true })));
-    ops.push(op(divider(w)));
+    const unidades = model.items.reduce((n, i) => n + Number(i.cantidad || 0), 0);
+    ops.push(op(padPair(model.items.length + ' productos', unidades + ' unidades', w)));
+    ops.push(op(rule(w)));
 
-    ops.push(op('METODOS DE PAGO:', { bold: true }));
+    twoCol('TOTAL', money(model.total) + ' Bs.', w)
+      .forEach(l => ops.push(op(l, { bold: true, tall: true })));
+    ops.push(op(rule(w)));
+
+    ops.push(op(sectionTitle('PAGOS', w), { bold: true }));
     model.pagos.forEach(pago => {
-      twoCol('- ' + pago.etiqueta, money(pago.monto), w).forEach(l => ops.push(op(l)));
+      twoCol(pago.etiqueta, money(pago.monto), w, 2).forEach(l => ops.push(op(l)));
     });
 
-    ops.push(op(''));
-    ops.push(op('¡GRACIAS POR SU COMPRA!', { align: 'center' }));
-    ops.push(op('Disfrute del evento musical', { align: 'center' }));
+    // El vuelto sólo aparece cuando lo hay: en una comanda pagada justa o con
+    // QR, una línea de "CAMBIO 0.00" sólo añade ruido al ticket.
+    // 'recibido' es el efectivo que entregó el cliente, que puede ser mayor que
+    // lo cobrado; si no viene, se asume que pagó justo.
+    const cobrado = round2(model.pagos.reduce((s, p) => s + Number(p.monto || 0), 0));
+    const pagado = Number(model.recibido) > cobrado ? round2(model.recibido) : cobrado;
+    const cambio = round2(pagado - Number(model.total || 0));
+    if (model.pagos.length > 1 || cambio > 0) {
+      ops.push(op(divider(w)));
+      ops.push(op(padPair('  Recibido', money(pagado), w)));
+    }
+    if (cambio > 0) {
+      ops.push(op(padPair('  CAMBIO', money(cambio) + ' Bs.', w), { bold: true }));
+    }
 
-    return ops;
+    return ops.concat(buildFooterOps(model, settings, [
+      { text: '¡GRACIAS POR SU COMPRA!', bold: true },
+      { text: 'Disfrute del evento musical' },
+      { text: '' },
+      { text: 'MasterDrinks POS' }
+    ]));
   }
 
   /** Ticket de preparación (copia del mesero, sin precios). */
   function buildMeseroOps(model, settings) {
     const w = settings.width;
-    const ops = [];
+    const ops = buildHeaderOps(model, settings, 'PREPARACION');
 
-    ops.push(op('*** MASTERDRINKS ***', { align: 'center', bold: true, tall: true }));
-    ops.push(op(model.barra, { align: 'center' }));
-    ops.push(op('COPIA PREPARACION / MESERO', { align: 'center' }));
-    ops.push(op(divider(w)));
+    kv('Mesero', model.mesero, w).forEach(l => ops.push(op(l)));
+    // En la barra sólo importa a qué hora entró la comanda, no la fecha entera.
+    kv('Hora', model.hora || model.fecha, w).forEach(l => ops.push(op(l)));
 
-    ops.push(op('Comanda: #' + model.id));
-    ops.push(op('Fecha: ' + model.fecha));
-    ops.push(op('Mesero: ' + model.mesero));
-    ops.push(op(divider(w)));
+    ops.push(op(sectionTitle('PREPARAR', w), { bold: true }));
 
     // Grande y en negrita: es lo que lee la barra a contraluz y con prisa.
+    // La casilla [ ] permite ir tachando lo ya servido.
     model.items.forEach(item => {
       wrapIndent('[ ] ' + item.cantidad + ' x ' + item.nombre, w, 4)
         .forEach(l => ops.push(op(l, { bold: true, tall: true })));
     });
+
     ops.push(op(divider(w)));
+    const unidades = model.items.reduce((n, i) => n + Number(i.cantidad || 0), 0);
+    ops.push(op(padPair(model.items.length + ' productos', unidades + ' unidades', w)));
 
     // Recuadro de observaciones, equivalente al borde que se ve en pantalla.
     const inner = w - 2;
+    ops.push(op(sectionTitle('OBSERVACIONES', w), { bold: true }));
     ops.push(op('+' + '-'.repeat(inner) + '+'));
-    ['Obs:'].concat(wrap(model.observaciones || 'Sin observaciones', inner - 2))
+    wrap(model.observaciones || 'Sin observaciones', inner - 2)
       .forEach(l => ops.push(op('|' + (' ' + l).padEnd(inner) + '|')));
     ops.push(op('+' + '-'.repeat(inner) + '+'));
 
-    ops.push(op(''));
-    ops.push(op('TICKET DE PREPARACION', { align: 'center' }));
-
-    return ops;
+    return ops.concat(buildFooterOps(model, settings, [
+      { text: 'TICKET DE PREPARACION', bold: true },
+      { text: 'No es comprobante de pago' }
+    ]));
   }
 
   // ---------------------------------------------------------------------
@@ -285,7 +373,7 @@ window.ThermalPrinter = (function () {
     push(ESC, 0x40);                                   // ESC @  — reiniciar impresora
     if (settings.encoding === 'cp850') push(ESC, 0x74, 0x02); // ESC t 2 — página de códigos CP850
 
-    let align = 'left', bold = false, tall = false;
+    let align = 'left', bold = false, size = 0x00;
 
     ops.forEach(o => {
       if (o.align !== align) {
@@ -296,11 +384,12 @@ window.ThermalPrinter = (function () {
         push(ESC, 0x45, o.bold ? 1 : 0);               // ESC E n
         bold = o.bold;
       }
-      if (o.tall !== tall) {
-        // GS ! n — n = ((ancho-1) << 4) | (alto-1). Sólo doble alto: al doblar
-        // el ancho el texto ya no entraría en las 32 columnas del papel.
-        push(GS, 0x21, o.tall ? 0x01 : 0x00);
-        tall = o.tall;
+      // GS ! n — n = ((ancho-1) << 4) | (alto-1). El doble ancho gasta dos
+      // columnas por carácter, por eso sólo lo llevan los titulares cortos.
+      const wanted = (o.wide ? 0x10 : 0x00) | (o.tall ? 0x01 : 0x00);
+      if (wanted !== size) {
+        push(GS, 0x21, wanted);
+        size = wanted;
       }
       push(...encodeText(o.text, settings.encoding));
       push(LF);
@@ -321,8 +410,11 @@ window.ThermalPrinter = (function () {
     const w = settings.width;
     return ops.map(o => {
       const text = foldForDisplay(o.text, settings.encoding);
-      return o.align === 'center' && text.length < w
-        ? ' '.repeat(Math.floor((w - text.length) / 2)) + text
+      // Un carácter a doble ancho ocupa dos columnas del papel: se cuenta así
+      // para centrarlo donde la impresora lo va a poner de verdad.
+      const columnas = o.wide ? text.length * 2 : text.length;
+      return o.align === 'center' && columnas < w
+        ? ' '.repeat(Math.floor((w - columnas) / 2)) + text
         : text;
     }).join('\n');
   }
@@ -341,7 +433,12 @@ window.ThermalPrinter = (function () {
         o.tall ? 'font-size:1.5em;line-height:1.15' : ''
       ].filter(Boolean).join(';');
       const text = escapeHtml(foldForDisplay(o.text, settings.encoding)) || '&nbsp;';
-      return `<div style="${style}">${text}</div>`;
+      // El doble ancho se reproduce estirando el texto, no agrandándolo: así la
+      // vista previa ocupa las mismas columnas de papel que la impresión real.
+      const cuerpo = o.wide
+        ? `<span style="display:inline-block;transform:scaleX(2);transform-origin:center">${text}</span>`
+        : text;
+      return `<div style="${style}">${cuerpo}</div>`;
     }).join('');
   }
 
@@ -462,6 +559,9 @@ window.ThermalPrinter = (function () {
       wrapIndent: wrapIndent,
       twoCol: twoCol,
       divider: divider,
+      rule: rule,
+      kv: kv,
+      sectionTitle: sectionTitle,
       op: op,
       opsToEscPos: opsToEscPos,
       opsToHtml: opsToHtml,
