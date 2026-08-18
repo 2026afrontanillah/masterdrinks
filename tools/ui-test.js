@@ -58,7 +58,7 @@ const check = (nombre, ok, extra) => {
 
   const servidor = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
     cwd: RAIZ,
-    env: Object.assign({}, process.env, { PORT: String(PUERTO), DB_FILE: BASE }),
+    env: Object.assign({}, process.env, { RENOMBRAR_BARRA: '1', PORT: String(PUERTO), DB_FILE: BASE }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
   const registro = [];
@@ -146,7 +146,13 @@ const check = (nombre, ok, extra) => {
   console.log(C.tit('\n  Rejilla de productos'));
   // =======================================================================
   const tarjetas = window.document.querySelectorAll('.product-card:not(.out-of-stock)');
-  check('Se pintó el catálogo', tarjetas.length > 0, tarjetas.length + ' productos');
+  // Todas las tarjetas, agotadas incluidas. Se guarda aparte porque más abajo
+  // hay que comparar catálogo completo con catálogo completo: si la base tiene
+  // algún producto agotado, mezclar ambas cuentas hace fallar la prueba sin
+  // que nada esté roto.
+  const totalTarjetas = window.document.querySelectorAll('.product-card').length;
+  check('Se pintó el catálogo', tarjetas.length > 0,
+    tarjetas.length + ' con stock de ' + totalTarjetas + ' en total');
   check('Cada tarjeta lleva su id, para refrescarla sola',
     [...tarjetas].every(c => c.dataset.id));
 
@@ -199,7 +205,8 @@ const check = (nombre, ok, extra) => {
   await esperar(60);
   check('La ✕ limpia y devuelve el catálogo entero',
     id('product-search').value === '' &&
-    window.document.querySelectorAll('.product-card').length === tarjetas.length);
+    window.document.querySelectorAll('.product-card').length === totalTarjetas,
+    window.document.querySelectorAll('.product-card').length + ' de ' + totalTarjetas);
   check('El carrito sobrevive al filtrado', id('cart-count').textContent === '2');
 
   const total = parseFloat(id('cart-total-amount').textContent);

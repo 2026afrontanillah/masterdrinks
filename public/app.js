@@ -59,6 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     cargarInstancia();
+    cargarQrCobro();
+    cargarConfiguracion();
 
     // ==========================================
     // AVISOS FLOTANTES
@@ -94,171 +96,31 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Dynamic wallpaper color extractor
-    function loadAndAnalyzeWallpaper() {
+    /**
+     * Carga el fondo de pantalla. Nada más.
+     *
+     * Antes esto analizaba el color dominante de la imagen y reescribía la
+     * paleta entera (--primary, --gradient-primary, las sombras). Con un
+     * fondo oscuro y poco saturado —como el que hay— caía en la rama
+     * "blanco/gris" y dejaba el degradado principal en blanco → gris: los
+     * botones de "Iniciar Sesión" y "CONFIRMAR PAGO" salían blancos sobre
+     * blanco, con pinta de estar desactivados, y el total del cobro casi no se
+     * leía. La identidad de la marca la define el CSS, no la foto del fondo.
+     */
+    function cargarFondo() {
         const img = new Image();
-        // Try the exact capitalized name from root first
         img.src = 'Wallpaper.jpg';
-        
         img.onerror = () => {
-            if (img.src.endsWith('Wallpaper.jpg')) {
-                img.src = 'wallpaper.jpg'; // fallback lowercase
-            }
+            if (img.src.endsWith('Wallpaper.jpg')) img.src = 'wallpaper.jpg';
         };
-
         img.onload = () => {
-            // Set background image dynamically on body
             document.body.style.setProperty('--wallpaper-url', `url('${img.src}')`);
-            
-            // Extract colors from the wallpaper with exhaustive binning checks
-            try {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = 20;
-                canvas.height = 20; // 20x20 grid to get a solid representative sample
-                ctx.drawImage(img, 0, 0, 20, 20);
-                
-                const imgData = ctx.getImageData(0, 0, 20, 20).data;
-                
-                let rSum = 0, gSum = 0, bSum = 0;
-                let count = 0;
-                const bins = {};
-                
-                for (let i = 0; i < imgData.length; i += 4) {
-                    const r = imgData[i];
-                    const g = imgData[i+1];
-                    const b = imgData[i+2];
-                    
-                    const brightness = (r + g + b) / 3;
-                    // Exclude pure dark colors to avoid counting shadows/borders
-                    if (brightness > 20) {
-                        rSum += r;
-                        gSum += g;
-                        bSum += b;
-                        count++;
-                        
-                        // Round colors to nearest multiple of 16 to group similar shades (quantization)
-                        const rBin = Math.round(r / 16) * 16;
-                        const gBin = Math.round(g / 16) * 16;
-                        const bBin = Math.round(b / 16) * 16;
-                        const key = `${rBin},${gBin},${bBin}`;
-                        bins[key] = (bins[key] || 0) + 1;
-                    }
-                }
-                
-                // If the entire image is dark/black, fall back to all pixels
-                if (count === 0) {
-                    for (let i = 0; i < imgData.length; i += 4) {
-                        const r = imgData[i];
-                        const g = imgData[i+1];
-                        const b = imgData[i+2];
-                        rSum += r;
-                        gSum += g;
-                        bSum += b;
-                        count++;
-                        
-                        const rBin = Math.round(r / 16) * 16;
-                        const gBin = Math.round(g / 16) * 16;
-                        const bBin = Math.round(b / 16) * 16;
-                        const key = `${rBin},${gBin},${bBin}`;
-                        bins[key] = (bins[key] || 0) + 1;
-                    }
-                }
-                
-                // Find the dominant color bin (most frequent color)
-                let dominantKey = null;
-                let maxCount = -1;
-                for (const key in bins) {
-                    if (bins[key] > maxCount) {
-                        maxCount = bins[key];
-                        dominantKey = key;
-                    }
-                }
-                
-                let rDom, gDom, bDom;
-                if (dominantKey) {
-                    const parts = dominantKey.split(',').map(Number);
-                    rDom = parts[0];
-                    gDom = parts[1];
-                    bDom = parts[2];
-                } else {
-                    rDom = Math.round(rSum / count);
-                    gDom = Math.round(gSum / count);
-                    bDom = Math.round(bSum / count);
-                }
-                
-                // Convert dominant color to HSL
-                const hsl = rgbToHsl(rDom, gDom, bDom);
-                const hue = Math.round(hsl.h * 360);
-                const sat = hsl.s;
-                const light = hsl.l;
-                
-                let primaryColor, accentColor, gradient;
-                
-                // Check for White/Gray/Light-cream dominant wallpaper
-                // If saturation is very low OR lightness is very high (meaning the color is white/light pastel)
-                if (sat < 0.20 || light > 0.75) {
-                    console.log("⚪ White/Gray theme activated (Dominant color is white/light).");
-                    primaryColor = '#ffffff';
-                    accentColor = '#f1f5f9'; // clean white/silver
-                    gradient = 'linear-gradient(135deg, #ffffff 0%, #cbd5e1 50%, #64748b 100%)';
-                    
-                    const root = document.documentElement;
-                    root.style.setProperty('--primary', primaryColor);
-                    root.style.setProperty('--accent-color', accentColor);
-                    root.style.setProperty('--gradient-primary', gradient);
-                    root.style.setProperty('--shadow-neon-pink', '0 0 20px rgba(255, 255, 255, 0.35)');
-                    root.style.setProperty('--shadow-glow', '0 0 20px rgba(255, 255, 255, 0.2)');
-                } else {
-                    // Colored theme: map directly to the dominant hue
-                    const finalSat = Math.round(Math.max(sat, 0.6) * 100);
-                    const finalLight = Math.round(Math.max(Math.min(light, 0.72), 0.45) * 100); // clamp only to guarantee visibility
-                    
-                    primaryColor = `hsl(${hue}, ${finalSat}%, ${finalLight}%)`;
-                    // Accent is a vibrantly shifted analogous/triadic tone
-                    const accentHue = (hue + 35) % 360;
-                    accentColor = `hsl(${accentHue}, ${finalSat}%, ${finalLight}%)`;
-                    
-                    gradient = `linear-gradient(135deg, hsl(${hue}, ${finalSat}%, ${Math.min(finalLight + 12, 90)}%) 0%, hsl(${(hue + 20) % 360}, ${finalSat}%, ${finalLight}%) 50%, hsl(${(hue + 40) % 360}, ${finalSat}%, ${Math.max(finalLight - 12, 35)}%) 100%)`;
-                    
-                    const root = document.documentElement;
-                    root.style.setProperty('--primary', primaryColor);
-                    root.style.setProperty('--accent-color', accentColor);
-                    root.style.setProperty('--gradient-primary', gradient);
-                    root.style.setProperty('--shadow-neon-pink', `0 0 20px hsl(${(hue + 20) % 360}, ${finalSat}%, ${finalLight}%, 0.35)`);
-                    root.style.setProperty('--shadow-glow', `0 0 20px hsl(${hue}, ${finalSat}%, ${finalLight}%, 0.25)`);
-                    
-                    console.log(`🎨 Colored Theme Activated. Dominant color matches: hsl(${hue}, ${finalSat}%, ${finalLight}%)`);
-                }
-            } catch (e) {
-                console.error("Failed to analyze wallpaper colors:", e);
-            }
+            document.body.classList.add('con-fondo');
         };
-    }
-
-    // RGB to HSL helper
-    function rgbToHsl(r, g, b) {
-        r /= 255, g /= 255, b /= 255;
-        const max = Math.max(r, g, b), min = Math.min(r, g, b);
-        let h, s;
-        const l = (max + min) / 2;
-
-        if (max === min) {
-            h = s = 0; // achromatic
-        } else {
-            const d = max - min;
-            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-            switch (max) {
-                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-                case g: h = (b - r) / d + 2; break;
-                case b: h = (r - g) / d + 4; break;
-            }
-            h /= 6;
-        }
-        return { h, s, l };
     }
 
     // Initialize wallpaper styling
-    loadAndAnalyzeWallpaper();
+    cargarFondo();
 
     // ==========================================
     // 1. ROUTING & LOGIN CONTROLLER
@@ -662,7 +524,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const restante = p.stock_actual - unidades;
 
         const stockEl = card.querySelector('.stock');
-        stockEl.textContent = 'Stock: ' + (restante <= 0 ? 'Agotado' : restante);
+        stockEl.textContent = restante <= 0 ? 'Agotado' : restante + ' u.';
         stockEl.classList.toggle('low', restante > 0 && restante < 10);
 
         card.classList.toggle('out-of-stock', restante <= 0);
@@ -727,13 +589,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             card.innerHTML = `
-                <div>
-                    <span class="emoji">${emojiDe(p)}</span>
-                    <h3>${escapeHtml(p.nombre)}</h3>
-                </div>
-                <div>
+                <span class="emoji">${emojiDe(p)}</span>
+                <h3>${escapeHtml(p.nombre)}</h3>
+                <div class="card-foot">
                     <div class="price">${p.precio_venta} Bs.</div>
-                    <div class="stock ${displayStock > 0 && displayStock < 10 ? 'low' : ''}">Stock: ${displayStock <= 0 ? 'Agotado' : displayStock}</div>
+                    <div class="stock ${displayStock > 0 && displayStock < 10 ? 'low' : ''}">${displayStock <= 0 ? 'Agotado' : displayStock + ' u.'}</div>
                 </div>
                 ${unidades > 0 ? `<span class="cart-badge">${unidades}</span>` : ''}
                 ${displayStock <= 0 ? '<div class="out-of-stock-overlay"><span>Agotado</span></div>' : ''}
@@ -845,7 +705,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="cart-qty-btn decrease-btn" aria-label="Quitar uno">−</button>
                     <span class="qty">${item.cantidad}</span>
                     <button class="cart-qty-btn increase-btn" aria-label="Añadir uno">+</button>
-                    <button class="remove-item-btn" aria-label="Quitar del carrito">🗑️</button>
+                    <button class="remove-item-btn" aria-label="Quitar del carrito" title="Quitar">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
+                        </svg>
+                    </button>
                 </div>
             `;
 
@@ -936,6 +801,8 @@ document.addEventListener('DOMContentLoaded', () => {
         payError.classList.remove('hide');
     }
 
+    const QR = 3;   // id_metodo_pago del código QR
+
     function seleccionarMetodo(metodo) {
         metodoActivo = metodo;
         mostrarErrorPago('');
@@ -944,13 +811,56 @@ document.addEventListener('DOMContentLoaded', () => {
             tab.classList.toggle('active', tab.dataset.metodo === String(metodo));
         });
 
-        // Sólo el efectivo necesita cambio, y sólo el mixto necesita repartir.
+        // Sólo el efectivo necesita cambio, sólo el mixto necesita repartir y
+        // sólo el QR necesita enseñar el código del banco.
         document.getElementById('pay-panel-efectivo')
             .classList.toggle('hide', metodo !== EFECTIVO);
         document.getElementById('pay-panel-mixto')
             .classList.toggle('hide', metodo !== 'mixto');
+        document.getElementById('pay-panel-qr')
+            .classList.toggle('hide', metodo !== QR);
 
         if (metodo === 'mixto') recalcularMixto();
+        if (metodo === QR) prepararPanelQr();
+    }
+
+    // ==========================================
+    // QR DE COBRO
+    // ==========================================
+    // Es la imagen del QR fijo del banco, cargada una vez desde el panel. Este
+    // sistema NO comprueba con el banco si el pago entró: no tiene credenciales
+    // ni conexión durante el evento. Quien confirma es el cajero, mirando el
+    // comprobante del cliente; la referencia que teclee es lo que después
+    // permite cuadrar la caja contra el extracto bancario.
+    let qrCobro = { imagen: null, titular: '', banco: '' };
+
+    async function cargarQrCobro() {
+        try {
+            const res = await fetch('/api/qr-cobro');
+            if (res.ok) qrCobro = await res.json();
+        } catch (err) {
+            console.warn('No se pudo leer el QR de cobro:', err);
+        }
+    }
+
+    function prepararPanelQr() {
+        const img = document.getElementById('qr-cobro-img');
+        const falta = document.getElementById('qr-cobro-falta');
+        const titular = document.getElementById('qr-cobro-titular');
+
+        if (qrCobro.imagen) {
+            img.src = qrCobro.imagen;
+            img.classList.remove('hide');
+            falta.classList.add('hide');
+        } else {
+            img.classList.add('hide');
+            falta.classList.remove('hide');
+        }
+
+        const partes = [qrCobro.titular, qrCobro.banco].filter(Boolean);
+        titular.textContent = partes.join(' · ');
+        document.getElementById('qr-cobro-monto').textContent = orderTotal.toFixed(2) + ' Bs.';
+        document.getElementById('pay-referencia').value = '';
     }
 
     // Se escribe el efectivo y el resto se rellena solo, como en el modal de
@@ -987,9 +897,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Identificador de ESTE intento de cobro. Se genera al abrir el modal y se
+    // mantiene mientras el carrito sea el mismo, de modo que si hay que
+    // reintentar —porque se perdió la respuesta— el servidor reconozca que es
+    // la misma venta y no la guarde otra vez. Sólo cambia cuando la venta se
+    // cierra de verdad y empieza una nueva.
+    let claveCobro = null;
+
+    function nuevaClaveCobro() {
+        if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+        // Respaldo para navegadores viejos: hora + azar basta para no repetirse
+        // dentro de una misma barra.
+        return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+    }
+
     function abrirModalCobro() {
         if (cart.length === 0 || orderTotal <= 0) return;
 
+        if (!claveCobro) claveCobro = nuevaClaveCobro();
         efectivoRecibido = 0;
         payRecibidoInput.value = '';
         payMixtoEfectivo.value = '';
@@ -1011,6 +936,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function construirPagos() {
         const referencia = id => {
             const meta = METODOS[id] || { ref: 'PAGO' };
+            // Si el cajero anotó la referencia del comprobante, esa manda: es la
+            // que sirve para cuadrar con el extracto del banco. El número
+            // inventado sólo rellena cuando no hay ninguna.
+            const anotada = document.getElementById('pay-referencia').value.trim();
+            if (id === QR && anotada) return anotada.slice(0, 40);
             return meta.ref + '-' + Math.floor(100000 + Math.random() * 900000);
         };
         const pago = (id, monto) => ({
@@ -1124,7 +1054,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 precio_unitario: c.precio_venta,
                 subtotal: c.precio_venta * c.cantidad
             })),
-            metodos_pago: payments
+            metodos_pago: payments,
+            // Marca este intento de cobro. Si hay que reintentar, viaja la misma
+            // y el servidor devuelve la comanda ya guardada en vez de crear otra.
+            clave_idempotencia: claveCobro
         };
 
         try {
@@ -1144,7 +1077,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     items: (result.items && result.items.length) ? result.items : bodyData.items,
                     recibido: metodoActivo === EFECTIVO ? efectivoRecibido : 0
                 }));
-                notify('Comanda ' + (result.ref_comanda || refComanda(result.id_comanda)) + ' guardada.', 'ok');
+                // La venta se cerró: la próxima empieza con clave nueva.
+                claveCobro = null;
+                if (result.repetida) {
+                    notify('Esa venta ya estaba guardada como ' +
+                        (result.ref_comanda || refComanda(result.id_comanda)) +
+                        '. No se cobró ni se descontó dos veces.', 'warn', 8000);
+                } else {
+                    notify('Comanda ' + (result.ref_comanda || refComanda(result.id_comanda)) + ' guardada.', 'ok');
+                }
                 // Otra tablet puede haber vendido mientras tanto: se releen las
                 // existencias para no ofrecer lo que ya no queda.
                 refrescarStock();
@@ -1194,7 +1135,11 @@ document.addEventListener('DOMContentLoaded', () => {
             instancia: data.instancia || instancia.nombre,
             fecha: ddmmaaaa + ' ' + hhmm,
             hora: hhmm,
-            barra: data.nombre_barra || (currentUser ? currentUser.nombre_barra : 'Barra'),
+            // La barra del ticket sale de los datos del evento, que es lo que
+            // el encargado escribió para esta barra; si no hay nada, se cae a
+            // la barra del cajero.
+            barra: configEvento.barra || data.nombre_barra ||
+                   (currentUser ? currentUser.nombre_barra : 'Barra'),
             cajero: data.nombre_cajero || (currentUser ? currentUser.nombre : 'Cajero'),
             mesero: data.nombre_mesero || (currentWaiter ? currentWaiter.nombre : 'Mesero'),
             total: Number(data.total) || 0,
@@ -1386,6 +1331,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     function showAdminView() {
         detenerSondeoStock();
+        cargarQrCobro().then(pintarQrConfig);
+        cargarConfiguracion().then(pintarConfiguracion);
         loginView.classList.add('hide');
         posView.classList.add('hide');
         adminView.classList.remove('hide');
@@ -1474,6 +1421,153 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error("Error loading dashboard data:", err);
         }
     }
+
+    // ==========================================
+    // DATOS DEL EVENTO
+    // ==========================================
+    // Evento, fecha, lugar, barra y responsable. Van en la tabla
+    // `configuracion` de esta base, así que cada barra guarda los suyos, y
+    // encabezan los tickets y el reporte de cierre.
+    let configEvento = { evento: '', fecha: '', lugar: '', barra: '', responsable: '' };
+
+    async function cargarConfiguracion() {
+        try {
+            const res = await fetch('/api/configuracion');
+            if (res.ok) configEvento = await res.json();
+        } catch (err) {
+            console.warn('No se pudo leer la configuración del evento:', err);
+        }
+        return configEvento;
+    }
+
+    function pintarConfiguracion() {
+        ['evento', 'fecha', 'lugar', 'barra', 'responsable'].forEach(campo => {
+            const el = document.getElementById('cfg-' + campo);
+            if (el) el.value = configEvento[campo] || '';
+        });
+    }
+
+    document.getElementById('cfg-guardar-btn').addEventListener('click', async () => {
+        const boton = document.getElementById('cfg-guardar-btn');
+        const cuerpo = {};
+        ['evento', 'fecha', 'lugar', 'barra', 'responsable'].forEach(campo => {
+            cuerpo[campo] = document.getElementById('cfg-' + campo).value;
+        });
+
+        boton.disabled = true;
+        try {
+            const res = await fetch('/api/admin/configuracion-evento', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(cuerpo)
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.message || 'error');
+
+            configEvento = data.configuracion;
+            pintarConfiguracion();
+            // El nombre de la barra ES la identidad: al cambiarlo cambian la
+            // etiqueta de la pantalla, el título de la pestaña y el prefijo de
+            // las comandas, así que se recargan sin reiniciar nada.
+            if (data.instancia) {
+                instancia = data.instancia;
+                document.querySelectorAll('.instancia-badge').forEach(el => {
+                    el.textContent = instancia.nombre;
+                    el.classList.remove('hide');
+                });
+                document.title = 'MasterDrinks · ' + instancia.nombre;
+            }
+            notify('Datos del evento guardados. Las comandas serán ' +
+                   (data.instancia ? data.instancia.prefijo : '') + '-1, ' +
+                   (data.instancia ? data.instancia.prefijo : '') + '-2...', 'ok', 6000);
+        } catch (err) {
+            notify(err.message || 'No se pudieron guardar los datos.', 'error');
+        } finally {
+            boton.disabled = false;
+        }
+    });
+
+    // ==========================================
+    // QR DE COBRO — CONFIGURACIÓN
+    // ==========================================
+    let qrPendiente = null;   // imagen recién elegida, aún sin guardar
+
+    function pintarQrConfig() {
+        const img = document.getElementById('qr-preview');
+        const vacio = document.getElementById('qr-vacio');
+        const fuente = qrPendiente || qrCobro.imagen;
+
+        if (fuente) {
+            img.src = fuente;
+            img.classList.remove('hide');
+            vacio.classList.add('hide');
+        } else {
+            img.classList.add('hide');
+            vacio.classList.remove('hide');
+        }
+        document.getElementById('qr-titular').value = qrCobro.titular || '';
+        document.getElementById('qr-banco').value = qrCobro.banco || '';
+    }
+
+    document.getElementById('qr-archivo').addEventListener('change', e => {
+        const archivo = e.target.files && e.target.files[0];
+        if (!archivo) return;
+
+        // 2 MB: un QR es una imagen pequeña. Si alguien sube una foto de 8 MP
+        // el servidor la rechazaría, así que se avisa aquí y no allí.
+        if (archivo.size > 2 * 1024 * 1024) {
+            notify('La imagen pesa más de 2 MB. Recórtala y vuelve a intentarlo.', 'warn');
+            e.target.value = '';
+            return;
+        }
+
+        const lector = new FileReader();
+        lector.onload = () => { qrPendiente = lector.result; pintarQrConfig(); };
+        lector.onerror = () => notify('No se pudo leer la imagen.', 'error');
+        lector.readAsDataURL(archivo);
+    });
+
+    async function guardarQrCobro(imagen) {
+        const boton = document.getElementById('qr-guardar-btn');
+        boton.disabled = true;
+        try {
+            const res = await fetch('/api/admin/qr-cobro', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    imagen,
+                    titular: document.getElementById('qr-titular').value,
+                    banco: document.getElementById('qr-banco').value
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.message || 'error');
+
+            await cargarQrCobro();
+            qrPendiente = null;
+            pintarQrConfig();
+            notify(imagen ? 'QR de cobro guardado.' : 'QR de cobro quitado.', 'ok');
+        } catch (err) {
+            notify(err.message || 'No se pudo guardar el QR.', 'error');
+        } finally {
+            boton.disabled = false;
+        }
+    }
+
+    document.getElementById('qr-guardar-btn').addEventListener('click', () => {
+        const imagen = qrPendiente || qrCobro.imagen;
+        if (!imagen) {
+            notify('Elige primero la imagen del QR.', 'warn');
+            return;
+        }
+        guardarQrCobro(imagen);
+    });
+
+    document.getElementById('qr-quitar-btn').addEventListener('click', () => {
+        qrPendiente = null;
+        document.getElementById('qr-archivo').value = '';
+        guardarQrCobro('');
+    });
 
     // ==========================================
     // REPORTE DE CIERRE EN PDF

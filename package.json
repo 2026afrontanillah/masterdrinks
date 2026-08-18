@@ -10,7 +10,9 @@
     "test:logica": "node tools/logic-test.js",
     "test:interfaz": "node tools/ui-test.js",
     "test:carga": "node tools/stress-test.js",
-    "test:sync": "node tools/sync-test.js"
+    "test:sync": "node tools/sync-test.js",
+    "capturas": "node tools/capturas.js",
+    "barra": "node tools/barra.js"
   },
   "keywords": [
     "nodejs",

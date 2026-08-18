@@ -108,7 +108,7 @@ function prepararBase() {
 function arrancarServidor() {
   const hijo = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
     cwd: RAIZ,
-    env: Object.assign({}, process.env, { PORT: String(PUERTO), DB_FILE: BASE }),
+    env: Object.assign({}, process.env, { RENOMBRAR_BARRA: '1', PORT: String(PUERTO), DB_FILE: BASE }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
   const registro = [];

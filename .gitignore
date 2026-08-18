@@ -40,3 +40,13 @@ pos_evento.dos.db*
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Capturas de pantalla que genera tools/capturas.js (se rehacen solas).
+tools/capturas/
+public/_shot.html
+pos_evento.shot.db*
+pos_evento.semilla.db*
+pos_evento.cfg.db*
+
+# Informe del diagnostico de instalacion
+diagnostico-npm.txt

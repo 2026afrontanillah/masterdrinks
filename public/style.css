@@ -1,33 +1,59 @@
 /* Design System Variables */
 :root {
-    --bg-dark: #07080e;
-    --card-bg: rgba(18, 22, 35, 0.65);
+    /* ------------------------------------------------------------------
+       Paleta neutra con un solo acento.
+
+       Antes esto era violeta + magenta + rojo en degradado, con resplandores
+       de neón. Llamaba mucho la atención y competía con el contenido: en una
+       pantalla que se mira cientos de veces por noche, el color tiene que
+       señalar dónde tocar, no decorar. Ahora casi todo es gris neutro y el
+       ámbar aparece sólo en tres sitios: el botón de cobrar, el importe total
+       y lo que está seleccionado.
+       ------------------------------------------------------------------ */
+    --bg-dark: #0b0b0d;                    /* casi negro, sin tinte de color */
+    --bg-elev-1: #141417;                  /* tarjeta sobre el fondo */
+    --bg-elev-2: #1b1b1f;                  /* elemento sobre la tarjeta */
+    --card-bg: #141417;
     --card-border: rgba(255, 255, 255, 0.08);
-    --text-primary: #ffffff;
-    --text-secondary: #94a3b8;
-    --accent-color: #ec4899; /* pink */
-    
-    /* Vibrant Color Palettes */
-    --primary: #8b5cf6;      /* purple */
-    --success: #10b981;      /* emerald green */
-    --warning: #f59e0b;      /* amber */
-    --danger: #ef4444;       /* red */
-    --info: #06b6d4;         /* cyan */
-    
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, #a78bfa 0%, #ec4899 50%, #f43f5e 100%);
-    --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
-    --gradient-btn-hover: linear-gradient(135deg, #b8a2fc 0%, #f472b6 100%);
-    
-    /* Box Shadows */
-    --shadow-card: 0 20px 50px rgba(0, 0, 0, 0.5);
-    --shadow-glow: 0 0 20px rgba(167, 139, 250, 0.2);
-    --shadow-neon-pink: 0 0 20px rgba(236, 72, 153, 0.3);
+    --text-primary: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+
+    /* Un único acento: ámbar cálido. Pega con una barra y, sobre gris neutro,
+       destaca sin gritar. El texto encima va casi negro, no blanco. */
+    --accent-color: #e0a33e;
+    --accent-hover: #eeb14a;
+    --accent-ink: #1a1206;
+    --accent-suave: rgba(224, 163, 62, 0.12);
+    --accent-borde: rgba(224, 163, 62, 0.35);
+
+    --primary: #e0a33e;
+    --success: #34d399;
+    --warning: #e0a33e;
+    --danger: #f26d6d;
+    --info: #7dd3fc;
+
+    /* Se conservan los nombres para no tocar cada regla, pero ya no son
+       degradados: son colores planos. Un degradado en un botón que se pulsa
+       mil veces por noche sólo añade ruido. */
+    --gradient-primary: var(--accent-color);
+    --gradient-glass: rgba(255, 255, 255, 0.02);
+    --gradient-btn-hover: var(--accent-hover);
+
+    /* Sombras discretas: profundidad, no brillo. */
+    --shadow-card: 0 16px 40px rgba(0, 0, 0, 0.55);
+    --shadow-glow: none;
+    --shadow-neon-pink: 0 6px 18px rgba(0, 0, 0, 0.45);
+    --shadow-accion: 0 4px 14px rgba(0, 0, 0, 0.4);
     
     /* Fonts */
     --font-heading: 'Outfit', sans-serif;
     --font-body: 'Plus Jakarta Sans', sans-serif;
-    --font-mono: 'Share Tech Mono', monospace;
+    /* Monoespaciada neutra del sistema. Antes era 'Share Tech Mono', de estética
+       sci-fi: alineaba cifras, sí, pero le daba a toda la caja un aire de panel
+       de nave espacial. Se reserva para la vista previa del ticket, que sí tiene
+       que salir en ancho fijo porque imita al papel. */
+    --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
 
     /* Curvas de movimiento.
        Las de serie (ease, ease-out) son demasiado blandas y el movimiento se
@@ -57,6 +83,8 @@ body {
     position: relative;
 }
 
+/* La foto de fondo se queda casi invisible: aporta grano, no color. Con un
+   fondo neutro el contenido no compite con nada. */
 body::before {
     content: '';
     position: fixed;
@@ -69,11 +97,12 @@ body::before {
     background-position: center;
     background-repeat: no-repeat;
     z-index: -2;
-    opacity: 0.35; /* increased opacity to make the wallpaper stand out */
-    filter: blur(3px); /* reduced blur to keep the wallpaper details recognizable */
-    transition: opacity 0.5s ease, background-image 0.5s ease;
+    opacity: 0.05;
+    filter: blur(8px) grayscale(1);
 }
 
+/* Un solo velo, sin halos de colores: antes había tres radiales violeta,
+   magenta y cian que teñían toda la pantalla. */
 body::after {
     content: '';
     position: fixed;
@@ -81,7 +110,8 @@ body::after {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: radial-gradient(circle at center, rgba(7, 8, 14, 0.4) 0%, rgba(7, 8, 14, 0.95) 100%);
+    background: linear-gradient(180deg, #0b0b0d 0%, #09090b 100%);
+    opacity: 0.92;
     z-index: -1;
 }
 
@@ -89,48 +119,16 @@ body::after {
     display: none !important;
 }
 
-/* Ambient Background Glow */
-.blob {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(140px);
-    z-index: 0;
-    pointer-events: none;
-    opacity: 0.45;
-    mix-blend-mode: screen;
-}
-
-.blob-1 {
-    top: -10%;
-    left: -10%;
-    width: 45vw;
-    height: 45vw;
-    background: radial-gradient(circle, rgba(167, 139, 250, 0.4) 0%, rgba(0,0,0,0) 70%);
-}
-
-.blob-2 {
-    bottom: -10%;
-    right: -10%;
-    width: 50vw;
-    height: 50vw;
-    background: radial-gradient(circle, rgba(236, 72, 153, 0.35) 0%, rgba(0,0,0,0) 70%);
-}
-
-.blob-3 {
-    top: 30%;
-    left: 35%;
-    width: 30vw;
-    height: 30vw;
-    background: radial-gradient(circle, rgba(6, 182, 212, 0.25) 0%, rgba(0,0,0,0) 70%);
-}
+/* Los halos de color ambiente se retiraron: eran tres manchas violeta, rosa
+   y cian desenfocadas que daban el aire "neón" que sobraba. Se dejan ocultos
+   en lugar de quitar el marcado, para no romper nada que los busque. */
+.blob { display: none; }
 
 /* Glassmorphism Cards */
 .glass-card {
     background: var(--card-bg);
     border: 1px solid var(--card-border);
-    backdrop-filter: blur(25px);
-    -webkit-backdrop-filter: blur(25px);
-    border-radius: 20px;
+    border-radius: 14px;
     box-shadow: var(--shadow-card);
     transition: border-color 0.3s ease;
 }
@@ -143,23 +141,23 @@ body::after {
 .gradient-text {
     font-family: var(--font-heading);
     font-weight: 800;
-    background: var(--gradient-primary);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
 }
 
 /* Buttons */
 .primary-btn {
-    background: var(--gradient-primary);
-    color: var(--text-primary);
+    /* Color plano y texto casi negro: el contraste lo da el color, no un
+       degradado ni una sombra bajo las letras. */
+    background: var(--accent-color);
+    color: var(--accent-ink);
     font-family: var(--font-body);
-    font-weight: 700;
+    font-weight: 600;
+    letter-spacing: 0.01em;
     border: none;
     padding: 12px 24px;
-    border-radius: 12px;
+    border-radius: 10px;
     cursor: pointer;
-    box-shadow: 0 4px 15px rgba(236, 72, 153, 0.2);
     transition: transform 160ms var(--ease-out),
                 box-shadow 250ms ease,
                 background 250ms ease;
@@ -168,9 +166,7 @@ body::after {
 
 @media (hover: hover) and (pointer: fine) {
     .primary-btn:hover:not(:disabled) {
-        transform: translateY(-2px);
-        box-shadow: var(--shadow-neon-pink);
-        background: var(--gradient-btn-hover);
+        background: var(--accent-hover);
     }
 }
 
@@ -182,9 +178,8 @@ body::after {
 }
 
 .primary-btn:disabled {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-secondary);
-    box-shadow: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
     cursor: not-allowed;
 }
 
@@ -319,7 +314,7 @@ body::after {
     outline: none;
     border-color: var(--primary);
     background: rgba(255, 255, 255, 0.08);
-    box-shadow: 0 0 10px rgba(139, 92, 246, 0.25);
+    box-shadow: none;
 }
 
 select option {
@@ -482,7 +477,7 @@ select option {
     background: var(--gradient-primary);
     border-color: transparent;
     transform: scale(1.25);
-    box-shadow: 0 0 8px rgba(236, 72, 153, 0.6);
+    box-shadow: none;
 }
 
 .pin-dots-container.shake {
@@ -537,7 +532,7 @@ select option {
     background: var(--gradient-primary);
     border-color: transparent;
     transform: scale(0.95);
-    box-shadow: 0 0 12px rgba(236, 72, 153, 0.4);
+    box-shadow: none;
 }
 
 .pin-btn.system {
@@ -720,9 +715,8 @@ select option {
 
 .category-btn.active {
     background: var(--gradient-glass);
-    border-color: rgba(236, 72, 153, 0.4);
+    border-color: var(--accent-borde);
     color: var(--text-primary);
-    box-shadow: 0 4px 15px rgba(236, 72, 153, 0.1);
 }
 
 /* POS Main Grid */
@@ -763,13 +757,15 @@ select option {
 }
 
 .product-card {
-    background: rgba(18, 22, 35, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 16px;
-    padding: 16px;
+    /* Superficie plana con un borde de 1 px. La separación del fondo la da el
+       borde, no una sombra ni un degradado. */
+    background: var(--bg-elev-1);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 14px;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    gap: 10px;
     /* Propiedades concretas, no 'all': con 'all' el navegador anima también el
        borde y la sombra al cambiar de stock, y se ve un parpadeo raro. */
     transition: transform 160ms var(--ease-out),
@@ -789,9 +785,8 @@ select option {
 @media (hover: hover) and (pointer: fine) {
     .product-card:hover:not(.out-of-stock) {
         transform: translateY(-4px);
-        border-color: rgba(255, 255, 255, 0.15);
-        background: rgba(18, 22, 35, 0.8);
-        box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+        border-color: rgba(255, 255, 255, 0.18);
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
     }
 }
 
@@ -811,15 +806,14 @@ select option {
     height: 26px;
     padding: 0 7px;
     border-radius: 13px;
-    background: var(--gradient-primary);
-    color: #fff;
+    background: var(--accent-color);
+    color: var(--accent-ink);
     font-family: var(--font-heading);
     font-size: 0.8rem;
     font-weight: 800;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 2px 10px rgba(236, 72, 153, 0.4);
     transition: transform 180ms var(--ease-out);
 }
 
@@ -848,7 +842,7 @@ select option {
    final, así que al llegar los datos nada salta de sitio. */
 .skeleton-card {
     height: 148px;
-    border-radius: 16px;
+    border-radius: 12px;
     background: linear-gradient(
         100deg,
         rgba(255, 255, 255, 0.04) 30%,
@@ -863,35 +857,72 @@ select option {
     to { background-position: -220% 0; }
 }
 
+/* El emoji dentro de una pastilla redonda: le da peso y hace que la tarjeta
+   tenga un punto de entrada visual claro en vez de empezar con texto suelto. */
 .product-card .emoji {
-    font-size: 2rem;
-    margin-bottom: 12px;
-    display: block;
+    font-size: 1.5rem;
+    line-height: 1;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
 }
 
+/* Dos líneas fijas para el nombre. Antes unos productos ocupaban una línea y
+   otros dos, así que los precios quedaban a distinta altura en cada tarjeta y
+   la rejilla se veía descuadrada. */
 .product-card h3 {
-    font-size: 0.95rem;
-    font-weight: 700;
-    margin-bottom: 8px;
-    line-height: 1.4;
+    font-size: 0.92rem;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text-primary);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: calc(0.92rem * 1.35 * 2);
 }
 
+/* El precio es el dato que se busca: grande, en la fuente de titulares y en el
+   rosa de marca. Antes era blanco y del mismo peso que el nombre. */
 .product-card .price {
     font-family: var(--font-heading);
-    font-size: 1.15rem;
-    font-weight: 700;
+    font-size: 1.45rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
     color: var(--text-primary);
-    margin-bottom: 4px;
+    line-height: 1;
 }
 
+/* El stock, en pastilla: se distingue del precio de un vistazo y los colores
+   (ámbar/rojo) se leen como aviso, no como texto gris más. */
 .product-card .stock {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
+    align-self: flex-start;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 3px 9px;
+    border-radius: 8px;
 }
 
 .product-card .stock.low {
-    color: #f59e0b;
-    font-weight: 600;
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.13);
+    border-color: rgba(245, 158, 11, 0.32);
+}
+
+/* Fila inferior: precio a la izquierda, stock a la derecha. */
+.product-card .card-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: auto;
 }
 
 .product-card.out-of-stock {
@@ -948,14 +979,14 @@ select option {
 .clear-btn {
     background: none;
     border: none;
-    color: #ef4444;
+    color: var(--text-muted);
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
 }
 
 .clear-btn:hover {
-    text-decoration: underline;
+    color: var(--danger);
 }
 
 .cart-items-container {
@@ -976,14 +1007,17 @@ select option {
 }
 
 /* Cart Item Row */
+/* Antes era nombre y controles en la misma fila: con nombres largos el texto
+   se partía en tres líneas y quedaba una columna estrujada. Ahora el nombre
+   ocupa el ancho completo y los controles van debajo, alineados. */
 .cart-item {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    padding: 12px;
+    background: var(--bg-elev-2);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 14px;
+    padding: 12px 12px 10px;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 8px;
 }
 
 /* Sólo las líneas recién añadidas entran animadas: si se animaran todas en
@@ -999,24 +1033,33 @@ select option {
 
 .cart-item-info {
     flex: 1;
+    min-width: 0;
 }
 
 .cart-item-info h4 {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     font-weight: 600;
-    margin-bottom: 4px;
+    line-height: 1.3;
+    color: var(--text-primary);
 }
 
 .cart-item-info .price {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
 }
 
 .cart-item-controls {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-left: 12px;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+/* El botón de borrar se separa del +/- para no confundirlos con prisa. */
+.cart-item-controls .remove-item-btn {
+    margin-left: auto;
 }
 
 /* Antes medían 24 px. Con el dedo, y con prisa, eso es fallar el toque o
@@ -1058,13 +1101,18 @@ select option {
     text-align: center;
 }
 
+.cart-item-controls .remove-item-btn svg {
+    width: 19px;
+    height: 19px;
+}
+
 .cart-item-controls .remove-item-btn {
     width: var(--touch);
     height: var(--touch);
     flex-shrink: 0;
     border: none;
     background: none;
-    color: var(--text-secondary);
+    color: var(--text-muted);
     cursor: pointer;
     font-size: 1.05rem;
     display: flex;
@@ -1169,13 +1217,26 @@ select option {
 .total-row {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    font-size: 1.1rem;
+    align-items: baseline;
+    font-size: 0.85rem;
+    color: var(--text-muted);
 }
 
+/* Las mayúsculas van sólo en la etiqueta: aplicadas a toda la fila convertían
+   el importe en "88.00 BS." */
+.total-row > span {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+
+/* El total es la cifra más importante de la pantalla. Lo que la destaca es el
+   tamaño y el aire alrededor, no el color: va en blanco, como el resto. */
 .total-row strong {
     font-family: var(--font-heading);
-    font-size: 1.5rem;
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
     color: var(--text-primary);
 }
 
@@ -1186,35 +1247,37 @@ select option {
    de "ir sumando pagos" que había antes en el carrito ya no existe. */
 .pay-sheet {
     position: relative;
-    width: min(460px, calc(100vw - 32px));
+    width: min(470px, calc(100vw - 32px));
     max-height: calc(100dvh - 32px);
     overflow-y: auto;
-    padding: 28px 24px 24px;
-    border-radius: 24px;
-    background: rgba(18, 22, 35, 0.96);
-    border: 1px solid var(--card-border);
-    box-shadow: var(--shadow-card);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    padding: 30px 26px 26px;
+    border-radius: 12px;
+    /* Un tono por encima del fondo y un borde claro: suficiente para que el
+       modal se despegue sin recurrir a brillos. */
+    background: #17171b;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
 }
 
 .pay-caption {
     text-align: center;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
 }
 
 .pay-total {
     text-align: center;
     font-family: var(--font-heading);
-    font-size: 2.6rem;
-    font-weight: 800;
+    font-size: 3rem;
+    margin-top: 4px;
+    font-weight: 700;
     line-height: 1.1;
-    margin-bottom: 22px;
-    background: var(--gradient-primary);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.035em;
+    margin-bottom: 24px;
+    color: var(--text-primary);
 }
 
 /* Pestañas de forma de pago. En 5 columnas caben las cuatro formas simples
@@ -1224,7 +1287,7 @@ select option {
     grid-template-columns: repeat(5, 1fr);
     gap: 6px;
     padding: 5px;
-    border-radius: 16px;
+    border-radius: 12px;
     background: rgba(0, 0, 0, 0.28);
     margin-bottom: 20px;
 }
@@ -1248,7 +1311,7 @@ select option {
 }
 
 .pay-tab span {
-    font-size: 0.68rem;
+    font-size: 0.74rem;
     font-weight: 600;
     letter-spacing: 0.2px;
 }
@@ -1256,10 +1319,9 @@ select option {
 .pay-tab:active { transform: scale(0.95); }
 
 .pay-tab.active {
-    background: var(--gradient-glass);
-    border-color: rgba(236, 72, 153, 0.45);
+    background: var(--accent-suave);
+    border-color: var(--accent-borde);
     color: var(--text-primary);
-    box-shadow: 0 4px 16px rgba(236, 72, 153, 0.14);
 }
 
 .pay-panel {
@@ -1294,13 +1356,13 @@ select option {
 
 .pay-input:focus {
     outline: none;
-    border-color: rgba(236, 72, 153, 0.45);
+    border-color: var(--accent-borde);
 }
 
 .pay-input.readonly {
-    background: rgba(139, 92, 246, 0.12);
-    border-color: rgba(139, 92, 246, 0.3);
-    color: #c4b5fd;
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.09);
+    color: var(--text-primary);
     font-weight: 700;
     text-align: center;
 }
@@ -1338,9 +1400,10 @@ select option {
 }
 
 .pay-change strong {
-    font-family: var(--font-mono);
+    font-family: var(--font-heading);
     font-size: 1.5rem;
-    color: var(--warning);
+    font-weight: 700;
+    color: var(--accent-color);
 }
 
 .pay-error {
@@ -1479,7 +1542,7 @@ select option {
 .kpi-card {
     background: rgba(18, 22, 35, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 18px;
+    border-radius: 12px;
     padding: 24px;
 }
 
@@ -1570,7 +1633,7 @@ select option {
 .table-container {
     background: rgba(18, 22, 35, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 16px;
+    border-radius: 12px;
     overflow-x: auto;
 }
 
@@ -1811,7 +1874,7 @@ select option {
     max-width: 720px;
     background: var(--card-bg);
     border: 1px solid var(--card-border);
-    border-radius: 16px;
+    border-radius: 12px;
     padding: 20px;
     backdrop-filter: blur(10px);
 }
@@ -1897,7 +1960,7 @@ select option {
     border: 1px solid rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(15px);
     -webkit-backdrop-filter: blur(15px);
-    border-radius: 16px;
+    border-radius: 12px;
     padding: 20px;
     display: flex;
     flex-direction: column;
@@ -2110,10 +2173,12 @@ select option {
     transform: scale(0.94);
 }
 
+/* "Justo" es el atajo más usado, así que lleva el acento; el resto de billetes
+   quedan neutros para que se distinga de un vistazo. */
 .quick-cash-btn.exact {
-    background: rgba(16, 185, 129, 0.14);
-    border-color: rgba(16, 185, 129, 0.35);
-    color: #6ee7b7;
+    background: var(--accent-suave);
+    border-color: var(--accent-borde);
+    color: var(--accent-color);
     font-size: 0.85rem;
 }
 
@@ -2134,8 +2199,8 @@ select option {
 .primary-btn.is-busy {
     background: repeating-linear-gradient(
         45deg,
-        rgba(139, 92, 246, 0.55) 0 12px,
-        rgba(139, 92, 246, 0.3) 12px 24px
+        rgba(255, 255, 255, 0.22) 0 12px,
+        rgba(255, 255, 255, 0.10) 12px 24px
     );
     background-size: 200% 100%;
     animation: busy-stripes 0.8s linear infinite;
@@ -2156,13 +2221,12 @@ select option {
     margin-left: 8px;
     padding: 3px 10px;
     border-radius: 10px;
-    background: rgba(245, 158, 11, 0.16);
-    border: 1px solid rgba(245, 158, 11, 0.4);
-    color: var(--warning);
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.4px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--card-border);
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     vertical-align: middle;
 }
@@ -2171,6 +2235,94 @@ select option {
     margin-left: 0;
     margin-top: 10px;
     font-size: 0.8rem;
+}
+
+/* ==========================================================================
+   QR DE COBRO
+   ========================================================================== */
+/* En la caja, el QR se enseña grande y sobre blanco: un QR sobre fondo oscuro
+   o pequeño da problemas de lectura con cámaras malas y poca luz, que es
+   exactamente la situación de una barra de noche. */
+.qr-cobro {
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.qr-cobro img {
+    display: block;
+    width: 230px;
+    height: 230px;
+    object-fit: contain;
+    margin: 0 auto 12px;
+    background: #fff;
+    padding: 12px;
+    border-radius: 12px;
+}
+
+.qr-cobro-titular {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.qr-cobro-monto {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+.qr-cobro-monto strong {
+    color: var(--accent-color);
+    font-size: 1.05rem;
+}
+
+.qr-vacio {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    padding: 24px 12px;
+}
+
+/* Configuración en el panel */
+.qr-config {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: flex-start;
+}
+
+.qr-config-preview {
+    flex: 0 0 200px;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed var(--card-border);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.qr-config-preview img {
+    max-width: 100%;
+    max-height: 200px;
+    background: #fff;
+    padding: 8px;
+    border-radius: 8px;
+}
+
+.qr-config-campos {
+    flex: 1;
+    min-width: 260px;
+}
+
+.qr-config-campos input[type="file"] {
+    width: 100%;
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--card-border);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
 }
 
 /* ==========================================================================
@@ -2232,8 +2384,8 @@ select option {
 }
 
 .rep-row strong {
-    font-family: var(--font-mono);
     color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
 }
 
 .rep-row.destacada strong {
@@ -2337,4 +2489,13 @@ select option {
     .kpi-grid {
         grid-template-columns: 1fr;
     }
+}
+
+/* Rejilla del formulario de datos del evento: en pantalla ancha caben tres por
+   fila; en tablet estrecha se apilan solas. */
+.config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0 16px;
+    margin-bottom: 8px;
 }

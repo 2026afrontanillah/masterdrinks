@@ -74,7 +74,7 @@ const leer = sql => {
   prepararBase();
   const hijo = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
     cwd: RAIZ,
-    env: Object.assign({}, process.env, { PORT: String(PUERTO), DB_FILE: BASE }),
+    env: Object.assign({}, process.env, { RENOMBRAR_BARRA: '1', PORT: String(PUERTO), DB_FILE: BASE }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
   const registro = [];
@@ -183,6 +183,65 @@ const leer = sql => {
     r.status === 200 && Math.abs(r.json.total - prod.precio_venta * 2) < 0.01,
     'cobrado ' + (r.json && r.json.total) + ' con precio real ' + prod.precio_venta);
   const idManipulada = r.json && r.json.id_comanda;
+
+  // =======================================================================
+  console.log(C.tit('\n  Venta duplicada por reintento'));
+  // =======================================================================
+  // Si la respuesta se pierde por el WiFi, el cajero vuelve a pulsar. Sin
+  // protección eso guardaba la venta dos veces: se cobraba una y el stock
+  // bajaba dos. La tablet manda una clave por intento de cobro y el servidor
+  // devuelve la comanda ya guardada en vez de crear otra.
+  const stockPrevioIdem = stockDe(prod.id_producto);
+  const ventaRepetida = Object.assign({}, base, {
+    observaciones: 'reintento',
+    clave_idempotencia: 'prueba-idem-' + Date.now(),
+    total: prod.precio_venta,
+    items: [item(prod.id_producto, 1)],
+    metodos_pago: [{ id_metodo_pago: 1, monto: prod.precio_venta }]
+  });
+
+  const env1 = await post('/api/comanda', ventaRepetida);
+  const env2 = await post('/api/comanda', ventaRepetida);
+  const env3 = await post('/api/comanda', ventaRepetida);
+
+  check('Tres envíos de la misma venta dan una sola comanda',
+    env1.json.id_comanda === env2.json.id_comanda && env2.json.id_comanda === env3.json.id_comanda,
+    'comanda ' + env1.json.id_comanda);
+  check('El stock bajó una sola vez',
+    stockDe(prod.id_producto) === stockPrevioIdem - 1,
+    stockPrevioIdem + ' → ' + stockDe(prod.id_producto));
+  check('No se guardó ninguna comanda de más',
+    leer("SELECT id_comanda FROM comanda WHERE observaciones = 'reintento'").length === 1);
+  check('Ni ningún pago de más',
+    leer(`SELECT p.id_pago FROM pago_comanda p JOIN comanda c ON c.id_comanda = p.id_comanda
+          WHERE c.observaciones = 'reintento'`).length === 1);
+  check('El reintento se distingue de una venta nueva',
+    env1.json.repetida === false && env2.json.repetida === true);
+  check('El reintento devuelve las líneas, para poder reimprimir el ticket',
+    Array.isArray(env2.json.items) && env2.json.items.length === 1);
+
+  // Varios reintentos a la vez: la cola de transacciones tiene que impedir
+  // que dos se cuelen entre la comprobación y la inserción.
+  const stockAntesSimultaneo = stockDe(prod.id_producto);
+  const ventaSimultanea = Object.assign({}, ventaRepetida, {
+    observaciones: 'simultanea', clave_idempotencia: 'prueba-simul-' + Date.now()
+  });
+  const enParalelo = await Promise.all(
+    Array.from({ length: 5 }, () => post('/api/comanda', ventaSimultanea))
+  );
+  check('Cinco reintentos simultáneos crean una sola comanda',
+    new Set(enParalelo.map(r => r.json.id_comanda)).size === 1);
+  check('Y descuentan una sola unidad',
+    stockDe(prod.id_producto) === stockAntesSimultaneo - 1);
+
+  // Y que no estorbe a las ventas de verdad.
+  const stockAntesDistinta = stockDe(prod.id_producto);
+  const otra = await post('/api/comanda', Object.assign({}, ventaRepetida, {
+    observaciones: 'distinta', clave_idempotencia: 'prueba-otra-' + Date.now()
+  }));
+  check('Una venta con clave distinta sí se guarda y descuenta',
+    otra.json.id_comanda !== env1.json.id_comanda &&
+    stockDe(prod.id_producto) === stockAntesDistinta - 1);
 
   // =======================================================================
   console.log(C.tit('\n  Anulación'));
@@ -357,6 +416,137 @@ const leer = sql => {
     venta.json.ref_comanda);
 
   // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Datos del evento (tabla configuracion)'));
+  // =======================================================================
+  // Encabezan los tickets y el cierre, así que no pueden quedar vacíos ni
+  // duplicarse: es una sola fila que el encargado edita desde el panel.
+  const columnasCfg = leer('PRAGMA table_info(configuracion)').map(c => c.name);
+  check('La tabla configuracion tiene sus cinco campos',
+    ['evento', 'fecha', 'lugar', 'barra', 'responsable'].every(c => columnasCfg.includes(c)),
+    columnasCfg.join(', '));
+
+  const cfgInicial = await get('/api/configuracion');
+  check('Nace con una fila rellena, nunca vacía',
+    !!cfgInicial.evento && !!cfgInicial.barra, cfgInicial.evento + ' · ' + cfgInicial.barra);
+
+  const guardarCfg = cuerpo => fetch(URL + '/api/admin/configuracion-evento', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo)
+  });
+
+  let rc = await guardarCfg({ evento: '', barra: 'X' });
+  check('Rechaza guardar sin nombre de evento', rc.status === 400);
+  rc = await guardarCfg({ evento: 'X', barra: '' });
+  check('Rechaza guardar sin nombre de barra', rc.status === 400);
+  rc = await guardarCfg({ evento: 'X', barra: 'Y', fecha: '12 de agosto' });
+  check('Rechaza una fecha con formato inválido', rc.status === 400);
+
+  rc = await guardarCfg({
+    evento: 'Prueba de configuración', fecha: '2026-09-12', lugar: 'Estadio',
+    barra: 'Barra de prueba', responsable: 'Responsable Ñ'
+  });
+  check('Guarda los cinco campos', rc.status === 200);
+  const cfgGuardada = await get('/api/configuracion');
+  check('Y los devuelve tal cual',
+    cfgGuardada.evento === 'Prueba de configuración' && cfgGuardada.responsable === 'Responsable Ñ');
+  check('Sigue habiendo una sola fila',
+    leer('SELECT id_configuracion FROM configuracion').length === 1);
+
+  const repCfg = await get('/api/admin/reporte');
+  check('El reporte usa estos datos y no los de ejemplo',
+    repCfg.evento.nombre_evento === 'Prueba de configuración' &&
+    repCfg.evento.responsable === 'Responsable Ñ');
+
+  // El nombre de la barra ES la identidad en el montaje de un solo servidor:
+  // al cambiarlo desde el panel tienen que cambiar con él el prefijo de las
+  // comandas y lo que se ve en la caja, sin reiniciar nada.
+  const identidadTrasGuardar = await get('/api/instancia');
+  check('Cambiar la barra en el panel cambia la identidad al vuelo',
+    identidadTrasGuardar.nombre === 'Barra de prueba',
+    identidadTrasGuardar.nombre + ' -> ' + identidadTrasGuardar.prefijo);
+  check('El prefijo sale de la inicial, ignorando el "Barra " de delante',
+    identidadTrasGuardar.prefijo === 'D', 'Barra de prueba -> ' + identidadTrasGuardar.prefijo);
+
+  const ventaConPrefijo = await post('/api/comanda', Object.assign({}, base, {
+    observaciones: 'prefijo nuevo',
+    clave_idempotencia: 'prefijo-' + Date.now(),
+    total: prod.precio_venta,
+    items: [item(prod.id_producto, 1)],
+    metodos_pago: [{ id_metodo_pago: 1, monto: prod.precio_venta }]
+  }));
+  check('Las comandas nuevas salen con el prefijo nuevo',
+    String(ventaConPrefijo.json.ref_comanda).startsWith(identidadTrasGuardar.prefijo + '-'),
+    ventaConPrefijo.json.ref_comanda);
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Cada barra, sólo lo suyo'));
+  // =======================================================================
+  // Una base sembrada para una barra concreta no debe traer los cajeros ni los
+  // meseros de las otras: si en la tablet de Norte se pudiera entrar como
+  // cajero_sur_1, esa venta aparecería bajo "Barra Sur" dentro del cierre de
+  // Norte, que es un informe con una barra que allí no existe.
+  const barrasEnBase = leer('SELECT nombre_barra FROM barra').map(b => b.nombre_barra);
+  const cajerosEnBase = leer('SELECT usuario FROM cajero').map(c => c.usuario);
+
+  if (barrasEnBase.length === 1) {
+    const propia = barrasEnBase[0].toLowerCase();
+    check('La base trae una sola barra', true, barrasEnBase[0]);
+    check('Todos sus cajeros son de esa barra',
+      cajerosEnBase.every(u => propia.includes(u.split('_')[1])),
+      cajerosEnBase.join(', '));
+    check('Ningún mesero cuelga de un cajero que no está',
+      leer(`SELECT m.id_mesero FROM mesero m
+            LEFT JOIN cajero c ON c.id_cajero = m.id_cajero
+            WHERE c.id_cajero IS NULL`).length === 0);
+  } else {
+    // Montaje de una sola instancia que lo lleva todo: debe seguir funcionando.
+    check('El montaje de una sola instancia conserva todas las barras',
+      barrasEnBase.length > 1, barrasEnBase.join(', '));
+    check('Y todos sus cajeros', cajerosEnBase.length === 9, cajerosEnBase.length + ' cajeros');
+  }
+  check('El administrador existe siempre, sea cual sea la barra',
+    leer("SELECT id_admin FROM administrador_evento WHERE usuario = 'admin_evento'").length === 1);
+
+  // Y ahora una base recién creada para una barra concreta: es el caso real de
+  // cada tablet del evento, que arranca con su .db vacío.
+  {
+    const BASE_NUEVA = path.join(RAIZ, 'pos_evento.semilla.db');
+    ['', '-wal', '-shm'].forEach(x => { if (fs.existsSync(BASE_NUEVA + x)) fs.unlinkSync(BASE_NUEVA + x); });
+
+    const puertoSemilla = PUERTO + 7;
+    const cria = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
+      cwd: RAIZ,
+      env: Object.assign({}, process.env, {
+        INSTANCIA: 'Norte', PREFIJO: 'N',
+        PORT: String(puertoSemilla), DB_FILE: BASE_NUEVA
+      }),
+      stdio: 'ignore'
+    });
+    for (let i = 0; i < 40; i++) {
+      try { if ((await fetch('http://127.0.0.1:' + puertoSemilla + '/api/productos')).ok) break; }
+      catch (e) { /* aún no */ }
+      await esperar(250);
+    }
+
+    const nueva = new DatabaseSync(BASE_NUEVA);
+    const barras = nueva.prepare('SELECT nombre_barra FROM barra').all().map(b => b.nombre_barra);
+    const cajeros = nueva.prepare('SELECT usuario FROM cajero').all().map(c => c.usuario);
+    const meseros = nueva.prepare('SELECT COUNT(*) n FROM mesero').get().n;
+    const admins = nueva.prepare('SELECT COUNT(*) n FROM administrador_evento').get().n;
+    nueva.close();
+    cria.kill('SIGKILL');
+    await esperar(400);
+    ['', '-wal', '-shm'].forEach(x => { try { fs.unlinkSync(BASE_NUEVA + x); } catch (e) {} });
+
+    check('Una base nueva de Norte trae SÓLO la Barra Norte',
+      barras.length === 1 && barras[0] === 'Barra Norte', barras.join(', '));
+    check('Trae sólo los cajeros de Norte',
+      cajeros.length === 3 && cajeros.every(u => u.includes('norte')), cajeros.join(', '));
+    check('Trae sólo los meseros de esos cajeros', meseros === 15, meseros + ' meseros');
+    check('Y el administrador, que hace falta en todas', admins > 0);
+  }
+
+
+  // =======================================================================
   console.log(C.tit('\n  Reporte de cierre'));
   // =======================================================================
   const rep = await get('/api/admin/reporte');
@@ -402,14 +592,21 @@ const leer = sql => {
   const texto = pdf.toString('latin1');
   check('El PDF se sirve como application/pdf',
     resPdf.headers.get('content-type') === 'application/pdf');
-  // El nombre lleva la barra: si llegan tres cierres al mismo chat de WhatsApp
-  // y se llaman igual, el segundo pisa al primero.
+  // El nombre lleva la barra: si llegan varios cierres al mismo chat de
+  // WhatsApp y se llaman igual, el segundo pisa al primero.
+  //
+  // Se relee la identidad aquí y no se usa la del principio: el nombre de la
+  // barra pudo cambiarse desde el panel en las comprobaciones anteriores, y el
+  // archivo lleva siempre el actual.
+  const identAhora = await get('/api/instancia');
+  const barraEnNombre = identAhora.nombre.normalize('NFD')
+    .replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '');
   check('Se descarga como archivo con la barra en el nombre',
-    new RegExp('attachment; filename="Cierre_' + ident.nombre + '_.*\\.pdf"')
+    new RegExp('attachment; filename="Cierre_' + barraEnNombre + '_.*\.pdf"')
       .test(resPdf.headers.get('content-disposition') || ''),
     resPdf.headers.get('content-disposition'));
   check('El PDF dice a qué barra corresponde',
-    texto.includes('Cierre de caja') && texto.includes(ident.nombre));
+    texto.includes('Cierre de caja') && texto.includes(identAhora.nombre));
   check('Es un PDF bien formado', texto.startsWith('%PDF-') && texto.trimEnd().endsWith('%%EOF'),
     (pdf.length / 1024).toFixed(1) + ' KB');
 

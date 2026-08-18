@@ -2458,7 +2458,7 @@ function cerrarOrdenado(senal) {
 // Server Initialization
 // 0.0.0.0 explícito: la tablet que hace de servidor tiene que aceptar las
 // conexiones de las demás por WiFi, no solo las de sí misma.
-const servidor = app.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   // La barra puede venir del panel, así que se lee de la base antes de
   // rotularla: si no, el cartel diría el valor de partida y no el real.
   await refrescarIdentidad();
@@ -2487,28 +2487,4 @@ const servidor = app.listen(PORT, '0.0.0.0', async () => {
   }
   console.log(`\n   Ctrl+C para detener.`);
   console.log(`==================================================\n`);
-});
-
-// Si el puerto está tomado, Node lanza un volcado de pila que no dice nada a
-// quien está montando la barra con el evento a punto de empezar. Casi siempre
-// es el propio servidor, que ya quedó abierto en otra ventana.
-servidor.on('error', err => {
-  if (err.code !== 'EADDRINUSE') throw err;
-  console.error(`
-==================================================`);
-  console.error(`   ⛔ EL PUERTO ${PORT} YA ESTÁ OCUPADO`);
-  console.error(`==================================================`);
-  console.error(`   MasterDrinks ya está encendido en otra ventana,`);
-  console.error(`   o quedó abierto de una vez anterior.`);
-  console.error(`
-   Qué hacer:`);
-  console.error(`   1. Mira si ya funciona:  http://localhost:${PORT}`);
-  console.error(`      Si abre, no hace falta nada más: ya estaba encendido.`);
-  console.error(`   2. Si quieres cerrarlo y volver a empezar, en Windows:`);
-  console.error(`         npx kill-port ${PORT}`);
-  console.error(`      o cierra la otra ventana negra con Ctrl+C.`);
-  console.error(`   3. Si prefieres otro puerto, cambia PORT en el .env`);
-  console.error(`==================================================
-`);
-  process.exit(1);
 });

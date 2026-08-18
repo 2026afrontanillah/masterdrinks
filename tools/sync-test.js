@@ -81,7 +81,7 @@ const stockEnPantalla = (t, idProd) => {
   db.close();
 
   const srv = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
-    cwd: RAIZ, env: Object.assign({}, process.env, { PORT: String(PUERTO), DB_FILE: BASE }),
+    cwd: RAIZ, env: Object.assign({}, process.env, { RENOMBRAR_BARRA: '1', PORT: String(PUERTO), DB_FILE: BASE }),
     stdio: 'ignore'
   });
   for (let i = 0; i < 40; i++) {
