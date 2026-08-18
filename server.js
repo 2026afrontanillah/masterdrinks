@@ -11,8 +11,9 @@ const { construirPdfCierre, nombreArchivoReporte } = require('./lib/reporte-cier
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 3 MB: por aquí entra la imagen del QR de cobro en base64. El límite por
-// defecto de Express (100 KB) la rechazaba con un 413 sin explicación.
+// Holgado a propósito: el límite por defecto de Express son 100 KB y una
+// comanda larga con muchas líneas los rozaba, devolviendo un 413 que en la
+// tablet se veía como "no se pudo cobrar" sin más explicación.
 app.use(express.json({ limit: '3mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -174,58 +175,50 @@ const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 // Meseros authenticate with a short PIN only. 'servidor' (default) accepts any active
 // waiter in this database: every cashier and every tablet hanging off this server is
-// the same operation, so splitting them by till or by bar only locks out waiters who
-// happen to be serving at another tablet. The narrower scopes are still available:
-// 'barra' (waiters of the same bar as the logged-in cashier), 'cajero' (only the ones
-// assigned to that cashier) and 'evento'. Note that a PIN must be unique inside
-// whatever scope is chosen — /api/admin/meseros enforces exactly that same scope.
+// the same bar, so splitting them by till only locks out waiters who happen to be
+// serving at another tablet. The narrower scopes are still available: 'cajero' (only
+// the waiters assigned to that cashier) and 'evento'. Note that a PIN must be unique
+// inside whatever scope is chosen — /api/admin/meseros enforces exactly that same scope.
 const MESERO_PIN_SCOPE = process.env.MESERO_PIN_SCOPE || 'servidor';
 
-// Identidad de esta instancia. Cada barra levanta su propio servidor con su
-// propia base, y las tres son iguales por fuera: sin esto habría tres comandas
-// #1 circulando la misma noche y, al juntar las bases, nadie sabría cuál es
-// cuál. El prefijo se antepone al número en tickets, pantalla e informes.
-// Identidad de esta instalación: el nombre de la barra y el prefijo que llevan
-// sus comandas.
+// Identidad de la barra: su nombre y el prefijo que llevan sus comandas.
 //
-// Por defecto sale de la tabla `configuracion`, es decir, de lo que el
-// encargado escribe en el panel de administrador. Así, en el montaje normal de
-// un solo servidor, no hay que tocar ningún archivo para cambiarle el nombre a
-// la barra: se edita en pantalla y ya.
-//
-// Fijar INSTANCIA en el .env sigue siendo posible y entonces esa manda sobre el
-// panel. Eso es para el montaje de varias barras con un servidor cada una,
-// donde el nombre no debe poder cambiarse desde dentro: es lo que impide que
-// dos bases acaben creyéndose la misma.
-const INSTANCIA_FIJADA_EN_ENV = Boolean((process.env.INSTANCIA || '').trim());
+// Hay UNA barra por instalación. El nombre sale de la tabla `configuracion`,
+// es decir, de lo que el encargado escribe en el panel (Datos del evento), y
+// suele cambiar de un evento a otro. Por eso no vive en ningún archivo de
+// configuración: se edita en pantalla y ya.
 
-// Del nombre se saca el prefijo: "Barra Norte" -> N, "General" -> G. Se ignora
-// el "Barra " de delante, que no distingue nada por estar en todas.
+// Nombre de partida, hasta que alguien lo cambie desde el panel.
+const BARRA_POR_DEFECTO = 'Barra 1';
+
+// Del nombre se saca el prefijo de las comandas: "Barra Norte" -> N-47.
+// Se ignora el "Barra " de delante, que no distingue nada por estar siempre.
 function prefijoDeNombre(nombre) {
   const limpio = String(nombre || '').trim().replace(/^barra\s+/i, '');
+  // Cuando lo que queda es un número ("Barra 1"), la inicial sería un "1"
+  // suelto y las comandas saldrían "1-47", que no se entiende. Se conserva la
+  // B para que quede "B1-47".
+  if (/^\d+$/.test(limpio)) return ('B' + limpio).slice(0, 3);
   const bruto = (limpio.charAt(0) || 'X').toUpperCase();
   return (bruto.replace(/[^A-Z0-9]/g, '') || 'X').slice(0, 3);
 }
 
 const INSTANCIA = {
-  nombre: (process.env.INSTANCIA || '').trim() || 'Principal',
-  prefijo: ''
+  nombre: BARRA_POR_DEFECTO,
+  prefijo: prefijoDeNombre(BARRA_POR_DEFECTO),
+  // Fila de `barra` en la base. Es siempre la misma: sólo cambia su nombre.
+  id_barra: null
 };
-INSTANCIA.prefijo = (process.env.PREFIJO || '').trim().toUpperCase()
-  .replace(/[^A-Z0-9]/g, '').slice(0, 3) || prefijoDeNombre(INSTANCIA.nombre);
 
-/**
- * Recoge el nombre de barra que haya guardado el panel. No hace nada si el
- * .env fijó la instancia, porque en ese montaje el archivo manda.
- */
+/** Recoge el nombre de barra que haya guardado el panel. */
 function refrescarIdentidad() {
-  if (INSTANCIA_FIJADA_EN_ENV) return Promise.resolve(INSTANCIA);
   return dbGet("SELECT valor FROM instancia WHERE clave = 'nombre'")
     .then(() => dbGet('SELECT barra FROM configuracion WHERE id_configuracion = 1'))
     .then(cfg => {
-      if (!cfg || !cfg.barra) return INSTANCIA;
-      INSTANCIA.nombre = cfg.barra;
-      INSTANCIA.prefijo = prefijoDeNombre(cfg.barra);
+      // Manda lo que diga el panel; si aún no se ha tocado, el de partida.
+      const puesto = (cfg && cfg.barra ? String(cfg.barra) : '').trim();
+      INSTANCIA.nombre = puesto || BARRA_POR_DEFECTO;
+      INSTANCIA.prefijo = prefijoDeNombre(INSTANCIA.nombre);
       // Se copia también a la tabla `instancia` para que el archivo .db siga
       // sabiendo de qué barra es aunque el nombre se haya cambiado desde el
       // panel: es lo que lo identifica si un día se copia a otro equipo.
@@ -233,10 +226,111 @@ function refrescarIdentidad() {
         dbRun(`INSERT INTO instancia (clave, valor) VALUES ('nombre', ?)
                ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.nombre]),
         dbRun(`INSERT INTO instancia (clave, valor) VALUES ('prefijo', ?)
-               ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.prefijo])
+               ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.prefijo]),
+        sincronizarBarra(INSTANCIA.nombre)
       ]).then(() => INSTANCIA);
     })
     .catch(() => INSTANCIA);   // base aún sin crear: se queda el valor de partida
+}
+
+/**
+ * Deja la tabla `barra` de acuerdo con el nombre escrito en Datos del evento.
+ *
+ * Con un servidor por evento hay UNA barra, así que no se crea una fila nueva
+ * cada vez que se corrige el rótulo: se recuerda cuál es en la tabla
+ * `instancia` y se le cambia el nombre. Así las comandas ya cobradas siguen
+ * colgando de la misma barra y el resumen de ventas no se parte en dos.
+ */
+function sincronizarBarra(nombre) {
+  const limpio = String(nombre || '').trim();
+  if (!limpio) return Promise.resolve(null);
+
+  // Se compara sin el "Barra " de delante: está en todas y no distingue nada,
+  // de modo que "General" reconoce a la "Barra General" ya sembrada.
+  const normaliza = txt => String(txt || '').trim().replace(/^barra\s+/i, '').toLowerCase();
+
+  return dbGet("SELECT valor FROM instancia WHERE clave = 'id_barra'")
+    .then(fila => {
+      const guardada = fila && Number(fila.valor);
+      if (!guardada) return null;
+      return dbGet('SELECT * FROM barra WHERE id_barra = ?', [guardada]);
+    })
+    .then(barra => {
+      if (barra) return barra;
+      // Primer arranque: engancha a la que ya exista con ese nombre antes de
+      // inventar una, o el panel acabaría con barras repetidas.
+      return dbAll('SELECT * FROM barra ORDER BY id_barra').then(filas =>
+        filas.find(b => normaliza(b.nombre_barra) === normaliza(limpio)) || null);
+    })
+    .then(barra => {
+      if (!barra) {
+        return dbRun(
+          `INSERT INTO barra (id_evento, nombre_barra, descripcion, ubicacion, activo)
+           VALUES (1, ?, '', '', 1)`, [limpio]
+        ).then(r => ({ id_barra: r.insertId, nombre_barra: limpio }));
+      }
+      if (barra.nombre_barra === limpio) return barra;
+      return dbRun('UPDATE barra SET nombre_barra = ? WHERE id_barra = ?', [limpio, barra.id_barra])
+        .then(() => Object.assign({}, barra, { nombre_barra: limpio }));
+    })
+    .then(barra => {
+      INSTANCIA.id_barra = barra.id_barra;
+      return dbRun(`INSERT INTO instancia (clave, valor) VALUES ('id_barra', ?)
+                    ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`,
+                   [String(barra.id_barra)]).then(() => barra);
+    });
+}
+
+/**
+ * Deja UNA sola barra en la base: la de este servidor.
+ *
+ * Las bases antiguas venían sembradas con Norte, Sur y General, de una versión
+ * anterior en la que se preveían varias. Eso engañaba: el resumen del panel
+ * enseñaba barras que en ese evento no existían, y una venta hecha aquí podía
+ * quedar apuntada a "Barra Sur".
+ *
+ * No se borra nada de lo vendido. Los cajeros y las comandas de las otras
+ * barras pasan a la barra buena, y sólo entonces se quitan las filas vacías.
+ * Antes de tocar nada se deja una copia del archivo, porque esto no se puede
+ * deshacer desde el panel.
+ */
+function unificarBarras() {
+  if (!INSTANCIA.id_barra) return Promise.resolve(null);
+
+  const id = INSTANCIA.id_barra;
+  return dbAll('SELECT id_barra, nombre_barra FROM barra WHERE id_barra <> ?', [id])
+    .then(sobran => {
+      if (sobran.length === 0) return null;      // ya está unificada
+
+      return respaldarBase()
+        .then(() => withTransaction(async () => {
+          const caj = await dbRun('UPDATE cajero  SET id_barra = ? WHERE id_barra <> ?', [id, id]);
+          const com = await dbRun('UPDATE comanda SET id_barra = ? WHERE id_barra <> ?', [id, id]);
+          await dbRun('DELETE FROM barra WHERE id_barra <> ?', [id]);
+          return { cajeros: caj.affectedRows, comandas: com.affectedRows };
+        }))
+        .then(r => {
+          console.log(`\n  ⚙ Barras unificadas en "${INSTANCIA.nombre}".`);
+          console.log(`    Se retiraron: ${sobran.map(b => b.nombre_barra).join(', ')}`);
+          console.log(`    Se trasladaron ${r.cajeros} cajeros y ${r.comandas} comandas.`);
+          console.log(`    Copia previa: ${path.basename(RESPALDO)}\n`);
+          return r;
+        });
+    })
+    .catch(err => {
+      console.error('  ⚠ No se pudieron unificar las barras:', err.message);
+      return null;
+    });
+}
+
+// Copia del archivo antes de la unificación. VACUUM INTO la hace desde dentro
+// de SQLite, así que incluye lo que aún esté en el -wal; copiar el .db a mano
+// se dejaría fuera las últimas ventas.
+const RESPALDO = dbFile.replace(/\.db$/, '') + '.antes-de-unificar.db';
+
+function respaldarBase() {
+  if (fs.existsSync(RESPALDO)) return Promise.resolve();   // ya hay una, no se pisa
+  return dbRun(`VACUUM INTO '${RESPALDO.replace(/'/g, "''")}'`).then(() => {});
 }
 
 /** Número de comanda tal como lo ve la gente: N-47 en vez de 47. */
@@ -408,41 +502,27 @@ const mockDb = {
     { id_producto: 19, id_categoria: 3, nombre: 'Sándwich de pollo', descripcion: 'Pollo, lechuga y aderezos', tipo_producto: 'COMIDA', precio_venta: 32.00, stock_actual: 48, activo: 1, creado_por_admin: 1 },
     { id_producto: 20, id_categoria: 3, nombre: 'Pizza personal', descripcion: 'Pizza individual de queso y jamón', tipo_producto: 'COMIDA', precio_venta: 40.00, stock_actual: 40, activo: 1, creado_por_admin: 1 }
   ],
-  comanda: [
-    { id_comanda: 1, id_evento: 1, id_barra: 3, id_cajero: 7, id_mesero: 31, fecha_hora: '2026-08-15 11:53:58', total: 500.00, estado_pago: 'PAGADO', estatus: 'EN_PROCESO', observaciones: 'Comanda de demostración', anulada_por_admin: null, fecha_anulacion: null, motivo_anulacion: null }
-  ],
-  detalle_comanda: [
-    { id_detalle: 1, id_comanda: 1, id_producto: 9, cantidad: 4, precio_unitario: 55.00, subtotal: 220.00 },
-    { id_detalle: 2, id_comanda: 1, id_producto: 14, cantidad: 4, precio_unitario: 38.00, subtotal: 152.00 },
-    { id_detalle: 3, id_comanda: 1, id_producto: 17, cantidad: 4, precio_unitario: 18.00, subtotal: 72.00 },
-    { id_detalle: 4, id_comanda: 1, id_producto: 18, cantidad: 2, precio_unitario: 28.00, subtotal: 56.00 }
-  ],
-  pago_comanda: [
-    { id_pago: 1, id_comanda: 1, id_metodo_pago: 1, monto: 200.00, fecha_hora: '2026-08-15 11:53:58', referencia: 'EFECTIVO-CAJA-001', estado: 'APROBADO' },
-    { id_pago: 2, id_comanda: 1, id_metodo_pago: 2, monto: 300.00, fecha_hora: '2026-08-15 11:53:58', referencia: 'TARJETA-OPERACION-987654', estado: 'APROBADO' }
-  ],
+  // Sin ventas de muestra. Antes venía una comanda de demostración, pero sus
+  // líneas no llevaban el movimiento de stock correspondiente: toda base nueva
+  // nacía con las existencias descuadradas y el panel marcando 500 Bs. de una
+  // venta que nunca ocurrió.
+  comanda: [],
+  detalle_comanda: [],
+  pago_comanda: [],
   metodo_pago: [
     { id_metodo_pago: 1, nombre: 'EFECTIVO', descripcion: 'Pago en efectivo', activo: 1 },
     { id_metodo_pago: 2, nombre: 'TARJETA', descripcion: 'Pago con tarjeta', activo: 1 },
     { id_metodo_pago: 3, nombre: 'QR', descripcion: 'Pago con código QR', activo: 1 },
     { id_metodo_pago: 4, nombre: 'TRANSFERENCIA', descripcion: 'Transferencia bancaria', activo: 1 }
   ],
-  movimiento_stock: [
-    { id_movimiento: 1, id_producto: 1, id_admin: 1, tipo_movimiento: 'ENTRADA', cantidad: 120, stock_anterior: 0, stock_nuevo: 120, motivo: 'Carga inicial de stock para el evento', fecha_hora: '2026-08-15 11:53:58' },
-    { id_movimiento: 2, id_producto: 8, id_admin: 1, tipo_movimiento: 'ENTRADA', cantidad: 38, stock_anterior: 0, stock_nuevo: 38, motivo: 'Carga inicial de stock para el evento', fecha_hora: '2026-08-15 11:53:58' },
-    { id_movimiento: 3, id_producto: 14, id_admin: 1, tipo_movimiento: 'ENTRADA', cantidad: 55, stock_anterior: 0, stock_nuevo: 55, motivo: 'Carga inicial de stock para el evento', fecha_hora: '2026-08-15 11:53:58' }
-  ],
+  movimiento_stock: [],
   auditoria_admin: [
     { id_auditoria: 1, id_admin: 1, id_evento: 1, accion: 'CREAR_CATEGORIA', entidad: 'categoria_producto', id_registro: 1, detalle: 'Se creó la categoría Cervezas', fecha_hora: '2026-08-15 11:53:58' },
     { id_auditoria: 2, id_admin: 1, id_evento: 1, accion: 'CREAR_PRODUCTO', entidad: 'producto', id_registro: 1, detalle: 'Se creó el producto Cerveza Paceña 350 ml', fecha_hora: '2026-08-15 11:53:58' },
     { id_auditoria: 3, id_admin: 1, id_evento: 1, accion: 'AGREGAR_STOCK', entidad: 'producto', id_registro: 1, detalle: 'Carga inicial de 120 unidades', fecha_hora: '2026-08-15 11:53:58' }
   ],
-  impresion_comanda_cajero: [
-    { id_impresion_cajero: 1, id_comanda: 1, fecha_hora_impresion: '2026-08-15 11:53:58', numero_copia: 1 }
-  ],
-  impresion_comanda_mesero: [
-    { id_impresion_mesero: 1, id_comanda: 1, fecha_hora_impresion: '2026-08-15 11:53:58', numero_copia: 2 }
-  ]
+  impresion_comanda_cajero: [],
+  impresion_comanda_mesero: []
 };
 
 // Generate 45 waiters to match original SQL dump
@@ -469,6 +549,28 @@ for (let i = 1; i <= 45; i++) {
     activo: 1
   });
 }
+
+// Un movimiento de ENTRADA por cada producto que nace con existencias.
+//
+// Antes la semilla traía tres movimientos sueltos para veinte productos con
+// stock. El reporte de stock cuadra existencias contra movimientos, así que los
+// otros diecisiete aparecían con unidades que nadie había metido nunca. Ahora
+// cada unidad que hay en la base tiene su movimiento detrás.
+mockDb.producto
+  .filter(p => Number(p.stock_actual) > 0)
+  .forEach((p, i) => {
+    mockDb.movimiento_stock.push({
+      id_movimiento: i + 1,
+      id_producto: p.id_producto,
+      id_admin: 1,
+      tipo_movimiento: 'ENTRADA',
+      cantidad: p.stock_actual,
+      stock_anterior: 0,
+      stock_nuevo: p.stock_actual,
+      motivo: 'Carga inicial de stock para el evento',
+      fecha_hora: '2026-08-15 11:53:58'
+    });
+  });
 
 // Adds a column to an existing table only when it is missing (idempotent migration).
 function ensureColumn(table, column, definition) {
@@ -677,14 +779,11 @@ function initializeDatabase() {
     db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_comanda_idempotencia
             ON comanda(clave_idempotencia) WHERE clave_idempotencia IS NOT NULL`);
 
-    // Identidad de esta instancia, grabada DENTRO de la propia base.
+    // Identidad de la barra, grabada DENTRO de la propia base.
     //
-    // Cada barra corre su propio servidor con su propio archivo .db, y los tres
-    // archivos son idénticos por fuera. Si al final de la noche se juntan sin
-    // más, no habría forma de saber qué venta salió de qué barra: los números
-    // de comanda empiezan en 1 en las tres. Guardando aquí el nombre y el
-    // prefijo, el archivo se explica solo aunque se copie a otro equipo meses
-    // después, y la herramienta de fusión puede etiquetar cada fila.
+    // Los archivos .db de dos eventos son idénticos por fuera. Guardando aquí el
+    // nombre de la barra y su prefijo, un archivo suelto se explica solo aunque
+    // aparezca meses después en una copia de seguridad.
     db.run(`CREATE TABLE IF NOT EXISTS instancia (
       clave TEXT PRIMARY KEY,
       valor TEXT
@@ -722,63 +821,15 @@ function initializeDatabase() {
       });
     });
 
-    // Guardia contra el error más caro de este montaje: que dos barras acaben
-    // usando el MISMO archivo de base de datos.
-    //
-    // Pasa sin querer al levantar dos servidores en la misma carpeta con
-    // distinto INSTANCIA: el nombre cambia, pero los dos abren pos_evento.db y
-    // comparten stock y ventas. Antes no avisaba nada, y sólo se notaba cuando
-    // una barra veía bajar existencias que había vendido la otra.
-    //
-    // La base recuerda de qué barra es. Si no coincide con la configurada, el
-    // servidor NO arranca: es preferible un error al encender que descubrirlo
-    // a mitad de evento con el stock descuadrado.
-    db.get("SELECT valor FROM instancia WHERE clave = 'nombre'", (err, fila) => {
-      if (err) return;
-      const grabada = fila && fila.valor;
-
-      // El guardián sólo tiene sentido cuando el .env fija la barra: ahí el
-      // nombre es la identidad del montaje y no debe cambiar nunca. Si el
-      // nombre sale del panel, cambiarlo es una acción normal del encargado y
-      // bloquear el arranque por eso sería absurdo.
-      if (INSTANCIA_FIJADA_EN_ENV && grabada && grabada !== INSTANCIA.nombre
-          && !process.env.RENOMBRAR_BARRA) {
-        console.error('\n==================================================');
-        console.error('  ⛔ ESTA BASE DE DATOS ES DE OTRA BARRA');
-        console.error('==================================================');
-        console.error(`  El archivo         : ${path.basename(dbFile)}`);
-        console.error(`  Pertenece a        : ${grabada}`);
-        console.error(`  Pero este servidor : ${INSTANCIA.nombre}`);
-        console.error('');
-        console.error('  Si arrancara, las dos barras compartirían stock y');
-        console.error('  ventas, y el cierre de caja no cuadraría.');
-        console.error('');
-        console.error('  Cada barra necesita SU PROPIA carpeta en SU PROPIA');
-        console.error('  tablet. Dos servidores en la misma carpeta usan el');
-        console.error('  mismo archivo aunque tengan distinto INSTANCIA.');
-        console.error('');
-        console.error('  Para probar varias barras en un mismo equipo:');
-        console.error('      node tools/barra.js norte');
-        console.error('');
-        console.error(`  Si de verdad quieres renombrar "${grabada}" a`);
-        console.error(`  "${INSTANCIA.nombre}" conservando sus ventas:`);
-        console.error('      RENOMBRAR_BARRA=1 npm start');
-        console.error('==================================================\n');
-        process.exit(1);
-      }
-
-      if (INSTANCIA_FIJADA_EN_ENV && grabada && grabada !== INSTANCIA.nombre) {
-        console.log(`\n  ⚠ Renombrando esta base: "${grabada}" pasa a ser "${INSTANCIA.nombre}".`);
-        console.log('    Las comandas ya guardadas conservan su numeración anterior.\n');
-      }
-
-      db.run(`INSERT INTO instancia (clave, valor) VALUES ('nombre', ?)
-              ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.nombre]);
-      db.run(`INSERT INTO instancia (clave, valor) VALUES ('prefijo', ?)
-              ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.prefijo]);
-      db.run(`INSERT INTO instancia (clave, valor) VALUES ('primer_arranque', ?)
-              ON CONFLICT(clave) DO NOTHING`, [nowSql()]);
-    });
+    // La base deja constancia de cómo se llama la barra y con qué prefijo
+    // numera. No lo usa el servidor para decidir nada: sirve para saber de qué
+    // evento es un archivo .db cuando aparece suelto en una copia de seguridad.
+    db.run(`INSERT INTO instancia (clave, valor) VALUES ('nombre', ?)
+            ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.nombre]);
+    db.run(`INSERT INTO instancia (clave, valor) VALUES ('prefijo', ?)
+            ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.prefijo]);
+    db.run(`INSERT INTO instancia (clave, valor) VALUES ('primer_arranque', ?)
+            ON CONFLICT(clave) DO NOTHING`, [nowSql()]);
 
     // Check if database is empty by querying events count
     db.get("SELECT COUNT(*) as count FROM evento", (err, row) => {
@@ -788,35 +839,22 @@ function initializeDatabase() {
       }
 
       if (row && row.count === 0) {
-        // Cada barra siembra SÓLO lo suyo.
-        //
-        // Antes toda base nueva se llenaba con las tres barras, los nueve
-        // cajeros y los cuarenta y cinco meseros. En la tablet de Norte se
-        // podía entrar como cajero_sur_1, y esa venta quedaba registrada bajo
-        // "Barra Sur" dentro del cierre de Norte: un informe con una barra que
-        // allí no existe. Ahora, si INSTANCIA nombra una barra concreta, sólo
-        // entran esa barra, sus cajeros y los meseros de esos cajeros.
-        //
-        // Si INSTANCIA no coincide con ninguna (por ejemplo "Principal"), se
-        // siembra todo: es el montaje de una sola barra que lo lleva todo.
-        // Sólo se recorta el sembrado cuando el .env fija la barra (montaje de
-        // varios servidores). En el montaje normal de uno solo entran todas,
-        // porque desde ahí se atiende el evento entero.
-        const barraPropia = INSTANCIA_FIJADA_EN_ENV
-          ? mockDb.barra.find(b => b.nombre_barra.toLowerCase().includes(INSTANCIA.nombre.toLowerCase()))
-          : null;
+        // Una sola barra, con el nombre de partida. El encargado lo cambia
+        // luego en el panel. Antes se sembraban tres (Norte, Sur y General) y
+        // el resumen del panel enseñaba barras que en ese evento no existían.
+        const barrasASembrar = [Object.assign({}, mockDb.barra[0],
+          { nombre_barra: BARRA_POR_DEFECTO, ubicacion: '' })];
+        const idBarraUnica = barrasASembrar[0].id_barra;
 
-        const barrasASembrar = barraPropia ? [barraPropia] : mockDb.barra;
-        const idsBarra = new Set(barrasASembrar.map(b => b.id_barra));
-        const cajerosASembrar = mockDb.cajero.filter(c => idsBarra.has(c.id_barra));
+        // Todo el personal de muestra cuelga de esa barra: si se quedara
+        // apuntando a una que no existe, esos cajeros no podrían ni entrar.
+        const cajerosASembrar = mockDb.cajero.map(c =>
+          Object.assign({}, c, { id_barra: idBarraUnica }));
         const idsCajero = new Set(cajerosASembrar.map(c => c.id_cajero));
         const meserosASembrar = mockDb.mesero.filter(m => idsCajero.has(m.id_cajero));
 
-        console.log(barraPropia
-          ? `💾 Sembrando la base SÓLO con la ${barraPropia.nombre_barra}: ` +
-            `${cajerosASembrar.length} cajeros y ${meserosASembrar.length} meseros.`
-          : `💾 Sembrando la base con TODAS las barras (${mockDb.barra.length}), ` +
-            `porque INSTANCIA="${INSTANCIA.nombre}" no nombra ninguna.`);
+        console.log(`💾 Sembrando la base: barra ${BARRA_POR_DEFECTO}, ` +
+          `${cajerosASembrar.length} cajeros y ${meserosASembrar.length} meseros.`);
 
         // Seed Evento
         db.run(`INSERT INTO evento (id_evento, nombre_evento, fecha_evento, lugar, descripcion, hora_inicio, hora_fin, activo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -867,8 +905,10 @@ function initializeDatabase() {
 
         // Seed Comandas, Detalle, Pagos, Movs
         mockDb.comanda.forEach(c => {
+          // La comanda de muestra tiene que colgar de la barra que existe.
+          const idBarra = idBarraUnica;
           db.run(`INSERT INTO comanda (id_comanda, id_evento, id_barra, id_cajero, id_mesero, fecha_hora, total, estado_pago, estatus, observaciones) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [c.id_comanda, c.id_evento, c.id_barra, c.id_cajero, c.id_mesero, c.fecha_hora, c.total, c.estado_pago, c.estatus, c.observaciones]);
+            [c.id_comanda, c.id_evento, idBarra, c.id_cajero, c.id_mesero, c.fecha_hora, c.total, c.estado_pago, c.estatus, c.observaciones]);
         });
 
         mockDb.detalle_comanda.forEach(d => {
@@ -1043,18 +1083,7 @@ app.post('/api/login/mesero', (req, res) => {
     // tablet" (a scope was applied) or simply "no such PIN" (the default, unscoped).
     let fueraDeAlcance = null;
 
-    if (MESERO_PIN_SCOPE === 'barra' && (id_barra || id_cajero)) {
-      // Any tablet of this bar must open for any of its waiters, whichever till they
-      // were assigned to. When the tablet only knows its cashier, derive the bar here.
-      if (id_barra) {
-        query += ` AND c.id_barra = ?`;
-        params.push(id_barra);
-      } else {
-        query += ` AND c.id_barra = (SELECT id_barra FROM cajero WHERE id_cajero = ?)`;
-        params.push(id_cajero);
-      }
-      fueraDeAlcance = 'Ese PIN es de un mesero de otra barra.';
-    } else if (MESERO_PIN_SCOPE === 'cajero' && id_cajero) {
+    if (MESERO_PIN_SCOPE === 'cajero' && id_cajero) {
       // A waiter reports to one cashier (mesero.id_cajero); only their PINs open this till.
       query += ` AND m.id_cajero = ?`;
       params.push(id_cajero);
@@ -1102,78 +1131,7 @@ app.post('/api/login/mesero', (req, res) => {
 // barra está atendiendo y cómo numerar sus comandas. Es público a propósito:
 // lo necesita el POS antes de que nadie inicie sesión.
 app.get('/api/instancia', (req, res) => {
-  res.json({ nombre: INSTANCIA.nombre, prefijo: INSTANCIA.prefijo });
-});
-
-// ==========================================
-// 1c. API: QR DE COBRO
-// ==========================================
-// Guarda el QR fijo del banco para enseñarlo en la caja. Es una imagen, no un
-// medio de cobro que emita este sistema: el QR lo genera el banco y aquí sólo
-// se muestra, para que el cajero no tenga que sacar el teléfono en cada venta.
-//
-// NO detecta pagos. Detectarlos exige preguntárselo al banco por su API, y eso
-// necesita credenciales y conexión a internet en el momento de la venta. Lo que
-// se guarda es la referencia del comprobante que teclea el cajero, que es lo
-// que después permite cuadrar la caja contra el extracto.
-//
-// Se guarda dentro de la base para que viaje con ella: cada barra tiene su
-// propio archivo y puede cobrar a una cuenta distinta.
-const CLAVES_QR = ['qr_imagen', 'qr_titular', 'qr_banco'];
-
-function leerConfigQr() {
-  return dbAll('SELECT clave, valor FROM instancia WHERE clave IN (?, ?, ?)', CLAVES_QR)
-    .then(filas => {
-      const mapa = Object.fromEntries(filas.map(f => [f.clave, f.valor]));
-      return {
-        imagen: mapa.qr_imagen || null,
-        titular: mapa.qr_titular || '',
-        banco: mapa.qr_banco || ''
-      };
-    });
-}
-
-app.get('/api/qr-cobro', (req, res) => {
-  if (useMockDb) return res.json({ imagen: null, titular: '', banco: '' });
-  leerConfigQr()
-    .then(cfg => res.json(cfg))
-    .catch(err => {
-      console.error('Error al leer el QR de cobro:', err);
-      res.status(500).json({ imagen: null, titular: '', banco: '' });
-    });
-});
-
-app.post('/api/admin/qr-cobro', (req, res) => {
-  if (useMockDb) {
-    return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
-  }
-  const { imagen, titular, banco } = req.body;
-
-  // Sólo imágenes, y sólo por valor: nada de URLs remotas, que en el evento no
-  // cargarían (no hay internet) y abrirían la puerta a incrustar cualquier cosa.
-  if (imagen !== null && imagen !== '') {
-    if (typeof imagen !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(imagen)) {
-      return res.status(400).json({ success: false, message: 'La imagen del QR no es válida.' });
-    }
-    if (imagen.length > 2 * 1024 * 1024) {
-      return res.status(400).json({ success: false, message: 'La imagen pesa demasiado (máximo 2 MB).' });
-    }
-  }
-
-  const guardar = (clave, valor) =>
-    dbRun(`INSERT INTO instancia (clave, valor) VALUES (?, ?)
-           ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [clave, valor]);
-
-  Promise.all([
-    guardar('qr_imagen', imagen || ''),
-    guardar('qr_titular', String(titular || '').slice(0, 80)),
-    guardar('qr_banco', String(banco || '').slice(0, 80))
-  ])
-    .then(() => res.json({ success: true }))
-    .catch(err => {
-      console.error('Error al guardar el QR de cobro:', err);
-      res.status(500).json({ success: false, message: 'No se pudo guardar el QR.' });
-    });
+  res.json({ nombre: INSTANCIA.nombre, prefijo: INSTANCIA.prefijo, id_barra: INSTANCIA.id_barra });
 });
 
 // ==========================================
@@ -1234,10 +1192,11 @@ app.put('/api/admin/configuracion-evento', (req, res) => {
     // El nombre de la barra es la identidad: al cambiarlo aquí, cambia también
     // el prefijo de las comandas y lo que se ve en la caja, sin reiniciar.
     .then(() => refrescarIdentidad())
+    .then(() => unificarBarras())
     .then(() => res.json({
       success: true,
       configuracion: limpio,
-      instancia: { nombre: INSTANCIA.nombre, prefijo: INSTANCIA.prefijo }
+      instancia: { nombre: INSTANCIA.nombre, prefijo: INSTANCIA.prefijo, id_barra: INSTANCIA.id_barra }
     }))
     .catch(err => {
       console.error('Error al guardar la configuración:', err);
@@ -1861,51 +1820,13 @@ app.post('/api/admin/productos', (req, res) => {
 });
 
 // CREATE BARRA
-app.post('/api/admin/barras', (req, res) => {
-  const { nombre_barra, descripcion, ubicacion, id_evento, id_admin } = req.body;
-  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
-
-  if (useMockDb) {
-    const newBarraId = mockDb.barra.length + 1;
-    mockDb.barra.push({
-      id_barra: newBarraId,
-      id_evento: parseInt(id_evento || 1),
-      nombre_barra,
-      descripcion,
-      ubicacion,
-      activo: 1
-    });
-
-    mockDb.auditoria_admin.push({
-      id_auditoria: mockDb.auditoria_admin.length + 1,
-      id_admin: parseInt(id_admin),
-      id_evento: parseInt(id_evento || 1),
-      accion: 'CREAR_BARRA',
-      entidad: 'barra',
-      id_registro: newBarraId,
-      detalle: `Se creó la barra ${nombre_barra}`,
-      fecha_hora: nowStr
-    });
-
-    return res.json({ success: true, id_barra: newBarraId });
-  } else {
-    const query = `INSERT INTO barra (id_evento, nombre_barra, descripcion, ubicacion) VALUES (?, ?, ?, ?)`;
-    pool.query(query, [id_evento || 1, nombre_barra, descripcion, ubicacion], (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      const newBarraId = result.insertId;
-
-      const queryAudit = `INSERT INTO auditoria_admin (id_admin, id_evento, accion, entidad, id_registro, detalle) VALUES (?, ?, 'CREAR_BARRA', 'barra', ?, ?)`;
-      pool.query(queryAudit, [id_admin, id_evento || 1, newBarraId, `Se creó la barra ${nombre_barra}`], (errAudit) => {
-        if (errAudit) console.error(errAudit);
-        return res.json({ success: true, id_barra: newBarraId });
-      });
-    });
-  }
-});
-
 // CREATE CAJERO
 app.post('/api/admin/cajeros', (req, res) => {
-  const { id_barra, nombre, usuario, password, id_admin, id_evento } = req.body;
+  // La barra no la elige el formulario: es la de este servidor, la que se
+  // rotula en Datos del evento. Con un desplegable era fácil asignarlo a otra
+  // fila y que ese cajero no pudiera cobrar aquí.
+  const { nombre, usuario, password, id_admin, id_evento } = req.body;
+  const id_barra = INSTANCIA.id_barra || req.body.id_barra;
   const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
   if (useMockDb) {
@@ -1980,13 +1901,7 @@ app.post('/api/admin/meseros', (req, res) => {
     // that /api/login/mesero searches, otherwise sales get attributed to the wrong person.
     let scopeSql;
     let scopeParams;
-    if (MESERO_PIN_SCOPE === 'barra') {
-      scopeSql = `SELECT m.id_mesero FROM mesero m
-                  JOIN cajero c ON m.id_cajero = c.id_cajero
-                  WHERE m.password = ? AND m.activo = 1
-                    AND c.id_barra = (SELECT id_barra FROM cajero WHERE id_cajero = ?)`;
-      scopeParams = [password, id_cajero];
-    } else if (MESERO_PIN_SCOPE === 'cajero') {
+    if (MESERO_PIN_SCOPE === 'cajero') {
       scopeSql = 'SELECT id_mesero FROM mesero WHERE password = ? AND id_cajero = ? AND activo = 1';
       scopeParams = [password, id_cajero];
     } else {
@@ -2462,6 +2377,7 @@ const servidor = app.listen(PORT, '0.0.0.0', async () => {
   // La barra puede venir del panel, así que se lee de la base antes de
   // rotularla: si no, el cartel diría el valor de partida y no el real.
   await refrescarIdentidad();
+  await unificarBarras();
   const ips = localAddresses();
   // La barra va lo primero y en grande. Con dos o tres tablets servidor
   // idénticas encima de la mesa, este cartel es la forma más rápida de saber
@@ -2479,12 +2395,9 @@ const servidor = app.listen(PORT, '0.0.0.0', async () => {
   } else {
     console.log(`\n   ⚠ Sin red detectada: enciende el WiFi/hotspot y reinicia.`);
   }
-  if (INSTANCIA.nombre === 'Principal') {
-    // Aviso, no error: en un montaje de una sola barra es correcto.
-    console.log(`\n   ⚠ Esta instancia no tiene nombre de barra propio.`);
-    console.log(`     Si montas varias barras, pon INSTANCIA y PREFIJO en el .env`);
-    console.log(`     o las tres numerarán sus comandas igual.`);
-  }
+  // El nombre encabeza los tickets y el cierre. Se recuerda dónde se cambia,
+  // porque el de partida sirve para arrancar pero rara vez es el definitivo.
+  console.log(`\n   Nombre de la barra: Dashboard → Datos del evento → Barra.`);
   console.log(`\n   Ctrl+C para detener.`);
   console.log(`==================================================\n`);
 });

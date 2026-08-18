@@ -67,10 +67,15 @@ function crearPaginaPiloto() {
   window.addEventListener('load', function () {
     if (paso === 'login') return;
     setTimeout(function () {
-      id('login-username').value = paso === 'admin' ? 'admin_evento' : 'cajero_norte_1';
+      var esAdmin = paso === 'admin' || paso === 'personal';
+      id('login-username').value = esAdmin ? 'admin_evento' : 'cajero_norte_1';
       id('login-password').value = 'demo123';
       q('#login-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       if (paso === 'pin' || paso === 'admin') return;
+      if (paso === 'personal') {
+        setTimeout(function () { click(q('[data-tab="tab-crear-personal"]')); }, 600);
+        return;
+      }
 
       setTimeout(function () {
         '1009'.split('').forEach(function (d) { click(q('.pin-btn[data-key="' + d + '"]')); });
@@ -114,9 +119,7 @@ function crearPaginaPiloto() {
   const servidor = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
     cwd: RAIZ,
     env: Object.assign({}, process.env, {
-      // Copia desechable: se permite adoptarla aunque venga de otra barra.
-      RENOMBRAR_BARRA: '1',
-      PORT: String(PUERTO), DB_FILE: BASE, INSTANCIA: 'Norte', PREFIJO: 'N'
+      PORT: String(PUERTO), DB_FILE: BASE
     }),
     stdio: 'ignore'
   });
@@ -127,16 +130,20 @@ function crearPaginaPiloto() {
     if (!arriba) await esperar(250);
   }
 
-  const limpiar = () => {
+  const limpiar = async () => {
     servidor.kill('SIGKILL');
     try { fs.unlinkSync(path.join(RAIZ, 'public/_shot.html')); } catch (e) {}
+  // Windows no suelta el archivo en el mismo instante en que muere el
+  // proceso, así que se espera un momento antes de borrar; si no, el
+  // unlink falla en silencio y la base se queda en la carpeta igual.
+    await esperar(400);
     ['', '-wal', '-shm'].forEach(s => { try { fs.unlinkSync(BASE + s); } catch (e) {} });
   };
 
-  if (!arriba) { console.error('  El servidor no arrancó.'); limpiar(); process.exit(1); }
+  if (!arriba) { console.error('  El servidor no arrancó.'); await limpiar(); process.exit(1); }
 
   console.log('\n  Capturando a ' + ANCHO + '×' + ALTO + '...\n');
-  for (const paso of ['login', 'pin', 'pos', 'cobro', 'qr', 'mixto', 'admin']) {
+  for (const paso of ['login', 'pin', 'pos', 'cobro', 'qr', 'mixto', 'admin', 'personal']) {
     const destino = path.join(SALIDA, paso + '.png');
     spawnSync(navegador, [
       '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-sandbox',
@@ -152,6 +159,6 @@ function crearPaginaPiloto() {
   }
 
   console.log('\n  Guardadas en tools/capturas/\n');
-  limpiar();
+  await limpiar();
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -244,8 +244,8 @@ window.ThermalPrinter = (function () {
     ops.push(op('MASTERDRINKS', { align: 'center', bold: true, tall: true, wide: true }));
     ops.push(op(model.barra, { align: 'center' }));
     ops.push(op(rule(w)));
-    // La referencia lleva el prefijo de la barra (N-47): con tres servidores
-    // independientes, el número solo no distingue una comanda de otra.
+    // La referencia lleva el prefijo de la barra (B1-47): así un ticket sigue
+    // identificándose solo si aparece suelto días después del evento.
     ops.push(op('COMANDA ' + (model.ref || '#' + model.id),
       { align: 'center', bold: true, tall: true, wide: true }));
     ops.push(op(subtitulo, { align: 'center', bold: true }));

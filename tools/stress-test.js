@@ -108,7 +108,7 @@ function prepararBase() {
 function arrancarServidor() {
   const hijo = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
     cwd: RAIZ,
-    env: Object.assign({}, process.env, { RENOMBRAR_BARRA: '1', PORT: String(PUERTO), DB_FILE: BASE }),
+    env: Object.assign({}, process.env, { PORT: String(PUERTO), DB_FILE: BASE }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
   const registro = [];
@@ -396,5 +396,13 @@ function auditar(stockInicial, resultados) {
   hijo.kill('SIGTERM');
   await esperar(600);
   hijo.kill('SIGKILL');
+  await esperar(400);
+  // Windows no suelta el archivo en el mismo instante en que muere el
+  // proceso, así que se espera un momento antes de borrar; si no, el
+  // unlink falla en silencio y la base se queda en la carpeta igual.
+  // Se borra la base de la prueba al acabar. Antes se quedaba en la carpeta
+  // del proyecto junto a su -wal y su -shm, y acababan conviviendo cuatro
+  // juegos de archivos que parecían bases de verdad.
+  ['', '-wal', '-shm'].forEach(s => { try { fs.unlinkSync(BASE + s); } catch (e) {} });
   process.exit(fallaron === 0 && resultados.fallos.length === 0 ? 0 : 1);
 })();

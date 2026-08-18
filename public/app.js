@@ -27,12 +27,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const waiterError = document.getElementById('waiter-error');
 
     // ==========================================
-    // IDENTIDAD DE ESTA INSTANCIA
+    // IDENTIDAD DE LA BARRA
     // ==========================================
-    // Cada barra corre su propio servidor. La tablet pregunta al arrancar a
-    // cuál está conectada, para numerar las comandas con su prefijo (N-47) y
-    // enseñarlo en pantalla: con tres montajes idénticos y separados, saber en
-    // qué barra estás no puede depender de la memoria de nadie.
+    // La tablet pregunta al arrancar cómo se llama la barra, para rotularla en
+    // pantalla y numerar las comandas con su prefijo (B1-47). El nombre lo pone
+    // el encargado en el panel y suele cambiar de un evento a otro.
     let instancia = { nombre: '', prefijo: '' };
 
     const refComanda = id => (instancia.prefijo ? instancia.prefijo + '-' + id : '#' + id);
@@ -49,8 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             // El título nombra el acceso directo cuando se hace "Añadir a
-            // pantalla de inicio". Sin esto las tres barras crean tres iconos
-            // llamados igual y no hay forma de distinguirlos en la tablet.
+            // pantalla de inicio", y de paso rotula la pestaña del navegador
+            // con la barra y el evento que se están atendiendo.
             document.title = 'MasterDrinks · ' + instancia.nombre;
         } catch (err) {
             // Sin identidad la caja sigue funcionando: se cae al '#47' de antes.
@@ -59,7 +58,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     cargarInstancia();
-    cargarQrCobro();
     cargarConfiguracion();
 
     // ==========================================
@@ -812,7 +810,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Sólo el efectivo necesita cambio, sólo el mixto necesita repartir y
-        // sólo el QR necesita enseñar el código del banco.
+        // sólo el QR necesita la referencia del comprobante.
         document.getElementById('pay-panel-efectivo')
             .classList.toggle('hide', metodo !== EFECTIVO);
         document.getElementById('pay-panel-mixto')
@@ -825,40 +823,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ==========================================
-    // QR DE COBRO
+    // COBRO POR QR
     // ==========================================
-    // Es la imagen del QR fijo del banco, cargada una vez desde el panel. Este
-    // sistema NO comprueba con el banco si el pago entró: no tiene credenciales
-    // ni conexión durante el evento. Quien confirma es el cajero, mirando el
-    // comprobante del cliente; la referencia que teclee es lo que después
-    // permite cuadrar la caja contra el extracto bancario.
-    let qrCobro = { imagen: null, titular: '', banco: '' };
-
-    async function cargarQrCobro() {
-        try {
-            const res = await fetch('/api/qr-cobro');
-            if (res.ok) qrCobro = await res.json();
-        } catch (err) {
-            console.warn('No se pudo leer el QR de cobro:', err);
-        }
-    }
-
+    // Este sistema NO emite el QR ni comprueba con el banco si el pago entró:
+    // no tiene credenciales ni conexión durante el evento. El cajero enseña el
+    // código de su propia banca móvil, mira el comprobante del cliente y teclea
+    // la referencia, que es lo que después permite cuadrar la caja contra el
+    // extracto bancario.
     function prepararPanelQr() {
-        const img = document.getElementById('qr-cobro-img');
-        const falta = document.getElementById('qr-cobro-falta');
-        const titular = document.getElementById('qr-cobro-titular');
-
-        if (qrCobro.imagen) {
-            img.src = qrCobro.imagen;
-            img.classList.remove('hide');
-            falta.classList.add('hide');
-        } else {
-            img.classList.add('hide');
-            falta.classList.remove('hide');
-        }
-
-        const partes = [qrCobro.titular, qrCobro.banco].filter(Boolean);
-        titular.textContent = partes.join(' · ');
         document.getElementById('qr-cobro-monto').textContent = orderTotal.toFixed(2) + ' Bs.';
         document.getElementById('pay-referencia').value = '';
     }
@@ -1282,7 +1254,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentTicket = {
             id: 'PRUEBA',
             fecha: new Date().toLocaleString(),
-            barra: currentUser ? currentUser.nombre_barra : 'Barra',
+            barra: configEvento.barra || (currentUser ? currentUser.nombre_barra : 'Barra'),
             cajero: currentUser ? currentUser.nombre : 'Cajero',
             mesero: currentWaiter ? currentWaiter.nombre : 'Mesero',
             total: 60,
@@ -1331,7 +1303,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     function showAdminView() {
         detenerSondeoStock();
-        cargarQrCobro().then(pintarQrConfig);
         cargarConfiguracion().then(pintarConfiguracion);
         loginView.classList.add('hide');
         posView.classList.add('hide');
@@ -1400,13 +1371,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            // Con una sola barra no hay reparto que enseñar: la barra de
+            // progreso estaría siempre al 100 % y el porcentaje sobra. Se
+            // enseña el nombre y lo recaudado, que es lo único que informa.
+            const unaSola = barNames.length === 1;
+
             barNames.forEach(name => {
                 const amount = salesByBar[name];
                 const pct = totalRecaudado > 0 ? (amount / totalRecaudado) * 100 : 0;
 
                 const div = document.createElement('div');
                 div.className = 'sales-bar-item';
-                div.innerHTML = `
+                div.innerHTML = unaSola
+                    ? `
+                    <div class="sales-bar-info">
+                        <span>${escapeHtml(name)}</span>
+                        <strong>${amount.toFixed(2)} Bs.</strong>
+                    </div>
+                `
+                    : `
                     <div class="sales-bar-info">
                         <span>${escapeHtml(name)}</span>
                         <strong>${amount.toFixed(2)} Bs. (${pct.toFixed(1)}%)</strong>
@@ -1426,8 +1409,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // DATOS DEL EVENTO
     // ==========================================
     // Evento, fecha, lugar, barra y responsable. Van en la tabla
-    // `configuracion` de esta base, así que cada barra guarda los suyos, y
-    // encabezan los tickets y el reporte de cierre.
+    // `configuracion` y encabezan los tickets y el reporte de cierre. Se
+    // rellenan una vez por evento.
     let configEvento = { evento: '', fecha: '', lugar: '', barra: '', responsable: '' };
 
     async function cargarConfiguracion() {
@@ -1476,6 +1459,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     el.classList.remove('hide');
                 });
                 document.title = 'MasterDrinks · ' + instancia.nombre;
+                // La ficha de alta de cajeros enseña esta misma barra, así que
+                // se repinta aquí y no hace falta salir y volver a la pestaña.
+                pintarBarraDelCajero();
             }
             notify('Datos del evento guardados. Las comandas serán ' +
                    (data.instancia ? data.instancia.prefijo : '') + '-1, ' +
@@ -1485,88 +1471,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             boton.disabled = false;
         }
-    });
-
-    // ==========================================
-    // QR DE COBRO — CONFIGURACIÓN
-    // ==========================================
-    let qrPendiente = null;   // imagen recién elegida, aún sin guardar
-
-    function pintarQrConfig() {
-        const img = document.getElementById('qr-preview');
-        const vacio = document.getElementById('qr-vacio');
-        const fuente = qrPendiente || qrCobro.imagen;
-
-        if (fuente) {
-            img.src = fuente;
-            img.classList.remove('hide');
-            vacio.classList.add('hide');
-        } else {
-            img.classList.add('hide');
-            vacio.classList.remove('hide');
-        }
-        document.getElementById('qr-titular').value = qrCobro.titular || '';
-        document.getElementById('qr-banco').value = qrCobro.banco || '';
-    }
-
-    document.getElementById('qr-archivo').addEventListener('change', e => {
-        const archivo = e.target.files && e.target.files[0];
-        if (!archivo) return;
-
-        // 2 MB: un QR es una imagen pequeña. Si alguien sube una foto de 8 MP
-        // el servidor la rechazaría, así que se avisa aquí y no allí.
-        if (archivo.size > 2 * 1024 * 1024) {
-            notify('La imagen pesa más de 2 MB. Recórtala y vuelve a intentarlo.', 'warn');
-            e.target.value = '';
-            return;
-        }
-
-        const lector = new FileReader();
-        lector.onload = () => { qrPendiente = lector.result; pintarQrConfig(); };
-        lector.onerror = () => notify('No se pudo leer la imagen.', 'error');
-        lector.readAsDataURL(archivo);
-    });
-
-    async function guardarQrCobro(imagen) {
-        const boton = document.getElementById('qr-guardar-btn');
-        boton.disabled = true;
-        try {
-            const res = await fetch('/api/admin/qr-cobro', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    imagen,
-                    titular: document.getElementById('qr-titular').value,
-                    banco: document.getElementById('qr-banco').value
-                })
-            });
-            const data = await res.json();
-            if (!res.ok || !data.success) throw new Error(data.message || 'error');
-
-            await cargarQrCobro();
-            qrPendiente = null;
-            pintarQrConfig();
-            notify(imagen ? 'QR de cobro guardado.' : 'QR de cobro quitado.', 'ok');
-        } catch (err) {
-            notify(err.message || 'No se pudo guardar el QR.', 'error');
-        } finally {
-            boton.disabled = false;
-        }
-    }
-
-    document.getElementById('qr-guardar-btn').addEventListener('click', () => {
-        const imagen = qrPendiente || qrCobro.imagen;
-        if (!imagen) {
-            notify('Elige primero la imagen del QR.', 'warn');
-            return;
-        }
-        guardarQrCobro(imagen);
-    });
-
-    document.getElementById('qr-quitar-btn').addEventListener('click', () => {
-        qrPendiente = null;
-        document.getElementById('qr-archivo').value = '';
-        guardarQrCobro('');
     });
 
     // ==========================================
@@ -1934,15 +1838,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/admin/configuracion');
             const data = await response.json();
 
-            // Populate Cajero's Barra selector
-            const cajBarra = document.getElementById('caj-barra');
-            cajBarra.innerHTML = '<option value="" disabled selected>Seleccione barra...</option>';
-            data.barras.forEach(b => {
-                const opt = document.createElement('option');
-                opt.value = b.id_barra;
-                opt.textContent = `${b.nombre_barra} (${b.ubicacion})`;
-                cajBarra.appendChild(opt);
-            });
+            // La barra no se elige: es la de este servidor. Se enseña sólo
+            // para que quede claro dónde va a poder cobrar el cajero.
+            pintarBarraDelCajero();
 
             // Populate Mesero's Cajero selector
             const mesCajero = document.getElementById('mes-cajero');
@@ -1958,37 +1856,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Form: Create Barra
-    document.getElementById('form-create-barra').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const nombre_barra = document.getElementById('bar-name').value;
-        const descripcion = document.getElementById('bar-desc').value;
-        const ubicacion = document.getElementById('bar-location').value;
-
-        try {
-            const response = await fetch('/api/admin/barras', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nombre_barra, descripcion, ubicacion, id_evento: currentUser.id_evento, id_admin: currentUser.id_admin })
-            });
-            const data = await response.json();
-
-            if (data.success) {
-                notify('Barra creada.', 'ok');
-                document.getElementById('form-create-barra').reset();
-                loadPersonalSetup(); // Refresh selectors
-            } else {
-                notify(data.message || 'No se pudo completar la operación.', 'error');
-            }
-        } catch (err) {
-            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
-        }
-    });
+    // La barra de esta instancia, tal como se rotuló en Datos del evento. Ya no
+    // se crean barras desde el panel: un servidor es una barra.
+    function pintarBarraDelCajero() {
+        const casilla = document.getElementById('caj-barra');
+        if (casilla) casilla.value = instancia.nombre || '—';
+    }
 
     // Form: Create Cajero
     document.getElementById('form-create-cajero').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const id_barra = document.getElementById('caj-barra').value;
         const nombre = document.getElementById('caj-name').value;
         const usuario = document.getElementById('caj-user').value;
         const password = document.getElementById('caj-pass').value;
@@ -1997,7 +1874,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/admin/cajeros', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id_barra, nombre, usuario, password, id_admin: currentUser.id_admin, id_evento: currentUser.id_evento })
+                body: JSON.stringify({ nombre, usuario, password, id_admin: currentUser.id_admin, id_evento: currentUser.id_evento })
             });
             const data = await response.json();
 

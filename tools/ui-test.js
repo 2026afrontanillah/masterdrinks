@@ -58,7 +58,7 @@ const check = (nombre, ok, extra) => {
 
   const servidor = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
     cwd: RAIZ,
-    env: Object.assign({}, process.env, { RENOMBRAR_BARRA: '1', PORT: String(PUERTO), DB_FILE: BASE }),
+    env: Object.assign({}, process.env, { PORT: String(PUERTO), DB_FILE: BASE }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
   const registro = [];
@@ -78,7 +78,17 @@ const check = (nombre, ok, extra) => {
 
   const terminar = codigo => {
     servidor.kill('SIGTERM');
-    setTimeout(() => { servidor.kill('SIGKILL'); process.exit(codigo); }, 500);
+    setTimeout(() => {
+      servidor.kill('SIGKILL');
+      // Windows no suelta el archivo en el mismo instante en que muere el
+      // proceso, así que se espera un momento antes de borrar; si no, el
+      // unlink falla en silencio y la base se queda en la carpeta igual.
+      // Se borra la base de la prueba al acabar. Antes se quedaba en la carpeta
+      // del proyecto junto a su -wal y su -shm, y acababan conviviendo cuatro
+      // juegos de archivos que parecían bases de verdad.
+      ['', '-wal', '-shm'].forEach(s => { try { fs.unlinkSync(BASE + s); } catch (e) {} });
+      setTimeout(() => process.exit(codigo), 300);
+    }, 500);
   };
 
   // ---- navegador simulado ----
@@ -281,6 +291,12 @@ const check = (nombre, ok, extra) => {
   check('El ticket lleva la marca y la referencia con prefijo de barra',
     previa.includes('MASTERDRINKS') && /COMANDA [A-Z0-9]{1,3}-\d+/.test(previa),
     (previa.match(/COMANDA [A-Z0-9-]+\d/) || [])[0]);
+  // El nombre de la barra lo escribe el encargado en Datos del evento y tiene
+  // que llegar tal cual a la cabecera del ticket: es lo que lee el cliente y lo
+  // que distingue un comprobante de otro si se juntan varias cajas.
+  const cfgTicket = await (await fetch(URL_BASE + '/api/configuracion')).json();
+  check('El ticket lleva impreso el nombre de la barra del panel',
+    previa.includes(cfgTicket.barra), cfgTicket.barra);
   check('El ticket imprime el precio unitario', / x \d+\.\d\d/.test(previa));
   check('El ticket refleja los dos métodos de pago',
     previa.includes('Efectivo') && previa.includes('Transferencia'));

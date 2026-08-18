@@ -50,3 +50,10 @@ pos_evento.cfg.db*
 
 # Informe del diagnostico de instalacion
 diagnostico-npm.txt
+
+# Copias de seguridad automáticas antes de unificar barras. Se crean una sola
+# vez por base, junto a ella, y no deben viajar al repositorio.
+*.antes-de-unificar.db*
+
+# Copia previa al reinicio de ventas
+*.antes-de-reiniciar.db*

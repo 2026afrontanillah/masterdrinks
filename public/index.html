@@ -190,7 +190,7 @@
                     <button class="nav-tab-btn active" data-tab="tab-dashboard">📊 Dashboard</button>
                     <button class="nav-tab-btn" data-tab="tab-comandas">📝 Comandas / Anulaciones</button>
                     <button class="nav-tab-btn" data-tab="tab-crear-producto">🛍️ Productos & Categorías</button>
-                    <button class="nav-tab-btn" data-tab="tab-crear-personal">👥 Personal & Barras</button>
+                    <button class="nav-tab-btn" data-tab="tab-crear-personal">👥 Personal</button>
                     <button class="nav-tab-btn" data-tab="tab-stock">📦 Ajustar Stock</button>
                     <button class="nav-tab-btn" data-tab="tab-inventario">📋 Reporte de Stock</button>
                     <button class="nav-tab-btn" data-tab="tab-auditoria">🔍 Logs & Auditoría</button>
@@ -234,13 +234,13 @@
 
                     <!-- Datos del evento.
                          Encabezan los tickets y el reporte de cierre. Se
-                         guardan en la tabla `configuracion` de esta base, así
-                         que cada barra tiene los suyos. -->
+                         guardan en la tabla `configuracion`, y suelen cambiar
+                         de un evento al siguiente. -->
                     <div class="glass-card reporte-card">
                         <h2>🏷️ Datos del evento</h2>
                         <p class="reporte-hint">
-                            Lo que sale impreso en los tickets y en la cabecera del reporte de
-                            cierre. Cada barra guarda los suyos.
+                            Lo que sale impreso en los tickets y en la cabecera del reporte
+                            de cierre. Cámbialos en cada evento.
                         </p>
                         <div class="config-grid">
                             <div class="form-group">
@@ -257,7 +257,11 @@
                             </div>
                             <div class="form-group">
                                 <label for="cfg-barra">Barra</label>
-                                <input type="text" id="cfg-barra" maxlength="120" placeholder="Ej. Barra Norte">
+                                <input type="text" id="cfg-barra" maxlength="120" placeholder="Ej. Barra 1">
+                                <p class="campo-nota">
+                                    Sale impreso en cada ticket, encabeza el reporte de cierre
+                                    y numera las comandas.
+                                </p>
                             </div>
                             <div class="form-group">
                                 <label for="cfg-responsable">Responsable</label>
@@ -266,46 +270,6 @@
                         </div>
                         <div class="reporte-acciones">
                             <button type="button" id="cfg-guardar-btn" class="primary-btn">Guardar datos</button>
-                        </div>
-                    </div>
-
-                    <!-- QR de cobro.
-                         Es la imagen del QR fijo del banco, para enseñarla en
-                         la caja sin sacar el teléfono. Este sistema no emite
-                         QR ni detecta pagos: eso exige la API del banco. -->
-                    <div class="glass-card reporte-card">
-                        <h2>📲 QR de cobro</h2>
-                        <p class="reporte-hint">
-                            Sube aquí el QR de tu banca móvil y la caja lo mostrará a pantalla
-                            completa cuando el cliente pague por QR, con el importe al lado.
-                            <strong>El sistema no comprueba los pagos con el banco</strong>: el cajero
-                            confirma cada cobro y anota la referencia del comprobante, que después
-                            sale en el reporte de cierre para cuadrarla con tu extracto.
-                        </p>
-
-                        <div class="qr-config">
-                            <div class="qr-config-preview">
-                                <img id="qr-preview" alt="QR de cobro" class="hide">
-                                <p id="qr-vacio" class="qr-vacio">Sin QR cargado</p>
-                            </div>
-                            <div class="qr-config-campos">
-                                <div class="form-group">
-                                    <label for="qr-archivo">Imagen del QR</label>
-                                    <input type="file" id="qr-archivo" accept="image/png,image/jpeg,image/webp">
-                                </div>
-                                <div class="form-group">
-                                    <label for="qr-titular">Titular de la cuenta</label>
-                                    <input type="text" id="qr-titular" placeholder="Ej. MasterDrinks SRL" maxlength="80">
-                                </div>
-                                <div class="form-group">
-                                    <label for="qr-banco">Banco</label>
-                                    <input type="text" id="qr-banco" placeholder="Ej. Banco Unión" maxlength="80">
-                                </div>
-                                <div class="reporte-acciones">
-                                    <button type="button" id="qr-guardar-btn" class="primary-btn">Guardar QR</button>
-                                    <button type="button" id="qr-quitar-btn" class="secondary-btn">Quitar</button>
-                                </div>
-                            </div>
                         </div>
                     </div>
 
@@ -428,39 +392,23 @@
                     </div>
                 </section>
 
-                <!-- Tab: Crear Personal & Barras -->
+                <!-- Tab: Crear Personal -->
                 <section id="tab-crear-personal" class="tab-content hide">
-                    <h1 class="page-title">Personal & Puntos de Venta</h1>
+                    <h1 class="page-title">Personal de la barra</h1>
                     <div class="admin-grid-forms">
-                        <!-- Create Barra -->
-                        <div class="glass-card form-card">
-                            <h2>Nueva Barra</h2>
-                            <form id="form-create-barra">
-                                <div class="form-group">
-                                    <label for="bar-name">Nombre de Barra</label>
-                                    <input type="text" id="bar-name" placeholder="Ej. Barra VIP" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="bar-desc">Descripción</label>
-                                    <input type="text" id="bar-desc" placeholder="Ej. Barra exclusiva sector VIP">
-                                </div>
-                                <div class="form-group">
-                                    <label for="bar-location">Ubicación física</label>
-                                    <input type="text" id="bar-location" placeholder="Ej. Terraza Alta Oeste" required>
-                                </div>
-                                <button type="submit" class="primary-btn">Crear Barra</button>
-                            </form>
-                        </div>
-
                         <!-- Create Cajero -->
                         <div class="glass-card form-card">
                             <h2>Nuevo Cajero</h2>
                             <form id="form-create-cajero">
+                                <!-- La barra no se elige: este servidor es una
+                                     barra, y su nombre sale de Datos del evento. -->
                                 <div class="form-group">
-                                    <label for="caj-barra">Barra Asignada</label>
-                                    <select id="caj-barra" required>
-                                        <!-- Populated dynamically -->
-                                    </select>
+                                    <label for="caj-barra">Barra</label>
+                                    <input type="text" id="caj-barra" class="campo-fijo" readonly
+                                           tabindex="-1" value="—">
+                                    <p class="campo-nota">
+                                        Se cambia en <strong>Dashboard → Datos del evento</strong>.
+                                    </p>
                                 </div>
                                 <div class="form-group">
                                     <label for="caj-name">Nombre Completo</label>
@@ -749,15 +697,11 @@
                 </div>
             </div>
 
-            <!-- QR: se enseña el código del banco con el importe al lado.
-                 La confirmación es del cajero, no del sistema. -->
+            <!-- QR: el cajero enseña el código de su propia banca móvil. Aquí sólo
+                 se recuerda el importe y se anota la referencia del comprobante,
+                 porque quien confirma el cobro es el cajero, no el sistema. -->
             <div id="pay-panel-qr" class="pay-panel hide">
                 <div class="qr-cobro">
-                    <img id="qr-cobro-img" alt="QR de cobro" class="hide">
-                    <p id="qr-cobro-falta" class="qr-vacio hide">
-                        No hay ningún QR cargado. Súbelo desde el panel de administrador.
-                    </p>
-                    <p id="qr-cobro-titular" class="qr-cobro-titular"></p>
                     <p class="qr-cobro-monto">El cliente debe transferir <strong id="qr-cobro-monto">0.00 Bs.</strong></p>
                 </div>
                 <label class="pay-label" for="pay-referencia">

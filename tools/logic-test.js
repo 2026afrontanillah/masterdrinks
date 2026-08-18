@@ -74,7 +74,7 @@ const leer = sql => {
   prepararBase();
   const hijo = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
     cwd: RAIZ,
-    env: Object.assign({}, process.env, { RENOMBRAR_BARRA: '1', PORT: String(PUERTO), DB_FILE: BASE }),
+    env: Object.assign({}, process.env, { PORT: String(PUERTO), DB_FILE: BASE }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
   const registro = [];
@@ -88,8 +88,12 @@ const leer = sql => {
 
   const { productos } = await get('/api/productos');
   const prod = productos[0];
+  // La barra no se escribe a mano: el servidor unifica la base en una sola y su
+  // id depende de con cuál se quedó. Escribir "1" aquí ataba la prueba a un
+  // detalle interno que ya no se cumple.
+  const idBarra = leer('SELECT id_barra FROM barra ORDER BY id_barra')[0].id_barra;
   const base = {
-    id_evento: 1, id_barra: 1, id_cajero: 1, id_mesero: 1,
+    id_evento: 1, id_barra: idBarra, id_cajero: 1, id_mesero: 1,
     observaciones: 'prueba de logica'
   };
   const item = (id, cant) => ({ id_producto: id, cantidad: cant, precio_unitario: 1, subtotal: 1 });
@@ -364,10 +368,10 @@ const leer = sql => {
   r = await post('/api/login', { usuario: 'cajero_norte_1', password: 'incorrecta' });
   check('Rechaza una contraseña equivocada', r.status === 401);
 
-  r = await post('/api/login/mesero', { password: '0000', id_cajero: 1, id_barra: 1, id_evento: 1 });
+  r = await post('/api/login/mesero', { password: '0000', id_cajero: 1, id_barra: idBarra, id_evento: 1 });
   check('Rechaza un PIN que no existe', r.status === 401);
 
-  r = await post('/api/login/mesero', { password: '1009', id_cajero: 1, id_barra: 1, id_evento: 1 });
+  r = await post('/api/login/mesero', { password: '1009', id_cajero: 1, id_barra: idBarra, id_evento: 1 });
   check('Acepta el PIN de un mesero de otra caja del mismo servidor',
     r.status === 200 && r.json.mesero.id_mesero === 9);
 
@@ -390,10 +394,10 @@ const leer = sql => {
   }
 
   // =======================================================================
-  console.log(C.tit('\n  Identidad de instancia'));
+  console.log(C.tit('\n  Identidad de la barra'));
   // =======================================================================
-  // Cada barra corre su propio servidor con su propia base. Sin identidad, las
-  // tres numeran desde 1 y al juntarlas no se sabe qué venta fue de dónde.
+  // El nombre de la barra sale del panel y de él depende el prefijo con el que
+  // se numeran las comandas, así que el servidor tiene que saber decir cuál es.
   const ident = await get('/api/instancia');
   check('El servidor dice quién es', !!ident.nombre && !!ident.prefijo,
     ident.nombre + ' / ' + ident.prefijo);
@@ -426,8 +430,12 @@ const leer = sql => {
     columnasCfg.join(', '));
 
   const cfgInicial = await get('/api/configuracion');
-  check('Nace con una fila rellena, nunca vacía',
-    !!cfgInicial.evento && !!cfgInicial.barra, cfgInicial.evento + ' · ' + cfgInicial.barra);
+  check('Nace con su fila, no vacía del todo', !!cfgInicial.evento, cfgInicial.evento);
+  // La barra es la excepción a propósito: se deja en blanco para que nadie
+  // acabe imprimiendo tickets con un nombre sembrado que no eligió. El panel
+  // no deja guardar sin ella, y eso se comprueba unas líneas más abajo.
+  check('La barra empieza sin nombre, esperando al panel',
+    typeof cfgInicial.barra === 'string', JSON.stringify(cfgInicial.barra));
 
   const guardarCfg = cuerpo => fetch(URL + '/api/admin/configuracion-evento', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo)
@@ -478,36 +486,40 @@ const leer = sql => {
     ventaConPrefijo.json.ref_comanda);
 
   // =======================================================================
-  console.log(C.tit(String.fromCharCode(10) + '  Cada barra, sólo lo suyo'));
+  console.log(C.tit(String.fromCharCode(10) + '  Una sola barra'));
   // =======================================================================
-  // Una base sembrada para una barra concreta no debe traer los cajeros ni los
-  // meseros de las otras: si en la tablet de Norte se pudiera entrar como
-  // cajero_sur_1, esa venta aparecería bajo "Barra Sur" dentro del cierre de
-  // Norte, que es un informe con una barra que allí no existe.
+  // Antes se sembraban tres barras y el personal de cada una. Ahora la base
+  // nace con una sola y todo el personal cuelga de ella; lo que hay que
+  // comprobar es que no quede nadie apuntando a una barra que no existe.
   const barrasEnBase = leer('SELECT nombre_barra FROM barra').map(b => b.nombre_barra);
   const cajerosEnBase = leer('SELECT usuario FROM cajero').map(c => c.usuario);
 
-  if (barrasEnBase.length === 1) {
-    const propia = barrasEnBase[0].toLowerCase();
-    check('La base trae una sola barra', true, barrasEnBase[0]);
-    check('Todos sus cajeros son de esa barra',
-      cajerosEnBase.every(u => propia.includes(u.split('_')[1])),
-      cajerosEnBase.join(', '));
-    check('Ningún mesero cuelga de un cajero que no está',
-      leer(`SELECT m.id_mesero FROM mesero m
-            LEFT JOIN cajero c ON c.id_cajero = m.id_cajero
-            WHERE c.id_cajero IS NULL`).length === 0);
-  } else {
-    // Montaje de una sola instancia que lo lleva todo: debe seguir funcionando.
-    check('El montaje de una sola instancia conserva todas las barras',
-      barrasEnBase.length > 1, barrasEnBase.join(', '));
-    check('Y todos sus cajeros', cajerosEnBase.length === 9, cajerosEnBase.length + ' cajeros');
-  }
+  // Con un servidor por evento la base queda unificada en UNA barra y todo el
+  // personal cuelga de ella. Mirar el nombre de usuario ya no sirve de nada:
+  // "cajero_sur_1" es un nombre histórico, no dice de qué barra es. Lo que hay
+  // que comprobar es que no quede nadie apuntando a una barra borrada, que es
+  // lo que sí rompería el cierre de caja.
+  check('La base quedó con una sola barra', barrasEnBase.length === 1, barrasEnBase.join(', '));
+  check('Todos los cajeros están en esa barra',
+    leer(`SELECT c.id_cajero FROM cajero c
+          LEFT JOIN barra b ON b.id_barra = c.id_barra
+          WHERE b.id_barra IS NULL`).length === 0,
+    cajerosEnBase.length + ' cajeros');
+  check('Ninguna comanda cuelga de una barra que ya no existe',
+    leer(`SELECT k.id_comanda FROM comanda k
+          LEFT JOIN barra b ON b.id_barra = k.id_barra
+          WHERE b.id_barra IS NULL`).length === 0);
+  check('Ninguna venta se perdió al unificar',
+    leer('SELECT COUNT(*) AS n FROM comanda')[0].n > 0);
+  check('Ningún mesero cuelga de un cajero que no está',
+    leer(`SELECT m.id_mesero FROM mesero m
+          LEFT JOIN cajero c ON c.id_cajero = m.id_cajero
+          WHERE c.id_cajero IS NULL`).length === 0);
   check('El administrador existe siempre, sea cual sea la barra',
     leer("SELECT id_admin FROM administrador_evento WHERE usuario = 'admin_evento'").length === 1);
 
-  // Y ahora una base recién creada para una barra concreta: es el caso real de
-  // cada tablet del evento, que arranca con su .db vacío.
+  // Y ahora una base recién creada: es el caso real de la tablet del evento,
+  // que arranca con su .db vacío y tiene que nacer ya con UNA sola barra.
   {
     const BASE_NUEVA = path.join(RAIZ, 'pos_evento.semilla.db');
     ['', '-wal', '-shm'].forEach(x => { if (fs.existsSync(BASE_NUEVA + x)) fs.unlinkSync(BASE_NUEVA + x); });
@@ -516,7 +528,6 @@ const leer = sql => {
     const cria = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
       cwd: RAIZ,
       env: Object.assign({}, process.env, {
-        INSTANCIA: 'Norte', PREFIJO: 'N',
         PORT: String(puertoSemilla), DB_FILE: BASE_NUEVA
       }),
       stdio: 'ignore'
@@ -537,12 +548,13 @@ const leer = sql => {
     await esperar(400);
     ['', '-wal', '-shm'].forEach(x => { try { fs.unlinkSync(BASE_NUEVA + x); } catch (e) {} });
 
-    check('Una base nueva de Norte trae SÓLO la Barra Norte',
-      barras.length === 1 && barras[0] === 'Barra Norte', barras.join(', '));
-    check('Trae sólo los cajeros de Norte',
-      cajeros.length === 3 && cajeros.every(u => u.includes('norte')), cajeros.join(', '));
-    check('Trae sólo los meseros de esos cajeros', meseros === 15, meseros + ' meseros');
-    check('Y el administrador, que hace falta en todas', admins > 0);
+    check('Una base nueva nace con UNA sola barra',
+      barras.length === 1, barras.join(', '));
+    check('Y se llama "Barra 1", el nombre de partida',
+      barras[0] === 'Barra 1', barras[0]);
+    check('Su personal de muestra entra entero', cajeros.length === 9 && meseros === 45,
+      cajeros.length + ' cajeros y ' + meseros + ' meseros');
+    check('Y el administrador, que siempre hace falta', admins > 0);
   }
 
 
@@ -656,6 +668,30 @@ const leer = sql => {
   check('Ningún stock quedó negativo',
     leer('SELECT id_producto FROM producto WHERE stock_actual < 0').length === 0);
 
+  // Cada unidad que sale tiene que dejar rastro. Sin esto una venta puede bajar
+  // el stock sin aparecer en el reporte, y al contar cajas por la noche falta
+  // mercancía que nadie sabe explicar.
+  check('Ninguna línea vendida se quedó sin su movimiento de stock',
+    leer(`SELECT d.id_detalle FROM detalle_comanda d
+          WHERE NOT EXISTS (SELECT 1 FROM movimiento_stock m
+                             WHERE m.id_producto = d.id_producto
+                               AND m.motivo = 'Venta comanda #' || d.id_comanda)`).length === 0);
+
+  // El stock de cada producto tiene que ser el que dejó su último movimiento.
+  // Se compara así y no sumando entradas menos salidas porque un AJUSTE fija el
+  // total en vez de sumarlo.
+  check('Cada producto cuadra con su último movimiento de stock',
+    leer(`SELECT p.id_producto FROM producto p
+          WHERE p.stock_actual <> COALESCE(
+            (SELECT m.stock_nuevo FROM movimiento_stock m
+              WHERE m.id_producto = p.id_producto
+              ORDER BY m.id_movimiento DESC LIMIT 1), 0)`).length === 0);
+
+  check('Ningún pago quedó sin su comanda',
+    leer(`SELECT p.id_pago FROM pago_comanda p
+          LEFT JOIN comanda c ON c.id_comanda = p.id_comanda
+          WHERE c.id_comanda IS NULL`).length === 0);
+
   console.log('');
   console.log(fallos === 0
     ? '  ' + C.ok('Todo correcto: ninguna entrada inválida pasó ni dejó rastro.') + '\n'
@@ -664,5 +700,13 @@ const leer = sql => {
   hijo.kill('SIGTERM');
   await esperar(600);
   hijo.kill('SIGKILL');
+  await esperar(400);
+  // Windows no suelta el archivo en el mismo instante en que muere el
+  // proceso, así que se espera un momento antes de borrar; si no, el
+  // unlink falla en silencio y la base se queda en la carpeta igual.
+  // Se borra la base de la prueba al acabar. Antes se quedaba en la carpeta
+  // del proyecto junto a su -wal y su -shm, y acababan conviviendo cuatro
+  // juegos de archivos que parecían bases de verdad.
+  ['', '-wal', '-shm'].forEach(s => { try { fs.unlinkSync(BASE + s); } catch (e) {} });
   process.exit(fallos === 0 ? 0 : 1);
 })().catch(e => { console.error(C.mal('Error: '), e); process.exit(1); });

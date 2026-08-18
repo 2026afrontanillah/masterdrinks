@@ -129,6 +129,11 @@ body::after {
     background: var(--card-bg);
     border: 1px solid var(--card-border);
     border-radius: 14px;
+    /* Relleno de base. Faltaba, y el contenido de las tarjetas del resumen
+       quedaba pegado al borde; se notaba poco mientras eran altas y mucho al
+       dejar una sola barra. Las variantes que traen el suyo (.form-card,
+       .reporte-card) lo siguen mandando por ser más específicas. */
+    padding: 24px;
     box-shadow: var(--shadow-card);
     transition: border-color 0.3s ease;
 }
@@ -315,6 +320,28 @@ body::after {
     border-color: var(--primary);
     background: rgba(255, 255, 255, 0.08);
     box-shadow: none;
+}
+
+/* Casilla que sólo informa: el dato se decide en otro sitio y aquí se enseña
+   para no dejar al usuario adivinando. Se ve apagada y no acepta el foco, así
+   que nadie intenta escribir en ella. */
+.campo-fijo,
+.form-group input.campo-fijo[readonly] {
+    background: rgba(255, 255, 255, 0.02);
+    border-style: dashed;
+    color: var(--text-secondary);
+    cursor: default;
+}
+
+.form-group input.campo-fijo[readonly]:focus {
+    border-color: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.campo-nota {
+    margin-top: 6px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
 }
 
 select option {
@@ -2238,31 +2265,13 @@ select option {
 }
 
 /* ==========================================================================
-   QR DE COBRO
+   COBRO POR QR
    ========================================================================== */
-/* En la caja, el QR se enseña grande y sobre blanco: un QR sobre fondo oscuro
-   o pequeño da problemas de lectura con cámaras malas y poca luz, que es
-   exactamente la situación de una barra de noche. */
+/* Sin imagen: el cajero enseña el código de su propia banca móvil. Aquí sólo
+   se recuerda el importe, en grande, para no equivocarse al dictarlo. */
 .qr-cobro {
     text-align: center;
     margin-bottom: 16px;
-}
-
-.qr-cobro img {
-    display: block;
-    width: 230px;
-    height: 230px;
-    object-fit: contain;
-    margin: 0 auto 12px;
-    background: #fff;
-    padding: 12px;
-    border-radius: 12px;
-}
-
-.qr-cobro-titular {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--text-primary);
 }
 
 .qr-cobro-monto {
@@ -2274,55 +2283,6 @@ select option {
 .qr-cobro-monto strong {
     color: var(--accent-color);
     font-size: 1.05rem;
-}
-
-.qr-vacio {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    padding: 24px 12px;
-}
-
-/* Configuración en el panel */
-.qr-config {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 24px;
-    align-items: flex-start;
-}
-
-.qr-config-preview {
-    flex: 0 0 200px;
-    min-height: 200px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px dashed var(--card-border);
-    border-radius: 12px;
-    padding: 12px;
-}
-
-.qr-config-preview img {
-    max-width: 100%;
-    max-height: 200px;
-    background: #fff;
-    padding: 8px;
-    border-radius: 8px;
-}
-
-.qr-config-campos {
-    flex: 1;
-    min-width: 260px;
-}
-
-.qr-config-campos input[type="file"] {
-    width: 100%;
-    padding: 10px;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--card-border);
-    color: var(--text-secondary);
-    font-size: 0.85rem;
 }
 
 /* ==========================================================================

@@ -11,8 +11,8 @@
     "test:interfaz": "node tools/ui-test.js",
     "test:carga": "node tools/stress-test.js",
     "test:sync": "node tools/sync-test.js",
-    "capturas": "node tools/capturas.js",
-    "barra": "node tools/barra.js"
+    "reiniciar": "node tools/reiniciar-ventas.js",
+    "capturas": "node tools/capturas.js"
   },
   "keywords": [
     "nodejs",
