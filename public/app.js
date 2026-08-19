@@ -30,11 +30,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // IDENTIDAD DE LA BARRA
     // ==========================================
     // La tablet pregunta al arrancar cómo se llama la barra, para rotularla en
-    // pantalla y numerar las comandas con su prefijo (B1-47). El nombre lo pone
-    // el encargado en el panel y suele cambiar de un evento a otro.
-    let instancia = { nombre: '', prefijo: '' };
+    // pantalla y en los tickets. El nombre lo pone el encargado en el panel y
+    // suele cambiar de un evento a otro.
+    let instancia = { nombre: '' };
 
-    const refComanda = id => (instancia.prefijo ? instancia.prefijo + '-' + id : '#' + id);
+    // El número de comanda es sólo el número: es lo que el mesero canta en voz
+    // alta y lo que el cliente busca en su ticket.
+    const refComanda = id => String(id);
 
     async function cargarInstancia() {
         try {
@@ -51,6 +53,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // pantalla de inicio", y de paso rotula la pestaña del navegador
             // con la barra y el evento que se están atendiendo.
             document.title = 'MasterDrinks · ' + instancia.nombre;
+
+            // Si el número que sale aquí no coincide con el que imprimió el
+            // servidor al arrancar, esta tablet está corriendo código viejo de
+            // su caché: hay que recargar la página.
+            if (instancia.version) {
+                document.querySelectorAll('.version-num').forEach(el => {
+                    el.textContent = instancia.version;
+                });
+            }
         } catch (err) {
             // Sin identidad la caja sigue funcionando: se cae al '#47' de antes.
             console.warn('No se pudo leer la identidad de la instancia:', err);
@@ -262,16 +273,91 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Cashier Logout inside Waiter Lock
-    document.getElementById('logout-cajero-btn').addEventListener('click', () => {
+    // Deja el POS como recién abierto.
+    //
+    // Sin esto, el mesero que armaba un pedido y se iba sin cobrar se lo dejaba
+    // puesto al siguiente: entraba con su PIN y se encontraba el carrito de
+    // otro, con el contador marcando productos que él no había tocado. Si lo
+    // cobraba sin mirar, la venta salía mal y el stock también.
+    function vaciarCarrito() {
+        const habia = cart.length;
+        const tocados = cart.map(i => i.id_producto);
+
+        cart = [];
+        payments = [];
+        efectivoRecibido = 0;
+        metodoActivo = EFECTIVO;
+
+        const obs = document.getElementById('cart-observations');
+        if (obs) obs.value = '';
+
+        renderCart();
+        recalcularTotal();
+        // Las tarjetas llevan encima el número de unidades ya añadidas: hay que
+        // quitárselo, o seguirían marcando un carrito que ya no existe.
+        tocados.forEach(id => actualizarTarjeta(id, false));
+        return habia;
+    }
+
+    // Salida al login, escondida detrás de una pulsación larga.
+    //
+    // El botón visible que había aquí se quitó: la barra es siempre la misma y
+    // el cajero no cambia durante el turno, así que sólo servía para salirse
+    // sin querer y tener que volver a teclear usuario y contraseña con gente
+    // esperando. Pero el encargado sí necesita llegar al panel para ajustar
+    // stock o sacar el cierre, y sin ninguna salida habría que recargar la
+    // página en el navegador, que en una tablet no es evidente.
+    //
+    // Tres segundos: lo bastante largo como para que nadie lo descubra por
+    // accidente apoyando el dedo, lo bastante corto para no desesperar.
+    const ESPERA_SALIDA = 3000;
+    let temporizadorSalida = null;
+
+    function cerrarSesionCajero() {
+        vaciarCarrito();
         currentUser = null;
+        currentWaiter = null;
         clearPin();
         waiterModal.classList.add('hide');
+        posView.classList.add('hide');
         loginView.classList.remove('hide');
-    });
+    }
+
+    const salidaOculta = document.getElementById('salida-oculta');
+    if (salidaOculta) {
+        const empezar = () => {
+            cancelar();
+            salidaOculta.classList.add('cargando');
+            temporizadorSalida = setTimeout(() => {
+                salidaOculta.classList.remove('cargando');
+                vibrar([30, 60, 30]);
+                notify('Sesión del cajero cerrada.', 'ok');
+                cerrarSesionCajero();
+            }, ESPERA_SALIDA);
+        };
+        const cancelar = () => {
+            salidaOculta.classList.remove('cargando');
+            if (temporizadorSalida) clearTimeout(temporizadorSalida);
+            temporizadorSalida = null;
+        };
+
+        // pointer* cubre dedo y ratón con los mismos manejadores. 'pointerleave'
+        // y 'pointercancel' hacen falta porque en una tablet el dedo se desliza
+        // fuera del icono sin llegar a levantarse.
+        salidaOculta.addEventListener('pointerdown', empezar);
+        ['pointerup', 'pointerleave', 'pointercancel'].forEach(
+            ev => salidaOculta.addEventListener(ev, cancelar));
+    }
 
     // Lock POS (Switch waiter)
     document.getElementById('lock-pos-btn').addEventListener('click', () => {
+        // Se avisa de lo que se descarta: si el mesero se equivocó de botón,
+        // tiene que enterarse ahora y no cuando vuelva y no encuentre nada.
+        const habia = vaciarCarrito();
+        if (habia > 0) {
+            notify('Se vació el carrito: ' + habia +
+                   (habia === 1 ? ' producto sin cobrar.' : ' productos sin cobrar.'), 'warn');
+        }
         currentWaiter = null;
         posView.classList.add('hide');
         showWaiterModal();
@@ -385,7 +471,11 @@ document.addEventListener('DOMContentLoaded', () => {
     async function refrescarStock() {
         let data;
         try {
-            const response = await fetch('/api/productos');
+            // Sólo las existencias, no el catálogo entero. Con una foto por
+            // producto, pedir /api/productos cada doce segundos son 600 KB por
+            // tablet y por sondeo: sobre el WiFi de un teléfono eso deja sin
+            // antena a las ventas, que es lo único que no puede esperar.
+            const response = await fetch('/api/stock');
             if (!response.ok) return;
             data = await response.json();
         } catch (err) {
@@ -394,23 +484,28 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const anterior = new Map(products.map(p => [p.id_producto, p.stock_actual]));
-        const nuevos = data.productos;
+        const llegado = new Map((data.stock || []).map(p => [p.id, p.s]));
 
-        // Si cambió el catálogo (alta o baja de productos), hay que repintar.
-        const mismosProductos = nuevos.length === products.length &&
-            nuevos.every(p => anterior.has(p.id_producto));
-
-        products = nuevos;
-        categories = data.categorias || categories;
+        // Un alta o una baja de producto cambia la lista de ids: eso sí obliga a
+        // recargar el catálogo entero, pero pasa una vez cada muchas horas.
+        const mismosProductos = llegado.size === products.length &&
+            products.every(p => llegado.has(p.id_producto));
 
         if (!mismosProductos) {
-            renderProducts();
-        } else {
-            nuevos.forEach(p => {
-                if (anterior.get(p.id_producto) !== p.stock_actual) actualizarTarjeta(p.id_producto);
-            });
+            await fetchProductsAndMenu();
+            avisarSiFaltaStock();
+            return;
         }
+
+        // Sólo se tocan las tarjetas cuyo número cambió. Repintar la rejilla
+        // entera cada pocos segundos cortaría el desplazamiento y el toque del
+        // cajero a mitad de venta.
+        products.forEach(p => {
+            const nuevo = llegado.get(p.id_producto);
+            if (nuevo === undefined || nuevo === p.stock_actual) return;
+            p.stock_actual = nuevo;
+            actualizarTarjeta(p.id_producto);
+        });
 
         avisarSiFaltaStock();
     }
@@ -517,8 +612,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = products.find(x => x.id_producto === id_producto);
         if (!p) return;
 
-        const enCarrito = cart.find(item => item.id_producto === id_producto);
-        const unidades = enCarrito ? enCarrito.cantidad : 0;
+        // Todas las unidades comprometidas: las que van sueltas y las que van
+        // de acompañante dentro de otra línea. La insignia de la tarjeta tiene
+        // que contarlas todas, porque todas salen del mismo almacén.
+        const unidades = unidadesEnCarrito(id_producto);
         const restante = p.stock_actual - unidades;
 
         const stockEl = card.querySelector('.stock');
@@ -544,6 +641,13 @@ document.addEventListener('DOMContentLoaded', () => {
             badge.remove();
         }
     }
+
+    // Dirección de la foto de un producto. Lleva el tamaño dentro: al cambiar
+    // la foto cambia la dirección, y el navegador —que la tiene cacheada un
+    // año— se entera de que hay una nueva.
+    const urlFoto = p => (p && p.tiene_foto)
+        ? '/api/producto/' + p.id_producto + '/foto?v=' + (p.foto_v || 0)
+        : '';
 
     // La cascada de entrada sólo se justifica al cargar el catálogo. Si se
     // repitiera al filtrar o al teclear en el buscador —decenas de veces por
@@ -586,8 +690,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 card.style.animationDelay = Math.min(i, 11) * 25 + 'ms';
             }
 
+            // Con foto se ve la foto; sin ella, el dibujito de siempre. Buscar
+            // una botella concreta entre veinte es mucho más rápido por la
+            // imagen que leyendo nombres que empiezan todos igual.
+            //
+            // El data URI viene validado por el servidor (data:image/... y
+            // base64 a secas), así que no puede colar comillas ni salirse del
+            // atributo.
+            const foto = urlFoto(p);
+            const visual = foto
+                ? `<img class="product-foto" src="${foto}" alt="" loading="lazy" decoding="async">`
+                : `<span class="emoji">${emojiDe(p)}</span>`;
+
             card.innerHTML = `
-                <span class="emoji">${emojiDe(p)}</span>
+                ${visual}
                 <h3>${escapeHtml(p.nombre)}</h3>
                 <div class="card-foot">
                     <div class="price">${p.precio_venta} Bs.</div>
@@ -614,15 +730,169 @@ document.addEventListener('DOMContentLoaded', () => {
         renderProducts();
     });
 
-    // Cart Lógica
-    function addToCart(product) {
-        const existing = cart.find(item => item.id_producto === product.id_producto);
-        const yaEnCarrito = existing ? existing.cantidad : 0;
+    // ==========================================
+    // CONTADOR DEL TURNO
+    // ==========================================
+    // Lo que lleva cobrado ESTA tablet desde que se abrió la caja. No sale de
+    // la base: es lo que ha pasado por delante de este cajero, que es justo lo
+    // que le preguntan ("¿cuánto llevas?") y lo que va a tener que cuadrar con
+    // el efectivo de su cajón al cerrar.
+    //
+    // Vive en la sesión y no en el servidor a propósito: si se recarga la
+    // página vuelve a cero, y eso es correcto —lo que cuenta para el cierre es
+    // el reporte, no este número—. Aquí sirve para orientarse, no para cuadrar.
+    let turno = { total: 0, comandas: 0 };
 
-        if (yaEnCarrito >= product.stock_actual) {
+    function anotarEnElTurno(importe) {
+        turno.total += Number(importe) || 0;
+        turno.comandas += 1;
+        pintarTurno();
+    }
+
+    function pintarTurno() {
+        const total = document.getElementById('turno-total');
+        const n = document.getElementById('turno-comandas');
+        if (total) total.textContent = turno.total.toFixed(2);
+        if (n) n.textContent = turno.comandas;
+    }
+
+    // Vibración corta al tocar un producto.
+    //
+    // En una barra a oscuras y con la música alta no se oye el toque ni se ve
+    // bien la pantalla: el golpecito en la mano es la única confirmación fiable
+    // de que el producto entró.
+    //
+    // 15 ms no se notaban con la tablet apoyada en la mesa: el mueble se come
+    // el pulso. 28 ms sí, y siguen sin cansar tras doscientos toques.
+    //
+    // No todos los navegadores la tienen (iOS no), y algunos exigen que la
+    // página ya haya recibido una interacción. Por eso va envuelto: si no puede
+    // vibrar, la venta sigue igual.
+    function vibrar(ms) {
+        try {
+            if (navigator.vibrate) navigator.vibrate(ms);
+        } catch (err) { /* sin vibración: no es motivo para cortar una venta */ }
+    }
+
+    // El carrito se mueve hasta la línea que acaba de cambiar.
+    //
+    // No siempre es la última: si vuelves a pulsar un whisky que ya estaba
+    // arriba del todo, lo que hay que enseñar es esa línea, no el final de la
+    // lista. Bajar siempre al fondo dejaba al cajero mirando un sitio donde no
+    // había pasado nada.
+    //
+    // Se mueve con animación y no de golpe para que se vea el recorrido: así
+    // se entiende que la lista se desplazó, en vez de parecer que cambió sola.
+    function mostrarLinea(id_producto) {
+        const lista = document.getElementById('cart-items');
+        if (!lista) return;
+
+        const fila = lista.querySelector(`.cart-item[data-id="${id_producto}"]`);
+        // requestAnimationFrame: si se llama antes de que el navegador haya
+        // pintado la línea nueva, la altura todavía es la de antes y el scroll
+        // se queda a media línea del final.
+        // requestAnimationFrame: si se llama antes de que el navegador haya
+        // pintado la línea, su posición todavía es la de antes y el desplazamiento
+        // se queda corto.
+        requestAnimationFrame(() => {
+            const destino = fila
+                // La línea, centrada en lo posible dentro de la ventana visible:
+                // así se ve también la de encima y la de debajo, y se entiende
+                // dónde está dentro del pedido.
+                ? fila.offsetTop - (lista.clientHeight - fila.offsetHeight) / 2
+                : lista.scrollHeight;
+
+            const tope = Math.max(0, Math.min(destino, lista.scrollHeight - lista.clientHeight));
+
+            // Quien haya pedido menos movimiento en su tablet recibe el salto
+            // seco: sigue viendo la línea, sin el recorrido.
+            const suave = !window.matchMedia ||
+                !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            try {
+                lista.scrollTo({ top: tope, behavior: suave ? 'smooth' : 'auto' });
+            } catch (err) {
+                lista.scrollTop = tope;   // navegadores sin scrollTo
+            }
+
+            // Un destello corto en la línea tocada. Con el carrito ya a la vista
+            // el desplazamiento no se nota, y sin esto no hay forma de saber
+            // cuál de las quince líneas acaba de subir.
+            if (fila) {
+                fila.classList.remove('tocada');
+                // Forzar el reflow reinicia la animación cuando se pulsa el
+                // mismo producto dos veces seguidas; sin esto, la segunda no se
+                // ve porque la clase nunca llegó a quitarse del todo.
+                void fila.offsetWidth;
+                fila.classList.add('tocada');
+            }
+        });
+    }
+
+    // Cuántas unidades de un producto hay ya comprometidas en el carrito,
+    // sumando las que van sueltas y las que van de acompañante. Un refresco
+    // sale de la misma nevera vaya cobrado o de regalo.
+    function unidadesEnCarrito(id_producto) {
+        return cart.reduce((n, item) => {
+            let suma = item.id_producto === id_producto ? item.cantidad : 0;
+            // Los acompañantes llevan cantidad POR BOTELLA: dos colas pequeñas
+            // en una línea de tres whiskys son seis colas fuera de la nevera.
+            (item.acompanantes || []).forEach(a => {
+                if (a.id_producto === id_producto) suma += a.cantidad * item.cantidad;
+            });
+            return n + suma;
+        }, 0);
+    }
+
+    // La línea del carrito se identifica por el par (producto, acompañante).
+    // Dos whiskys, uno con Coca y otro con Sprite, son dos líneas distintas
+    // aunque el whisky sea el mismo: si se fundieran, no habría forma de saber
+    // cuál lleva cuál al prepararlos.
+    // Firma del acompañamiento de una línea, para poder compararlas. Ordenada
+    // por id: elegir "2 colas + 1 tónica" y "1 tónica + 2 colas" tiene que dar
+    // la misma línea.
+    const firmaAcomp = acomps => (acomps || [])
+        .slice()
+        .sort((a, b) => a.id_producto - b.id_producto)
+        .map(a => a.id_producto + 'x' + a.cantidad)
+        .join(',');
+
+    const mismaLinea = (item, id_producto, acomps) =>
+        item.id_producto === id_producto &&
+        firmaAcomp(item.acompanantes) === firmaAcomp(acomps);
+
+    // Cart Lógica
+    function addToCart(product, acompanantes) {
+        if (unidadesEnCarrito(product.id_producto) >= product.stock_actual) {
+            // Dos pulsos, distintos del toque normal: se nota en la mano que
+            // eso NO entró, sin tener que leer el aviso.
+            vibrar([25, 40, 25]);
             notify('No queda stock de ' + product.nombre + '.', 'warn');
             return;
         }
+
+        // Si la botella lleva acompañamiento, se pregunta ANTES de meterla.
+        // Preguntarlo al cobrar sería tarde: el mesero ya se habría ido con el
+        // pedido tomado y habría que salir a buscarlo.
+        if (product.requiere_acompanante && !acompanantes) {
+            abrirCuadroAcompanante(product);
+            return;
+        }
+
+        const acomps = acompanantes || [];
+
+        // Los acompañantes también salen del almacén: si no queda, no se puede
+        // prometer. Mejor enterarse aquí que en la barra.
+        for (const a of acomps) {
+            const cat = products.find(p => p.id_producto === a.id_producto);
+            const disponible = cat ? cat.stock_actual - unidadesEnCarrito(a.id_producto) : 0;
+            if (disponible < a.cantidad) {
+                vibrar([25, 40, 25]);
+                notify('No queda ' + a.nombre + ' para acompañar.', 'warn');
+                return;
+            }
+        }
+
+        const existing = cart.find(item => mismaLinea(item, product.id_producto, acomps));
 
         if (existing) {
             existing.cantidad++;
@@ -633,14 +903,601 @@ document.addEventListener('DOMContentLoaded', () => {
                 nombre: product.nombre,
                 precio_venta: parseFloat(product.precio_venta),
                 cantidad: 1,
-                stock_max: product.stock_actual
+                stock_max: product.stock_actual,
+                acompanantes: acomps
             });
             renderCart();
         }
 
         recalcularTotal();
         actualizarTarjeta(product.id_producto, true);
+        acomps.forEach(a => actualizarTarjeta(a.id_producto, true));
+        vibrar(28);
+        mostrarLinea(product.id_producto);
     }
+
+    // ==========================================
+    // MOVER STOCK A OTRA BARRA
+    // ==========================================
+    // Tres pasos, uno por pantalla: destino, producto y unidades. De uno en uno
+    // porque esto se hace de pie y con prisa: un formulario con cinco campos a
+    // la vez se rellena mal y se descubre al día siguiente, cuando falta media
+    // caja y nadie sabe a dónde fue.
+    //
+    // Al confirmar sale la comanda impresa para el bartender que entrega.
+    const moverModal = document.getElementById('mover-modal');
+    let moverDestino = '';
+    let moverProducto = null;
+    let moverPendientes = [];      // lo que ya se ha añadido a este movimiento
+    let moverDestinosUsados = [];
+    // El mismo asistente sirve para las dos direcciones: los tres pasos son los
+    // mismos y sólo cambian las palabras y el signo del stock. Duplicarlo sería
+    // duplicar también cada arreglo que le haga falta después.
+    let moverModo = 'SALIDA';      // 'SALIDA' (se va) | 'ENTRADA' (llega)
+    let moverMotivo = 'TRASPASO';  // sólo en ENTRADA: 'COMPRA' | 'TRASPASO'
+
+    const saliendo = () => moverModo === 'SALIDA';
+
+    function abrirMoverStock(modo) {
+        moverModo = modo === 'ENTRADA' ? 'ENTRADA' : 'SALIDA';
+        moverMotivo = saliendo() ? 'TRASPASO' : 'COMPRA';
+        moverDestino = '';
+        moverProducto = null;
+        moverPendientes = [];
+        document.getElementById('mover-destino').value = '';
+        document.getElementById('mover-buscar').value = '';
+        document.getElementById('mover-nota').value = '';
+
+        // El selector compra/traspaso sólo tiene sentido al agregar.
+        document.getElementById('mover-motivos').classList.toggle('hide', saliendo());
+        document.querySelectorAll('#mover-motivos .ingreso-tipo').forEach(b =>
+            b.classList.toggle('activa', b.dataset.motivo === moverMotivo));
+
+        document.getElementById('mover-confirmar').textContent =
+            saliendo() ? 'Confirmar y imprimir' : 'Registrar entrada';
+
+        pintarPendientes();
+        cargarDestinosUsados();
+        moverPaso(1);
+        moverModal.classList.remove('hide');
+    }
+
+    function cerrarMoverStock() {
+        moverModal.classList.add('hide');
+    }
+
+    function moverPaso(n) {
+        [1, 2, 3].forEach(i => {
+            document.getElementById('mover-p' + i).classList.toggle('hide', i !== n);
+            const marca = document.querySelector(`.mover-paso[data-paso="${i}"]`);
+            if (marca) {
+                marca.classList.toggle('activa', i === n);
+                marca.classList.toggle('hecha', i < n);
+            }
+        });
+
+        const titulo = document.getElementById('mover-titulo');
+        const sub = document.getElementById('mover-subtitulo');
+        const campo = document.getElementById('mover-destino');
+
+        if (n === 1) {
+            if (saliendo()) {
+                titulo.textContent = '¿A dónde va?';
+                sub.textContent = 'Barra o almacén que la recibe';
+                campo.placeholder = 'Ej. Barra VIP';
+            } else if (moverMotivo === 'COMPRA') {
+                titulo.textContent = '¿A quién se compró?';
+                sub.textContent = 'Proveedor que trae la mercancía';
+                campo.placeholder = 'Ej. Distribuidora Central';
+            } else {
+                titulo.textContent = '¿De dónde llega?';
+                sub.textContent = 'Barra que manda la mercancía';
+                campo.placeholder = 'Ej. Barra VIP';
+            }
+        } else if (n === 2) {
+            titulo.textContent = '¿Qué producto?';
+            sub.textContent = (saliendo() ? 'Va a ' : 'Llega de ') + moverDestino;
+            pintarProductosMover();
+            document.getElementById('mover-buscar').focus();
+        } else {
+            titulo.textContent = '¿Cuántas unidades?';
+            sub.textContent = moverProducto
+                ? (saliendo() ? moverProducto.nombre + ' → ' + moverDestino
+                              : moverDestino + ' → ' + moverProducto.nombre)
+                : '';
+        }
+    }
+
+    async function cargarDestinosUsados() {
+        const caja = document.getElementById('mover-destinos-usados');
+        caja.innerHTML = '';
+        try {
+            const res = await fetch('/api/traspasos');
+            const data = await res.json();
+            // Sólo destinos de salidas: para mandar mercancía no sirve de nada
+            // sugerir el proveedor al que se le compró.
+            // Se sugieren los de la misma dirección: para mandar mercancía no
+            // sirve de nada ofrecer el proveedor al que se le compró.
+            moverDestinosUsados = (data.destinos || [])
+                .filter(d => d.tipo === moverModo).map(d => d.contraparte);
+        } catch (err) {
+            moverDestinosUsados = [];
+        }
+
+        // Sugerir los ya usados evita que "Barra VIP", "barra vip" y "VIP"
+        // acaben siendo tres destinos distintos que no se pueden sumar.
+        moverDestinosUsados.slice(0, 6).forEach(d => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'mover-sugerencia';
+            b.textContent = d;
+            b.addEventListener('click', () => {
+                document.getElementById('mover-destino').value = d;
+                pasarAProducto();
+            });
+            caja.appendChild(b);
+        });
+    }
+
+    function pasarAProducto() {
+        const valor = document.getElementById('mover-destino').value.trim();
+        if (!valor) {
+            notify('Escribe a dónde va la mercancía.', 'warn');
+            return;
+        }
+        moverDestino = valor;
+        moverPaso(2);
+    }
+
+    function pintarProductosMover() {
+        const caja = document.getElementById('mover-productos');
+        const filtro = document.getElementById('mover-buscar').value.trim().toLowerCase();
+        caja.innerHTML = '';
+
+        // Lo que ya está apartado en este mismo traspaso se descuenta de lo que
+        // se ofrece: si no, se podrían mandar 30 de algo de lo que quedan 20.
+        const apartado = id => moverPendientes
+            .filter(p => p.id_producto === id)
+            .reduce((n, p) => n + p.cantidad, 0);
+
+        // Al agregar no se filtra por stock: justamente lo que no queda es lo
+        // que se va a reponer, y esconderlo lo haría imposible.
+        const lista = products
+            .filter(p => !saliendo() || (p.stock_actual - apartado(p.id_producto)) > 0)
+            .filter(p => !filtro || p.nombre.toLowerCase().includes(filtro));
+
+        if (!lista.length) {
+            const vacio = document.createElement('p');
+            vacio.className = 'mover-vacio';
+            vacio.textContent = filtro ? 'Ningún producto con ese nombre.' : 'No queda stock que mover.';
+            caja.appendChild(vacio);
+            return;
+        }
+
+        lista.forEach(p => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'mover-producto';
+
+            const nombre = document.createElement('span');
+            nombre.className = 'mover-producto-nombre';
+            nombre.textContent = p.nombre;
+            b.appendChild(nombre);
+
+            const stock = document.createElement('span');
+            stock.className = 'mover-producto-stock';
+            stock.textContent = (p.stock_actual - apartado(p.id_producto)) + ' u.';
+            b.appendChild(stock);
+
+            b.addEventListener('click', () => {
+                moverProducto = p;
+                document.getElementById('mover-elegido').textContent = p.nombre;
+                document.getElementById('mover-unidades').value = 1;
+                pintarDisponible();
+                pintarRapidos();
+                moverPaso(3);
+            });
+            caja.appendChild(b);
+        });
+    }
+
+    function disponibleDe(p) {
+        const apartado = moverPendientes
+            .filter(x => x.id_producto === p.id_producto)
+            .reduce((n, x) => n + x.cantidad, 0);
+        return p.stock_actual - apartado;
+    }
+
+    function pintarDisponible() {
+        if (!moverProducto) return;
+        document.getElementById('mover-disponible').textContent = saliendo()
+            ? 'Quedan ' + disponibleDe(moverProducto) + ' en esta barra'
+            : 'Ahora hay ' + moverProducto.stock_actual + ' en esta barra';
+    }
+
+    // Cantidades de caja: mover mercancía va de seis en seis o de doce en doce,
+    // no de una en una. Teclear "24" con el dedo es donde se equivoca.
+    function pintarRapidos() {
+        const caja = document.getElementById('mover-rapidos');
+        caja.innerHTML = '';
+        // Al agregar no hay tope: llega la mercancía que llegue.
+        const tope = !moverProducto ? 0
+            : (saliendo() ? disponibleDe(moverProducto) : Infinity);
+        [6, 12, 24].filter(n => n <= tope).forEach(n => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'quick-cash-btn';
+            b.textContent = n;
+            b.addEventListener('click', () => {
+                document.getElementById('mover-unidades').value = n;
+                vibrar(20);
+            });
+            caja.appendChild(b);
+        });
+        if (saliendo() && tope > 0) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'quick-cash-btn';
+            b.textContent = 'Todo (' + tope + ')';
+            b.addEventListener('click', () => {
+                document.getElementById('mover-unidades').value = tope;
+                vibrar(20);
+            });
+            caja.appendChild(b);
+        }
+    }
+
+    function pintarPendientes() {
+        const caja = document.getElementById('mover-lista');
+        caja.innerHTML = '';
+
+        const confirmar = document.getElementById('mover-confirmar');
+        if (confirmar) {
+            const base = saliendo() ? 'Confirmar y imprimir' : 'Registrar entrada';
+            confirmar.textContent = moverPendientes.length
+                ? base + ' (' + moverPendientes.length + ')'
+                : base;
+        }
+
+        if (!moverPendientes.length) return;
+
+        moverPendientes.forEach((p, i) => {
+            const fila = document.createElement('div');
+            fila.className = 'mover-pendiente';
+
+            const txt = document.createElement('span');
+            txt.textContent = p.cantidad + ' × ' + p.nombre;
+            fila.appendChild(txt);
+
+            const quitar = document.createElement('button');
+            quitar.type = 'button';
+            quitar.className = 'mover-quitar';
+            quitar.textContent = '✕';
+            quitar.setAttribute('aria-label', 'Quitar ' + p.nombre);
+            quitar.addEventListener('click', () => {
+                moverPendientes.splice(i, 1);
+                pintarPendientes();
+                pintarDisponible();
+            });
+            fila.appendChild(quitar);
+
+            caja.appendChild(fila);
+        });
+    }
+
+    function apuntarLoElegido() {
+        if (!moverProducto) return false;
+        const n = parseInt(document.getElementById('mover-unidades').value, 10);
+        if (!Number.isInteger(n) || n <= 0) {
+            notify('Pon cuántas unidades vas a mover.', 'warn');
+            return false;
+        }
+        if (saliendo() && n > disponibleDe(moverProducto)) {
+            notify('Sólo quedan ' + disponibleDe(moverProducto) + ' de ' + moverProducto.nombre + '.', 'warn');
+            return false;
+        }
+        moverPendientes.push({
+            id_producto: moverProducto.id_producto,
+            nombre: moverProducto.nombre,
+            cantidad: n
+        });
+        pintarPendientes();
+        return true;
+    }
+
+    async function confirmarTraspaso() {
+        if (!apuntarLoElegido()) return;
+
+        const boton = document.getElementById('mover-confirmar');
+        boton.disabled = true;
+        try {
+            const res = await fetch('/api/traspaso', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tipo: moverModo,
+                    motivo: saliendo() ? 'TRASPASO' : moverMotivo,
+                    contraparte: moverDestino,
+                    observaciones: document.getElementById('mover-nota').value.trim(),
+                    id_cajero: currentUser ? currentUser.id_cajero : null,
+                    items: moverPendientes.map(p => ({ id_producto: p.id_producto, cantidad: p.cantidad }))
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo registrar el traspaso.', 'error', 7000);
+                return;
+            }
+
+            cerrarMoverStock();
+            notify(data.message, 'ok', 6000);
+            vibrar([30, 60, 30]);
+            // El stock de la caja tiene que reflejar de inmediato lo que se fue,
+            // o el cajero seguiría vendiendo lo que ya está en la otra barra.
+            await fetchProductsAndMenu();
+            // La comanda se imprime en las dos direcciones: al mandar sirve de
+            // entrega, y al recibir de acuse. En los dos casos alguien tiene
+            // que poder demostrar que la mercancía cambió de manos.
+            imprimirTraspaso(data);
+        } catch (err) {
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        } finally {
+            boton.disabled = false;
+        }
+    }
+
+    // La comanda del traspaso: la misma vista previa y la misma impresora que
+    // los tickets de venta, para que el bartender vea siempre el mismo papel.
+    function imprimirTraspaso(data) {
+        const ahora = new Date();
+        const dos = n => String(n).padStart(2, '0');
+        const modelo = {
+            id: data.id_traspaso,
+            tipo: data.tipo,
+            motivo: data.motivo,
+            barra: configEvento.barra || instancia.nombre || 'Barra',
+            contraparte: data.contraparte,
+            fecha: dos(ahora.getDate()) + '/' + dos(ahora.getMonth() + 1) + '/' + ahora.getFullYear(),
+            hora: dos(ahora.getHours()) + ':' + dos(ahora.getMinutes()),
+            responsable: currentUser ? currentUser.nombre : '',
+            observaciones: data.observaciones || '',
+            items: data.items || []
+        };
+
+        const ajustes = ThermalPrinter.getSettings();
+        const ops = ThermalPrinter.buildTraspasoOps(modelo, ajustes);
+
+        traspasoParaImprimir = { ops: ops, modelo: modelo };
+        document.getElementById('traspaso-body').innerHTML =
+            ThermalPrinter.helpers.opsToHtml(ops, ajustes);
+        document.getElementById('traspaso-modal').classList.remove('hide');
+    }
+
+    let traspasoParaImprimir = null;
+
+    document.getElementById('mover-stock-btn')
+        .addEventListener('click', () => abrirMoverStock('SALIDA'));
+    document.getElementById('agregar-stock-btn')
+        .addEventListener('click', () => abrirMoverStock('ENTRADA'));
+
+    document.querySelectorAll('#mover-motivos .ingreso-tipo').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#mover-motivos .ingreso-tipo')
+                .forEach(b => b.classList.remove('activa'));
+            btn.classList.add('activa');
+            moverMotivo = btn.dataset.motivo;
+            // El rótulo cambia con el motivo: no se pregunta igual por un
+            // proveedor que por la barra de al lado.
+            moverPaso(1);
+            cargarDestinosUsados();
+        });
+    });
+    document.getElementById('mover-cerrar').addEventListener('click', cerrarMoverStock);
+    moverModal.addEventListener('click', e => {
+        if (e.target === moverModal) cerrarMoverStock();
+    });
+    document.getElementById('mover-a-producto').addEventListener('click', pasarAProducto);
+    document.getElementById('mover-destino').addEventListener('keydown', e => {
+        if (e.key === 'Enter') pasarAProducto();
+    });
+    document.getElementById('mover-buscar').addEventListener('input', pintarProductosMover);
+    document.getElementById('mover-menos').addEventListener('click', () => {
+        const campo = document.getElementById('mover-unidades');
+        campo.value = Math.max(1, (parseInt(campo.value, 10) || 1) - 1);
+        vibrar(20);
+    });
+    document.getElementById('mover-mas').addEventListener('click', () => {
+        const campo = document.getElementById('mover-unidades');
+        const tope = moverProducto ? disponibleDe(moverProducto) : 1;
+        campo.value = Math.min(tope, (parseInt(campo.value, 10) || 0) + 1);
+        vibrar(20);
+    });
+    document.getElementById('mover-otro').addEventListener('click', () => {
+        if (!apuntarLoElegido()) return;
+        moverProducto = null;
+        document.getElementById('mover-buscar').value = '';
+        moverPaso(2);
+    });
+    document.getElementById('mover-confirmar').addEventListener('click', confirmarTraspaso);
+
+    document.getElementById('traspaso-cerrar').addEventListener('click', () => {
+        document.getElementById('traspaso-modal').classList.add('hide');
+        traspasoParaImprimir = null;
+    });
+
+    document.getElementById('traspaso-imprimir').addEventListener('click', () => {
+        if (!traspasoParaImprimir) return;
+        try {
+            ThermalPrinter.printOps(traspasoParaImprimir.ops);
+            notify('Enviado a la impresora.', 'ok');
+        } catch (err) {
+            notify('No se pudo imprimir: ' + (err.message || 'revisa RawBT'), 'error');
+        }
+    });
+
+    // ==========================================
+    // CUADRO DE ACOMPAÑANTE
+    // ==========================================
+    const acompModal = document.getElementById('acomp-modal');
+    let productoEsperandoAcompanante = null;
+
+    // Lo elegido en el cuadro: { id_producto -> cantidad por botella }.
+    let acompElegidos = new Map();
+
+    function abrirCuadroAcompanante(product) {
+        productoEsperandoAcompanante = product;
+        acompElegidos = new Map();
+        document.getElementById('acomp-producto').textContent = product.nombre;
+
+        pintarOpcionesAcompanante();
+        acompModal.classList.remove('hide');
+    }
+
+    function pintarOpcionesAcompanante() {
+        const caja = document.getElementById('acomp-opciones');
+        const vacio = document.getElementById('acomp-vacio');
+        caja.innerHTML = '';
+
+        // TODOS los marcados como acompañante, agotados incluidos.
+        //
+        // Antes se escondían los que no tenían stock, y eso dejaba al cajero
+        // buscando una Coca-Cola que sí existe pero se acabó, sin entender por
+        // qué no aparece. Sale, marcada como agotada y sin poder tocarse: se ve
+        // que se acabó y se elige otra cosa.
+        const opciones = products.filter(p => p.es_acompanante);
+        vacio.classList.toggle('hide', opciones.length > 0);
+
+        opciones.forEach(p => {
+            const disponible = p.stock_actual - unidadesEnCarrito(p.id_producto);
+            const puestas = acompElegidos.get(p.id_producto) || 0;
+            const agotado = disponible <= 0;
+
+            const fila = document.createElement('div');
+            fila.className = 'acomp-opcion' + (agotado ? ' agotada' : '') +
+                (puestas > 0 ? ' elegida' : '');
+
+            const texto = document.createElement('div');
+            texto.className = 'acomp-opcion-texto';
+
+            const nombre = document.createElement('span');
+            nombre.className = 'acomp-opcion-nombre';
+            nombre.textContent = p.nombre;
+            texto.appendChild(nombre);
+
+            const stock = document.createElement('span');
+            stock.className = 'acomp-opcion-stock' + (agotado ? ' agotado' : '');
+            stock.textContent = agotado ? 'Agotado' : 'quedan ' + disponible;
+            texto.appendChild(stock);
+
+            fila.appendChild(texto);
+
+            if (agotado) {
+                caja.appendChild(fila);
+                return;
+            }
+
+            // Cantidad por botella: si se acabó la Coca de dos litros, se ponen
+            // dos pequeñas y el cliente se lleva lo mismo.
+            const control = document.createElement('div');
+            control.className = 'acomp-control';
+
+            const menos = document.createElement('button');
+            menos.type = 'button';
+            menos.className = 'cart-qty-btn';
+            menos.textContent = '−';
+            menos.setAttribute('aria-label', 'Una menos de ' + p.nombre);
+            menos.disabled = puestas === 0;
+            menos.addEventListener('click', () => cambiarAcomp(p, -1));
+            control.appendChild(menos);
+
+            const num = document.createElement('span');
+            num.className = 'acomp-cantidad';
+            num.textContent = puestas;
+            control.appendChild(num);
+
+            const mas = document.createElement('button');
+            mas.type = 'button';
+            mas.className = 'cart-qty-btn';
+            mas.textContent = '+';
+            mas.setAttribute('aria-label', 'Uno más de ' + p.nombre);
+            mas.disabled = puestas >= disponible;
+            mas.addEventListener('click', () => cambiarAcomp(p, +1));
+            control.appendChild(mas);
+
+            fila.appendChild(control);
+
+            // Tocar la fila entera suma uno: con prisa, apuntar al "+" de 44 px
+            // es más difícil que tocar el bloque.
+            texto.addEventListener('click', () => cambiarAcomp(p, +1));
+
+            caja.appendChild(fila);
+        });
+
+        pintarResumenAcompanante();
+    }
+
+    function cambiarAcomp(p, delta) {
+        const disponible = p.stock_actual - unidadesEnCarrito(p.id_producto);
+        const ahora = acompElegidos.get(p.id_producto) || 0;
+        const nuevo = Math.max(0, Math.min(disponible, ahora + delta));
+        if (nuevo === ahora) {
+            if (delta > 0) {
+                vibrar([25, 40, 25]);
+                notify('No queda más ' + p.nombre + '.', 'warn');
+            }
+            return;
+        }
+        if (nuevo === 0) acompElegidos.delete(p.id_producto);
+        else acompElegidos.set(p.id_producto, nuevo);
+        vibrar(20);
+        pintarOpcionesAcompanante();
+    }
+
+    function pintarResumenAcompanante() {
+        const resumen = document.getElementById('acomp-resumen');
+        const aceptar = document.getElementById('acomp-aceptar');
+        if (!resumen || !aceptar) return;
+
+        if (acompElegidos.size === 0) {
+            resumen.textContent = 'Elige el acompañamiento';
+            resumen.classList.remove('tiene');
+            aceptar.disabled = true;
+            return;
+        }
+
+        const partes = [];
+        acompElegidos.forEach((cant, id) => {
+            const p = products.find(x => x.id_producto === id);
+            partes.push(cant + ' × ' + (p ? p.nombre : 'producto'));
+        });
+        resumen.textContent = partes.join('  ·  ');
+        resumen.classList.add('tiene');
+        aceptar.disabled = false;
+    }
+
+    function cerrarCuadroAcompanante() {
+        acompModal.classList.add('hide');
+        productoEsperandoAcompanante = null;
+    }
+
+    document.getElementById('acomp-aceptar').addEventListener('click', () => {
+        if (!productoEsperandoAcompanante || acompElegidos.size === 0) return;
+        const elegidos = [];
+        acompElegidos.forEach((cantidad, id) => {
+            const p = products.find(x => x.id_producto === id);
+            elegidos.push({ id_producto: id, nombre: p ? p.nombre : 'Producto', cantidad });
+        });
+        const botella = productoEsperandoAcompanante;
+        cerrarCuadroAcompanante();
+        addToCart(botella, elegidos);
+    });
+
+    document.getElementById('acomp-cancelar').addEventListener('click', cerrarCuadroAcompanante);
+    // Tocar fuera cancela: es lo que todo el mundo intenta primero, y aquí no
+    // se pierde nada porque el producto todavía no entró en el carrito.
+    acompModal.addEventListener('click', e => {
+        if (e.target === acompModal) cerrarCuadroAcompanante();
+    });
 
     // Suma del carrito. Vive aparte porque ahora se recalcula sin repintar nada.
     function recalcularTotal() {
@@ -655,30 +1512,46 @@ document.addEventListener('DOMContentLoaded', () => {
         return total;
     }
 
+    // Una fila se identifica por el par producto+acompañante, no sólo por el
+    // producto: puede haber dos whiskys en el carrito con refrescos distintos.
+    const claveLinea = item => item.id_producto + '|' + firmaAcomp(item.acompanantes);
+
+    function filaDe(item) {
+        return document.querySelector(
+            `.cart-item[data-clave="${claveLinea(item)}"]`);
+    }
+
     // Cambia sólo los números de una línea ya pintada, sin tocar el resto del
     // carrito: subir una cantidad no debe hacer parpadear toda la lista.
     function actualizarLinea(item) {
-        const fila = document.querySelector(`.cart-item[data-id="${item.id_producto}"]`);
+        const fila = filaDe(item);
         if (!fila) return renderCart();
 
         const sub = item.precio_venta * item.cantidad;
         fila.querySelector('.price').textContent =
             `${item.precio_venta.toFixed(2)} x ${item.cantidad} = ${sub.toFixed(2)} Bs.`;
         fila.querySelector('.qty').textContent = item.cantidad;
+        // Las cantidades de los acompañantes van con la de la línea.
+        fila.querySelectorAll('.cart-acomp-cant').forEach((el, i) => {
+            const a = (item.acompanantes || [])[i];
+            if (a) el.textContent = a.cantidad * item.cantidad;
+        });
     }
 
-    function quitarDelCarrito(id_producto) {
-        cart = cart.filter(c => c.id_producto !== id_producto);
+    function quitarDelCarrito(item) {
+        const acomps = item.acompanantes || [];
+        cart = cart.filter(c => !mismaLinea(c, item.id_producto, acomps));
         renderCart();
         recalcularTotal();
-        actualizarTarjeta(id_producto);
+        actualizarTarjeta(item.id_producto);
+        acomps.forEach(a => actualizarTarjeta(a.id_producto));
     }
 
     function renderCart() {
         const container = document.getElementById('cart-items');
         // Las líneas que ya estaban no vuelven a animarse; sólo entra la nueva.
         const yaPintadas = new Set(
-            [...container.querySelectorAll('.cart-item')].map(el => el.dataset.id)
+            [...container.querySelectorAll('.cart-item')].map(el => el.dataset.clave)
         );
         container.innerHTML = '';
 
@@ -690,14 +1563,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
         cart.forEach(item => {
             const sub = item.precio_venta * item.cantidad;
+            const clave = claveLinea(item);
 
             const div = document.createElement('div');
-            div.className = 'cart-item' + (yaPintadas.has(String(item.id_producto)) ? '' : ' enter');
+            div.className = 'cart-item' + (yaPintadas.has(clave) ? '' : ' enter');
             div.dataset.id = item.id_producto;
+            div.dataset.clave = clave;
+
+            // El acompañante va debajo y sangrado, sin importe: se lee de un
+            // vistazo que va dentro de la botella y no que se cobra aparte.
+            // Todos los acompañantes, cada uno con su cantidad ya multiplicada
+            // por las botellas de la línea: es lo que hay que servir.
+            const acompHtml = (item.acompanantes || []).map(a => `
+                   <div class="cart-acomp">
+                       <span class="cart-acomp-flecha" aria-hidden="true">↳</span>
+                       <span class="cart-acomp-nombre">${escapeHtml(a.nombre)}</span>
+                       <span class="cart-acomp-cant">${a.cantidad * item.cantidad}</span>
+                       <span class="cart-acomp-gratis">incluido</span>
+                   </div>`).join('');
+
             div.innerHTML = `
                 <div class="cart-item-info">
                     <h4>${escapeHtml(item.nombre)}</h4>
                     <div class="price">${item.precio_venta.toFixed(2)} x ${item.cantidad} = ${sub.toFixed(2)} Bs.</div>
+                    ${acompHtml}
                 </div>
                 <div class="cart-item-controls">
                     <button class="cart-qty-btn decrease-btn" aria-label="Quitar uno">−</button>
@@ -719,8 +1608,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     actualizarLinea(item);
                     recalcularTotal();
                     actualizarTarjeta(item.id_producto, true);
+                    (item.acompanantes || []).forEach(a => actualizarTarjeta(a.id_producto, true));
                 } else {
-                    quitarDelCarrito(item.id_producto);
+                    quitarDelCarrito(item);
                 }
             });
 
@@ -729,18 +1619,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 // tablet puede haber vendido unidades desde entonces.
                 const enCatalogo = products.find(p => p.id_producto === item.id_producto);
                 const tope = enCatalogo ? enCatalogo.stock_actual : item.stock_max;
-                if (item.cantidad >= tope) {
+                // unidadesEnCarrito y no item.cantidad: el mismo producto puede
+                // estar además de acompañante en otra línea, y todo sale del
+                // mismo almacén.
+                if (unidadesEnCarrito(item.id_producto) >= tope) {
                     notify('No queda stock de ' + item.nombre + '.', 'warn');
                     return;
+                }
+                // Una botella más se lleva sus acompañantes: hay que
+                // comprobar que quedan todos antes de subir la cantidad.
+                for (const a of (item.acompanantes || [])) {
+                    const cat = products.find(p => p.id_producto === a.id_producto);
+                    const tope = cat ? cat.stock_actual : 0;
+                    if (unidadesEnCarrito(a.id_producto) + a.cantidad > tope) {
+                        notify('No queda ' + a.nombre + ' para acompañar.', 'warn');
+                        return;
+                    }
                 }
                 item.cantidad++;
                 actualizarLinea(item);
                 recalcularTotal();
                 actualizarTarjeta(item.id_producto, true);
+                (item.acompanantes || []).forEach(a => actualizarTarjeta(a.id_producto, true));
+                // El "+" también es "poner en el carrito": mismo golpecito, o
+                // el cajero no sabe cuál de sus toques contó.
+                vibrar(28);
             });
 
             div.querySelector('.remove-item-btn').addEventListener('click', () => {
-                quitarDelCarrito(item.id_producto);
+                vibrar([18, 30, 18]);
+                quitarDelCarrito(item);
             });
 
             container.appendChild(div);
@@ -750,9 +1658,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('clear-cart').addEventListener('click', () => {
-        cart = [];
-        renderCart();
-        renderProducts();
+        // Antes vaciaba la lista pero dejaba el contador y el total con las
+        // cifras anteriores: la pantalla decía "3" y "58.00 Bs." sobre un
+        // carrito vacío. Ahora usa el mismo vaciado que salir sin cobrar.
+        if (!cart.length) return;
+        vibrar([20, 30, 20]);
+        vaciarCarrito();
     });
 
     // ==========================================
@@ -1024,7 +1935,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 id_producto: c.id_producto,
                 cantidad: c.cantidad,
                 precio_unitario: c.precio_venta,
-                subtotal: c.precio_venta * c.cantidad
+                subtotal: c.precio_venta * c.cantidad,
+                // Sólo el id: el precio del acompañante lo pone el servidor, y
+                // es cero. Si viajara desde aquí, bastaría con retocar la
+                // petición para regalarse una botella.
+                // Cantidades POR BOTELLA: el servidor las multiplica por las
+                // unidades de la línea. Sólo viajan ids y cantidades; el precio
+                // (cero) lo pone él.
+                acompanantes: (c.acompanantes || []).map(a => ({
+                    id_producto: a.id_producto, cantidad: a.cantidad
+                }))
             })),
             metodos_pago: payments,
             // Marca este intento de cobro. Si hay que reintentar, viaja la misma
@@ -1056,6 +1976,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         (result.ref_comanda || refComanda(result.id_comanda)) +
                         '. No se cobró ni se descontó dos veces.', 'warn', 8000);
                 } else {
+                    anotarEnElTurno(typeof result.total === 'number' ? result.total : bodyData.total);
                     notify('Comanda ' + (result.ref_comanda || refComanda(result.id_comanda)) + ' guardada.', 'ok');
                 }
                 // Otra tablet puede haber vendido mientras tanto: se releen las
@@ -1101,12 +2022,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return {
             id: id_comanda,
-            // Lo que se imprime y se canta: N-47. Si el servidor no dio
-            // identidad, refComanda devuelve el '#47' de siempre.
             ref: data.ref_comanda || refComanda(id_comanda),
             instancia: data.instancia || instancia.nombre,
             fecha: ddmmaaaa + ' ' + hhmm,
+            // Separadas además de juntas: el ticket las coloca en las dos
+            // puntas de la misma línea, y el de barra sólo usa la hora.
+            fechaDia: ddmmaaaa,
             hora: hhmm,
+            // El nombre del evento encabeza el ticket. Sale de Datos del
+            // evento, igual que la barra.
+            evento: configEvento.evento || '',
             // La barra del ticket sale de los datos del evento, que es lo que
             // el encargado escribió para esta barra; si no hay nada, se cae a
             // la barra del cajero.
@@ -1129,7 +2054,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     precio_unitario: item.precio_unitario != null
                         ? Number(item.precio_unitario)
                         : (known ? Number(known.precio_venta) : null),
-                    subtotal: Number(item.subtotal) || 0
+                    subtotal: Number(item.subtotal) || 0,
+                    // El acompañante viaja DENTRO de su línea, no como línea
+                    // aparte: el ticket lo imprime sangrado debajo y sin
+                    // importe, que es como se entiende que va incluido.
+                    acompanantes: item.acompanantes
+                        ? item.acompanantes.map(a => ({ nombre: a.nombre, cantidad: a.cantidad }))
+                        : (item.acomps || []).map(a => ({ nombre: a.nombre, cantidad: a.qty }))
                 };
             }),
             pagos: (data.metodos_pago || payments).map(pay => {
@@ -1254,6 +2185,9 @@ document.addEventListener('DOMContentLoaded', () => {
         currentTicket = {
             id: 'PRUEBA',
             fecha: new Date().toLocaleString(),
+            fechaDia: new Date().toLocaleDateString(),
+            hora: new Date().toTimeString().slice(0, 5),
+            evento: configEvento.evento || '',
             barra: configEvento.barra || (currentUser ? currentUser.nombre_barra : 'Barra'),
             cajero: currentUser ? currentUser.nombre : 'Cajero',
             mesero: currentWaiter ? currentWaiter.nombre : 'Mesero',
@@ -1285,14 +2219,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Reimpresión desde el panel admin: no se toca el estado del POS.
         } else {
             currentWaiter = null;
-
-            // Reset states
-            cart = [];
-            payments = [];
-            efectivoRecibido = 0;
-            metodoActivo = EFECTIVO;
-            document.getElementById('cart-observations').value = '';
-
+            vaciarCarrito();
             posView.classList.add('hide');
             showWaiterModal();
         }
@@ -1333,8 +2260,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Load data according to tab
             if (targetTab === 'tab-dashboard') loadDashboardData();
             else if (targetTab === 'tab-comandas') loadComandasData();
-            else if (targetTab === 'tab-crear-producto') loadCatalogSetup();
-            else if (targetTab === 'tab-crear-personal') loadPersonalSetup();
+            else if (targetTab === 'tab-crear-producto') { loadCatalogSetup(); cargarCatalogoAdmin(); }
+            else if (targetTab === 'tab-crear-personal') { loadPersonalSetup(); cargarPersonalAdmin(); }
             else if (targetTab === 'tab-stock') loadStockSetup();
             else if (targetTab === 'tab-inventario') loadInventoryData();
             else if (targetTab === 'tab-auditoria') loadAuditsData();
@@ -1450,8 +2377,8 @@ document.addEventListener('DOMContentLoaded', () => {
             configEvento = data.configuracion;
             pintarConfiguracion();
             // El nombre de la barra ES la identidad: al cambiarlo cambian la
-            // etiqueta de la pantalla, el título de la pestaña y el prefijo de
-            // las comandas, así que se recargan sin reiniciar nada.
+            // etiqueta de la pantalla, el título de la pestaña y lo que se
+            // imprime, así que se recargan sin reiniciar nada.
             if (data.instancia) {
                 instancia = data.instancia;
                 document.querySelectorAll('.instancia-badge').forEach(el => {
@@ -1463,9 +2390,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // se repinta aquí y no hace falta salir y volver a la pestaña.
                 pintarBarraDelCajero();
             }
-            notify('Datos del evento guardados. Las comandas serán ' +
-                   (data.instancia ? data.instancia.prefijo : '') + '-1, ' +
-                   (data.instancia ? data.instancia.prefijo : '') + '-2...', 'ok', 6000);
+            notify('Datos del evento guardados.', 'ok');
         } catch (err) {
             notify(err.message || 'No se pudieron guardar los datos.', 'error');
         } finally {
@@ -1815,6 +2740,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    foto: fotoNuevoProducto,
+                    requiere_acompanante: document.getElementById('prod-requiere').checked,
+                    es_acompanante: document.getElementById('prod-es-acomp').checked,
                     id_categoria, nombre, descripcion, tipo_producto, precio_venta, stock_actual,
                     id_admin: currentUser.id_admin, id_evento: currentUser.id_evento
                 })
@@ -1824,6 +2752,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 notify('Producto creado.', 'ok');
                 document.getElementById('form-create-product').reset();
+                // reset() no vacía la vista previa de la foto: es un <div>, no
+                // un campo del formulario.
+                limpiarFotoDelFormulario();
+                // reset() sí desmarca las casillas, pero se dejan explícitas
+                // porque el alta siguiente no debe heredar nada de la anterior.
+                document.getElementById('prod-requiere').checked = false;
+                document.getElementById('prod-es-acomp').checked = false;
+                cargarCatalogoAdmin();
             } else {
                 notify(data.message || 'No se pudo completar la operación.', 'error');
             }
@@ -1832,8 +2768,689 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // ==========================================
+    // FOTOS DE PRODUCTO
+    // ==========================================
+    // La foto se reduce aquí, en la tablet, antes de salir por la red.
+    //
+    // Una foto de la cámara son 3-8 MB. Sin reducir habría que subirlos por el
+    // WiFi del hotspot, guardarlos en el .db y volver a bajarlos en cada tablet
+    // cliente al abrir la caja: la rejilla de productos tardaría segundos en
+    // pintarse. Reducida a 400 px de lado pesa unos 30 KB y se ve perfecta en
+    // una tarjeta que mide 150.
+    const FOTO_LADO = 400;
+    const FOTO_CALIDAD = 0.82;
+
+    /**
+     * ¿La imagen tiene algún píxel transparente?
+     *
+     * No se miran los cuatro millones de píxeles: basta el borde, que es donde
+     * está el fondo de un recorte de producto. Se recorre el marco de fuera y
+     * en cuanto aparece un píxel no opaco se para.
+     */
+    function tieneTransparencia(ctx, ancho, alto) {
+        try {
+            const puntos = [];
+            const paso = Math.max(1, Math.floor(Math.min(ancho, alto) / 24));
+            for (let x = 0; x < ancho; x += paso) puntos.push([x, 0], [x, alto - 1]);
+            for (let y = 0; y < alto; y += paso) puntos.push([0, y], [ancho - 1, y]);
+            for (const [x, y] of puntos) {
+                if (ctx.getImageData(x, y, 1, 1).data[3] < 250) return true;
+            }
+        } catch (err) {
+            // Un lienzo "sucio" no deja leerse. Ante la duda, JPEG con blanco:
+            // pesa menos y nunca sale con el fondo negro.
+            return false;
+        }
+        return false;
+    }
+
+    function reducirImagen(archivo) {
+        return new Promise((resolve, reject) => {
+            const lector = new FileReader();
+            lector.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+            lector.onload = () => {
+                const img = new Image();
+                img.onerror = () => reject(new Error('Ese archivo no es una imagen.'));
+                img.onload = () => {
+                    // Nunca se agranda: una foto pequeña se queda como está en
+                    // vez de estirarse y verse borrosa.
+                    const escala = Math.min(1, FOTO_LADO / Math.max(img.width, img.height));
+                    const ancho = Math.max(1, Math.round(img.width * escala));
+                    const alto = Math.max(1, Math.round(img.height * escala));
+
+                    const lienzo = document.createElement('canvas');
+                    lienzo.width = ancho;
+                    lienzo.height = alto;
+                    const ctx = lienzo.getContext('2d');
+                    ctx.drawImage(img, 0, 0, ancho, alto);
+
+                    // Si la foto trae fondo transparente se guarda en PNG y la
+                    // botella queda recortada sobre el fondo oscuro de la
+                    // tarjeta, que es como mejor se ve. Si es una foto normal
+                    // se pasa a JPEG, que pesa la cuarta parte; en ese caso hay
+                    // que pintar el blanco por debajo, porque un JPEG no tiene
+                    // transparencia y lo que no se rellena sale negro.
+                    try {
+                        if (tieneTransparencia(ctx, ancho, alto)) {
+                            resolve(lienzo.toDataURL('image/png'));
+                            return;
+                        }
+                        ctx.globalCompositeOperation = 'destination-over';
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(0, 0, ancho, alto);
+                        resolve(lienzo.toDataURL('image/jpeg', FOTO_CALIDAD));
+                    } catch (err) {
+                        reject(new Error('No se pudo procesar la imagen.'));
+                    }
+                };
+                img.src = lector.result;
+            };
+            lector.readAsDataURL(archivo);
+        });
+    }
+
+    // Pinta una foto (o el hueco de "sin foto") dentro de un contenedor.
+    function pintarFoto(caja, dataUri) {
+        if (!caja) return;
+        caja.innerHTML = '';
+        if (dataUri) {
+            const img = document.createElement('img');
+            img.src = dataUri;
+            img.alt = '';
+            caja.appendChild(img);
+            caja.classList.add('tiene');
+        } else {
+            const vacio = document.createElement('span');
+            vacio.className = 'foto-vacia';
+            vacio.textContent = 'Sin foto';
+            caja.appendChild(vacio);
+            caja.classList.remove('tiene');
+        }
+    }
+
+    // ---- Foto en el formulario de alta --------------------------------------
+    let fotoNuevoProducto = null;
+
+    const fotoInput = document.getElementById('prod-foto');
+    const fotoVista = document.getElementById('prod-foto-vista');
+    const fotoQuitar = document.getElementById('prod-foto-quitar');
+
+    if (fotoInput) {
+        fotoInput.addEventListener('change', async e => {
+            const archivo = e.target.files && e.target.files[0];
+            if (!archivo) return;
+            try {
+                fotoNuevoProducto = await reducirImagen(archivo);
+                pintarFoto(fotoVista, fotoNuevoProducto);
+                fotoQuitar.classList.remove('hide');
+            } catch (err) {
+                notify(err.message || 'No se pudo usar esa imagen.', 'error');
+                fotoInput.value = '';
+            }
+        });
+
+        fotoQuitar.addEventListener('click', () => {
+            fotoNuevoProducto = null;
+            fotoInput.value = '';
+            pintarFoto(fotoVista, null);
+            fotoQuitar.classList.add('hide');
+        });
+    }
+
+    function limpiarFotoDelFormulario() {
+        fotoNuevoProducto = null;
+        if (fotoInput) fotoInput.value = '';
+        pintarFoto(fotoVista, null);
+        if (fotoQuitar) fotoQuitar.classList.add('hide');
+    }
+
+    // ---- Cambiar la foto de un producto que ya existe -----------------------
+    // Un único control de archivo escondido que se reutiliza: crear uno por
+    // fila dejaría veinte en la página sin ninguna ventaja.
+    const fotoSuelta = document.createElement('input');
+    fotoSuelta.type = 'file';
+    fotoSuelta.accept = 'image/png,image/jpeg,image/webp';
+    fotoSuelta.className = 'foto-input';
+    document.body.appendChild(fotoSuelta);
+    let productoDeLaFoto = null;
+
+    fotoSuelta.addEventListener('change', async e => {
+        const archivo = e.target.files && e.target.files[0];
+        if (!archivo || !productoDeLaFoto) return;
+        try {
+            const dataUri = await reducirImagen(archivo);
+            await guardarFotoProducto(productoDeLaFoto, dataUri);
+        } catch (err) {
+            notify(err.message || 'No se pudo usar esa imagen.', 'error');
+        } finally {
+            fotoSuelta.value = '';
+            productoDeLaFoto = null;
+        }
+    });
+
+    function pedirFotoPara(id_producto) {
+        productoDeLaFoto = id_producto;
+        fotoSuelta.click();
+    }
+
+    async function guardarFotoProducto(id_producto, dataUri) {
+        try {
+            const res = await fetch('/api/admin/productos/' + id_producto + '/foto', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ foto: dataUri })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo guardar la foto.', 'error');
+                return;
+            }
+            notify(data.message, 'ok');
+            cargarCatalogoAdmin();
+            // La caja tiene que enterarse: si no, el cajero sigue viendo el
+            // dibujito hasta que recargue la página.
+            fetchProductsAndMenu();
+        } catch (err) {
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        }
+    }
+
+    // ==========================================
+    // LISTAS DEL PANEL: VER Y ELIMINAR
+    // ==========================================
+    // El panel sólo dejaba crear. No había forma de ver qué había ya, ni de
+    // quitar lo que sobraba, así que el catálogo de ejemplo se quedaba mezclado
+    // con los productos de verdad y en la caja aparecían cosas que no se venden.
+    //
+    // Eliminar no siempre borra: lo que ya tiene ventas se retira (deja de salir
+    // en la caja) pero se conserva, porque el cierre de caja lo nombra. El
+    // servidor decide cuál de los dos casos es y lo dice en su respuesta.
+
+    // Pregunta antes de borrar. Es el único sitio de la aplicación donde se
+    // pierde algo de forma irreversible, así que se pide confirmación aunque
+    // sea un toque más.
+    function confirmarBorrado(texto) {
+        return window.confirm(texto);
+    }
+
+    async function borrar(url, texto, alTerminar) {
+        if (!confirmarBorrado(texto)) return;
+        try {
+            const res = await fetch(url, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_admin: currentUser ? currentUser.id_admin : 1 })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo eliminar.', 'error', 7000);
+                return;
+            }
+            // Los retirados llevan más explicación que un simple "hecho": el
+            // encargado tiene que entender por qué sigue existiendo.
+            notify(data.message, data.retirado ? 'warn' : 'ok', data.retirado ? 8000 : 4000);
+            if (alTerminar) alTerminar();
+        } catch (err) {
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        }
+    }
+
+    // Una fila de lista.
+    //
+    // Va en DOS renglones y no en uno: el nombre arriba, ocupando todo el
+    // ancho, y debajo los datos y las marcas.
+    //
+    // En una sola línea, las tres insignias ("vendido 1×", "con acompañante",
+    // "es acompañante") más la foto y los botones se comían el sitio y el
+    // nombre quedaba en "Ballant…" y "Chivas …": dos whiskys distintos que se
+    // leían igual. El nombre es lo que se busca en esta lista, así que es lo
+    // único que tiene garantizada la línea entera.
+    function filaLista({ titulo, detalle, insignia, inactivo, onBorrar,
+                         foto, onFoto, onQuitarFoto, marcas, onEditar }) {
+        const fila = document.createElement('div');
+        fila.className = 'lista-fila' + (inactivo ? ' inactiva' : '');
+
+        // Miniatura, sólo en las filas que pueden tenerla. Es un botón: se toca
+        // la foto para ponerla o cambiarla.
+        if (onFoto) {
+            const btnFoto = document.createElement('button');
+            btnFoto.type = 'button';
+            btnFoto.className = 'lista-foto' + (foto ? ' tiene' : '');
+            btnFoto.title = foto ? 'Cambiar la foto' : 'Añadir una foto';
+            btnFoto.setAttribute('aria-label', (foto ? 'Cambiar' : 'Añadir') + ' foto de ' + titulo);
+            if (foto) {
+                const img = document.createElement('img');
+                img.src = foto;
+                img.alt = '';
+                // Descarga diferida: con veinte fotos en la lista, cargarlas
+                // todas de golpe retrasa el primer pintado de la pestaña.
+                img.loading = 'lazy';
+                btnFoto.appendChild(img);
+            } else {
+                btnFoto.textContent = '+';
+            }
+            btnFoto.addEventListener('click', onFoto);
+            fila.appendChild(btnFoto);
+        }
+
+        const cuerpo = document.createElement('div');
+        cuerpo.className = 'lista-cuerpo';
+
+        // Renglón 1: el nombre, solo, con todo el ancho.
+        const nombre = document.createElement('span');
+        nombre.className = 'lista-nombre';
+        nombre.textContent = titulo;
+        cuerpo.appendChild(nombre);
+
+        // Renglón 2: datos, insignias y marcas. Si no caben, saltan de línea
+        // en vez de empujar al nombre.
+        const meta = document.createElement('div');
+        meta.className = 'lista-meta';
+
+        if (detalle) {
+            const sub = document.createElement('span');
+            sub.className = 'lista-detalle';
+            sub.textContent = detalle;
+            meta.appendChild(sub);
+        }
+
+        if (insignia) {
+            const ins = document.createElement('span');
+            ins.className = 'lista-insignia';
+            ins.textContent = insignia;
+            meta.appendChild(ins);
+        }
+
+        if (inactivo) {
+            const ret = document.createElement('span');
+            ret.className = 'lista-insignia retirada';
+            ret.textContent = 'Retirado';
+            meta.appendChild(ret);
+        }
+
+        // Marcas alternables (acompañamiento). Se pintan siempre, encendidas o
+        // apagadas: si sólo salieran las activas, no habría dónde tocar para
+        // encender la primera.
+        if (marcas && !inactivo) {
+            marcas.forEach(m => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'lista-marca' + (m.activa ? ' activa' : '');
+                b.textContent = m.texto;
+                b.title = (m.activa ? 'Quitar: ' : 'Marcar: ') + m.texto;
+                b.setAttribute('aria-pressed', m.activa ? 'true' : 'false');
+                b.addEventListener('click', m.onTocar);
+                meta.appendChild(b);
+            });
+        }
+
+        if (meta.childNodes.length) cuerpo.appendChild(meta);
+        fila.appendChild(cuerpo);
+
+        // Acciones, siempre a la derecha y siempre en el mismo sitio.
+        const acciones = document.createElement('div');
+        acciones.className = 'lista-acciones';
+
+        if (onEditar && !inactivo) {
+            const ed = document.createElement('button');
+            ed.type = 'button';
+            ed.className = 'lista-editar';
+            ed.title = 'Editar';
+            ed.setAttribute('aria-label', 'Editar ' + titulo);
+            ed.textContent = '✎';
+            ed.addEventListener('click', onEditar);
+            acciones.appendChild(ed);
+        }
+
+        if (onQuitarFoto && !inactivo) {
+            const quitar = document.createElement('button');
+            quitar.type = 'button';
+            quitar.className = 'lista-quitar-foto';
+            quitar.title = 'Quitar la foto';
+            quitar.setAttribute('aria-label', 'Quitar la foto de ' + titulo);
+            quitar.textContent = '🚫';
+            quitar.addEventListener('click', onQuitarFoto);
+            acciones.appendChild(quitar);
+        }
+
+        if (!inactivo) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'lista-borrar';
+            btn.title = 'Eliminar';
+            btn.setAttribute('aria-label', 'Eliminar ' + titulo);
+            btn.textContent = '✕';
+            btn.addEventListener('click', onBorrar);
+            acciones.appendChild(btn);
+        }
+
+        fila.appendChild(acciones);
+        return fila;
+    }
+
+    // Cabecera de grupo. Una lista de cuarenta y cinco meseros seguidos no se
+    // puede repasar; agrupada por cajero, cada bloque es del tamaño de lo que
+    // una persona lleva a su cargo, que es como se reparte el trabajo.
+    function cabeceraGrupo(texto, cuantos) {
+        const h = document.createElement('div');
+        h.className = 'lista-grupo';
+        const a = document.createElement('span');
+        a.className = 'lista-grupo-nombre';
+        a.textContent = texto;
+        h.appendChild(a);
+        const b = document.createElement('span');
+        b.className = 'lista-grupo-cuenta';
+        b.textContent = cuantos;
+        h.appendChild(b);
+        return h;
+    }
+
+    // Agrupa conservando el orden de aparición: así el orden de los grupos no
+    // baila entre un repintado y el siguiente.
+    function agrupar(lista, claveDe) {
+        const grupos = new Map();
+        lista.forEach(x => {
+            const k = claveDe(x) || 'Sin asignar';
+            if (!grupos.has(k)) grupos.set(k, []);
+            grupos.get(k).push(x);
+        });
+        return grupos;
+    }
+
+    function pintarVacio(contenedor, texto) {
+        contenedor.innerHTML = '';
+        const p = document.createElement('p');
+        p.className = 'lista-vacia';
+        p.textContent = texto;
+        contenedor.appendChild(p);
+    }
+
+    // ---- Catálogo -----------------------------------------------------------
+    let catalogoAdmin = { categorias: [], productos: [] };
+
+    async function cargarCatalogoAdmin() {
+        try {
+            const res = await fetch('/api/admin/catalogo');
+            catalogoAdmin = await res.json();
+        } catch (err) {
+            catalogoAdmin = { categorias: [], productos: [] };
+        }
+        pintarCategorias();
+        pintarProductosAdmin();
+    }
+
+    function pintarCategorias() {
+        const cont = document.getElementById('lista-categorias');
+        if (!cont) return;
+        const cats = catalogoAdmin.categorias || [];
+        document.getElementById('cont-categorias').textContent = cats.length;
+
+        if (!cats.length) return pintarVacio(cont, 'Todavía no hay categorías.');
+
+        cont.innerHTML = '';
+        cats.forEach(c => {
+            cont.appendChild(filaLista({
+                titulo: c.nombre,
+                detalle: c.descripcion || '',
+                insignia: c.productos + (c.productos === 1 ? ' producto' : ' productos'),
+                inactivo: c.activo === 0,
+                onBorrar: () => borrar(
+                    '/api/admin/categorias/' + c.id_categoria,
+                    '¿Eliminar la categoría "' + c.nombre + '"?',
+                    () => { cargarCatalogoAdmin(); loadCatalogSetup(); })
+            }));
+        });
+    }
+
+    function pintarProductosAdmin() {
+        const cont = document.getElementById('lista-productos');
+        if (!cont) return;
+        const filtro = (document.getElementById('buscar-producto-cat').value || '')
+            .trim().toLowerCase();
+        const todos = catalogoAdmin.productos || [];
+        const lista = filtro
+            ? todos.filter(p => (p.nombre || '').toLowerCase().includes(filtro))
+            : todos;
+
+        document.getElementById('cont-productos').textContent =
+            filtro ? lista.length + ' de ' + todos.length : todos.length;
+
+        if (!lista.length) {
+            return pintarVacio(cont, filtro ? 'Ningún producto con ese nombre.' : 'Todavía no hay productos.');
+        }
+
+        cont.innerHTML = '';
+        // Agrupados por categoría, como en la caja: repasar veinte productos
+        // mezclados obliga a leerlos todos para saber si falta una cerveza.
+        agrupar(lista, p => p.categoria).forEach((productos, categoria) => {
+            cont.appendChild(cabeceraGrupo(categoria, productos.length));
+            productos.forEach(p => {
+                const precio = Number(p.precio_venta).toFixed(2) + ' Bs.';
+                cont.appendChild(filaLista({
+                    titulo: p.nombre,
+                    detalle: [precio, p.stock_actual + ' u.'].join(' · '),
+                    insignia: p.vendido > 0 ? 'vendido ' + p.vendido + '×' : '',
+                    inactivo: p.activo === 0,
+                    foto: urlFoto(p),
+                    onEditar: () => abrirEditarProducto(p),
+                    marcas: [
+                        { texto: 'con acompañante', activa: !!p.requiere_acompanante,
+                          onTocar: () => marcarAcompanamiento(p, 'requiere') },
+                        { texto: 'es acompañante', activa: !!p.es_acompanante,
+                          onTocar: () => marcarAcompanamiento(p, 'es') }
+                    ],
+                    // La miniatura es el botón: se toca la foto para cambiarla, que
+                    // es donde todo el mundo va a tocar de todas formas.
+                    onFoto: () => pedirFotoPara(p.id_producto),
+                    onQuitarFoto: p.tiene_foto ? () => guardarFotoProducto(p.id_producto, '') : null,
+                    onBorrar: () => borrar(
+                        '/api/admin/productos/' + p.id_producto,
+                        p.vendido > 0
+                            ? '"' + p.nombre + '" ya tiene ventas.\n\nSe retirará de la caja pero seguirá ' +
+                              'apareciendo en el cierre. ¿Continuar?'
+                            : '¿Eliminar "' + p.nombre + '"?',
+                        () => { cargarCatalogoAdmin(); loadCatalogSetup(); })
+                }));
+            });
+        });
+    }
+
+    // Cambia una de las dos marcas de acompañamiento. Se manda el estado
+    // completo y no un "alterna esto": así el servidor no tiene que adivinar
+    // nada y dos toques rápidos no pueden dejarlo en un estado a medias.
+    async function marcarAcompanamiento(p, cual) {
+        const requiere = cual === 'requiere' ? !p.requiere_acompanante : !!p.requiere_acompanante;
+        const es = cual === 'es' ? !p.es_acompanante : !!p.es_acompanante;
+
+        // Las dos a la vez no tienen sentido: un producto que pide acompañante
+        // no puede ser el acompañante de otro. Se apaga la contraria sola en
+        // vez de rechazar el toque y hacer que el encargado adivine por qué.
+        const cuerpo = (requiere && es)
+            ? { requiere_acompanante: cual === 'requiere', es_acompanante: cual === 'es' }
+            : { requiere_acompanante: requiere, es_acompanante: es };
+
+        try {
+            const res = await fetch('/api/admin/productos/' + p.id_producto + '/acompanamiento', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(cuerpo)
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo guardar.', 'error');
+                return;
+            }
+            notify(data.message, 'ok');
+            cargarCatalogoAdmin();
+        } catch (err) {
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        }
+    }
+
+    // ---- Editar un producto -------------------------------------------------
+    const editarModal = document.getElementById('editar-modal');
+    let productoEditando = null;
+
+    function abrirEditarProducto(p) {
+        productoEditando = p;
+        document.getElementById('editar-cual').textContent = p.nombre;
+        document.getElementById('editar-nombre').value = p.nombre || '';
+        document.getElementById('editar-precio').value = Number(p.precio_venta).toFixed(2);
+        document.getElementById('editar-descripcion').value = p.descripcion || '';
+
+        const sel = document.getElementById('editar-categoria');
+        sel.innerHTML = '';
+        (catalogoAdmin.categorias || []).forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id_categoria;
+            opt.textContent = c.nombre;
+            sel.appendChild(opt);
+        });
+        sel.value = p.id_categoria || '';
+
+        editarModal.classList.remove('hide');
+        document.getElementById('editar-nombre').focus();
+    }
+
+    function cerrarEditarProducto() {
+        editarModal.classList.add('hide');
+        productoEditando = null;
+    }
+
+    async function guardarEdicionProducto() {
+        if (!productoEditando) return;
+        const boton = document.getElementById('editar-guardar');
+        boton.disabled = true;
+        try {
+            const res = await fetch('/api/admin/productos/' + productoEditando.id_producto, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nombre: document.getElementById('editar-nombre').value,
+                    descripcion: document.getElementById('editar-descripcion').value,
+                    precio_venta: document.getElementById('editar-precio').value,
+                    id_categoria: document.getElementById('editar-categoria').value,
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo guardar.', 'error', 6000);
+                return;
+            }
+            notify(data.message, 'ok');
+            cerrarEditarProducto();
+            cargarCatalogoAdmin();
+            loadCatalogSetup();
+            // La caja tiene que enterarse del precio nuevo antes de la siguiente
+            // venta, o seguiría cobrando el viejo hasta recargar.
+            fetchProductsAndMenu();
+        } catch (err) {
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        } finally {
+            boton.disabled = false;
+        }
+    }
+
+    document.getElementById('editar-cerrar').addEventListener('click', cerrarEditarProducto);
+    document.getElementById('editar-guardar').addEventListener('click', guardarEdicionProducto);
+    editarModal.addEventListener('click', e => {
+        if (e.target === editarModal) cerrarEditarProducto();
+    });
+
+    // ---- Personal -----------------------------------------------------------
+    let personalAdmin = { cajeros: [], meseros: [] };
+
+    async function cargarPersonalAdmin() {
+        try {
+            const res = await fetch('/api/admin/personal');
+            personalAdmin = await res.json();
+        } catch (err) {
+            personalAdmin = { cajeros: [], meseros: [] };
+        }
+        pintarCajeros();
+        pintarMeseros();
+    }
+
+    function pintarCajeros() {
+        const cont = document.getElementById('lista-cajeros');
+        if (!cont) return;
+        const cajeros = personalAdmin.cajeros || [];
+        document.getElementById('cont-cajeros').textContent = cajeros.length;
+
+        if (!cajeros.length) return pintarVacio(cont, 'Todavía no hay cajeros.');
+
+        cont.innerHTML = '';
+        cajeros.forEach(c => {
+            const partes = [c.usuario];
+            if (c.meseros) partes.push(c.meseros + (c.meseros === 1 ? ' mesero' : ' meseros'));
+            cont.appendChild(filaLista({
+                titulo: c.nombre,
+                detalle: partes.join(' · '),
+                insignia: c.comandas > 0 ? c.comandas + (c.comandas === 1 ? ' comanda' : ' comandas') : '',
+                inactivo: c.activo === 0,
+                onBorrar: () => borrar(
+                    '/api/admin/cajeros/' + c.id_cajero,
+                    c.comandas > 0
+                        ? c.nombre + ' ya cobró comandas.\n\nDejará de poder entrar, pero seguirá ' +
+                          'apareciendo en el cierre. ¿Continuar?'
+                        : '¿Eliminar al cajero ' + c.nombre + '?',
+                    () => { cargarPersonalAdmin(); loadPersonalSetup(); })
+            }));
+        });
+    }
+
+    function pintarMeseros() {
+        const cont = document.getElementById('lista-meseros');
+        if (!cont) return;
+        const filtro = (document.getElementById('buscar-mesero').value || '')
+            .trim().toLowerCase();
+        const todos = personalAdmin.meseros || [];
+        // Se busca también por PIN: en mitad del evento, lo que se olvida es el
+        // número, no el nombre.
+        const lista = filtro
+            ? todos.filter(m => (m.nombre || '').toLowerCase().includes(filtro) ||
+                                String(m.pin || '').includes(filtro))
+            : todos;
+
+        document.getElementById('cont-meseros').textContent =
+            filtro ? lista.length + ' de ' + todos.length : todos.length;
+
+        if (!lista.length) {
+            return pintarVacio(cont, filtro ? 'Ningún mesero con eso.' : 'Todavía no hay meseros.');
+        }
+
+        cont.innerHTML = '';
+        // Agrupados por cajero: es como se reparte el trabajo en la barra, y
+        // así se ve de un vistazo quién lleva cinco meseros y quién ninguno.
+        agrupar(lista, m => m.cajero).forEach((meseros, cajero) => {
+            cont.appendChild(cabeceraGrupo(cajero, meseros.length));
+            meseros.forEach(m => {
+                cont.appendChild(filaLista({
+                    titulo: m.nombre,
+                        detalle: 'PIN ' + m.pin,
+                    insignia: m.comandas > 0 ? m.comandas + (m.comandas === 1 ? ' comanda' : ' comandas') : '',
+                    inactivo: m.activo === 0,
+                    onBorrar: () => borrar(
+                        '/api/admin/meseros/' + m.id_mesero,
+                        m.comandas > 0
+                            ? m.nombre + ' ya tiene comandas.\n\nSu PIN dejará de funcionar, pero seguirá ' +
+                              'apareciendo en el cierre. ¿Continuar?'
+                            : '¿Eliminar al mesero ' + m.nombre + '?',
+                        () => { cargarPersonalAdmin(); loadPersonalSetup(); })
+                }));
+            });
+        });
+    }
+
+    document.getElementById('buscar-producto-cat').addEventListener('input', pintarProductosAdmin);
+    document.getElementById('buscar-mesero').addEventListener('input', pintarMeseros);
+
     // TAB: PERSONAL & BARRAS SETUP
-    async function loadPersonalSetup() {
+    // `mantenerCajero` conserva el cajero elegido al repintar el desplegable:
+    // al dar de alta varios meseros seguidos, todos son del mismo.
+    async function loadPersonalSetup(mantenerCajero) {
         try {
             const response = await fetch('/api/admin/configuracion');
             const data = await response.json();
@@ -1844,13 +3461,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Populate Mesero's Cajero selector
             const mesCajero = document.getElementById('mes-cajero');
-            mesCajero.innerHTML = '<option value="" disabled selected>Seleccione cajero...</option>';
+            const elegido = mantenerCajero || mesCajero.value;
+            mesCajero.innerHTML = '<option value="" disabled>Seleccione cajero...</option>';
             data.cajeros.forEach(c => {
                 const opt = document.createElement('option');
                 opt.value = c.id_cajero;
                 opt.textContent = `${c.nombre} (${c.usuario})`;
                 mesCajero.appendChild(opt);
             });
+            // Se vuelve a poner el que estaba; si ya no existe, se queda en el
+            // aviso de elegir uno.
+            mesCajero.value = elegido || '';
+            if (!mesCajero.value) mesCajero.selectedIndex = 0;
         } catch (err) {
             console.error(err);
         }
@@ -1881,7 +3503,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 notify('Cajero registrado.', 'ok');
                 document.getElementById('form-create-cajero').reset();
+                // Los dos: loadPersonalSetup rellena los desplegables y
+                // cargarPersonalAdmin repinta las listas. Antes sólo se llamaba
+                // al primero, así que el cajero recién creado no aparecía abajo
+                // hasta recargar la página.
                 loadPersonalSetup();
+                cargarPersonalAdmin();
             } else {
                 notify(data.message || 'No se pudo completar la operación.', 'error');
             }
@@ -1908,7 +3535,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (data.success) {
                 notify('Mesero registrado.', 'ok');
-                document.getElementById('form-create-mesero').reset();
+
+                // reset() borraría también el cajero elegido, y dar de alta
+                // quince meseros del mismo cajero obligaría a volver a
+                // seleccionarlo quince veces. Se limpian sólo los campos que
+                // cambian de una persona a la siguiente.
+                ['mes-name', 'mes-user', 'mes-pass'].forEach(id => {
+                    document.getElementById(id).value = '';
+                });
+                document.getElementById('mes-name').focus();
+
+                loadPersonalSetup(id_cajero);
+                cargarPersonalAdmin();
             } else {
                 notify(data.message || 'No se pudo completar la operación.', 'error');
             }
@@ -1918,19 +3556,205 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // TAB: ADJUST STOCK SETUP
+    // ==========================================
+    // INGRESO DE MERCANCÍA (COMPRA O TRASPASO RECIBIDO)
+    // ==========================================
+    // Dos orígenes y hay que distinguirlos: lo que se compra a un proveedor
+    // costó dinero, lo que llega de otra barra ya estaba pagado. Mezclarlos
+    // haría imposible saber cuánto se gastó en mercancía esa noche.
+    let ingresoMotivo = 'COMPRA';
+    let ingresoPendientes = [];
+
+    function pintarIngresoPendientes() {
+        const caja = document.getElementById('ingreso-lista');
+        if (!caja) return;
+        caja.innerHTML = '';
+
+        // El botón dice cuántos lleva la lista: es lo que aclara que guardar
+        // registra TODO lo añadido, no sólo lo que se ve escrito arriba.
+        const guardar = document.getElementById('ingreso-guardar');
+        if (guardar) {
+            guardar.textContent = ingresoPendientes.length
+                ? 'Guardar ingreso (' + ingresoPendientes.length + ')'
+                : 'Guardar ingreso';
+        }
+        ingresoPendientes.forEach((p, i) => {
+            const fila = document.createElement('div');
+            fila.className = 'mover-pendiente';
+            const txt = document.createElement('span');
+            txt.textContent = p.cantidad + ' × ' + p.nombre;
+            fila.appendChild(txt);
+            const quitar = document.createElement('button');
+            quitar.type = 'button';
+            quitar.className = 'mover-quitar';
+            quitar.textContent = '✕';
+            quitar.setAttribute('aria-label', 'Quitar ' + p.nombre);
+            quitar.addEventListener('click', () => {
+                ingresoPendientes.splice(i, 1);
+                pintarIngresoPendientes();
+            });
+            fila.appendChild(quitar);
+            caja.appendChild(fila);
+        });
+    }
+
+    function apuntarIngreso() {
+        const sel = document.getElementById('ingreso-producto');
+        const id = parseInt(sel.value, 10);
+        const n = parseInt(document.getElementById('ingreso-unidades').value, 10);
+
+        if (!id) { notify('Elige el producto.', 'warn'); return false; }
+        if (!Number.isInteger(n) || n <= 0) {
+            notify('Pon cuántas unidades llegaron.', 'warn');
+            return false;
+        }
+        ingresoPendientes.push({
+            id_producto: id,
+            nombre: sel.options[sel.selectedIndex].textContent,
+            cantidad: n
+        });
+        pintarIngresoPendientes();
+        document.getElementById('ingreso-unidades').value = '';
+        return true;
+    }
+
+    async function guardarIngreso() {
+        if (!apuntarIngreso()) return;
+
+        const origen = document.getElementById('ingreso-origen').value.trim();
+        if (!origen) {
+            notify(ingresoMotivo === 'COMPRA'
+                ? 'Escribe a qué proveedor se le compró.'
+                : 'Escribe de qué barra llega.', 'warn');
+            return;
+        }
+
+        const boton = document.getElementById('ingreso-guardar');
+        boton.disabled = true;
+        try {
+            const res = await fetch('/api/traspaso', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tipo: 'ENTRADA',
+                    motivo: ingresoMotivo,
+                    contraparte: origen,
+                    observaciones: document.getElementById('ingreso-nota').value.trim(),
+                    id_admin: currentUser ? currentUser.id_admin : null,
+                    items: ingresoPendientes.map(p => ({ id_producto: p.id_producto, cantidad: p.cantidad }))
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo registrar el ingreso.', 'error', 7000);
+                return;
+            }
+
+            notify(data.message, 'ok', 6000);
+            ingresoPendientes = [];
+            pintarIngresoPendientes();
+            document.getElementById('ingreso-nota').value = '';
+            document.getElementById('ingreso-unidades').value = '';
+            cargarTraspasos();
+            loadStockSetup();
+        } catch (err) {
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        } finally {
+            boton.disabled = false;
+        }
+    }
+
+    document.querySelectorAll('.ingreso-tipo').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.ingreso-tipo').forEach(b => b.classList.remove('activa'));
+            btn.classList.add('activa');
+            ingresoMotivo = btn.dataset.motivo;
+            const etiqueta = document.getElementById('ingreso-origen-label');
+            const campo = document.getElementById('ingreso-origen');
+            if (ingresoMotivo === 'COMPRA') {
+                etiqueta.textContent = 'Proveedor';
+                campo.placeholder = 'Ej. Distribuidora Central';
+            } else {
+                etiqueta.textContent = 'Barra de origen';
+                campo.placeholder = 'Ej. Barra VIP';
+            }
+        });
+    });
+
+    document.getElementById('ingreso-otro').addEventListener('click', () => { apuntarIngreso(); });
+    document.getElementById('ingreso-guardar').addEventListener('click', guardarIngreso);
+
+    // ---- Historial de movimientos de mercancía -----------------------------
+    async function cargarTraspasos() {
+        const caja = document.getElementById('lista-traspasos');
+        if (!caja) return;
+        let data;
+        try {
+            data = await (await fetch('/api/traspasos')).json();
+        } catch (err) {
+            return pintarVacio(caja, 'No se pudo leer el historial.');
+        }
+
+        const lista = data.traspasos || [];
+        document.getElementById('cont-traspasos').textContent = lista.length;
+        if (!lista.length) {
+            return pintarVacio(caja, 'Todavía no hay entradas ni salidas de mercancía.');
+        }
+
+        caja.innerHTML = '';
+        lista.forEach(t => {
+            const sale = t.tipo === 'SALIDA';
+            const fila = document.createElement('div');
+            fila.className = 'lista-fila';
+
+            const flecha = document.createElement('span');
+            flecha.className = 'traspaso-flecha ' + (sale ? 'sale' : 'entra');
+            flecha.textContent = sale ? '↗' : '↙';
+            flecha.title = sale ? 'Salió de esta barra' : 'Entró a esta barra';
+            fila.appendChild(flecha);
+
+            const texto = document.createElement('div');
+            texto.className = 'lista-texto';
+            const nombre = document.createElement('span');
+            nombre.className = 'lista-nombre';
+            nombre.textContent = (sale ? 'A ' : (t.motivo === 'COMPRA' ? 'Compra a ' : 'De ')) + t.contraparte;
+            texto.appendChild(nombre);
+            const sub = document.createElement('span');
+            sub.className = 'lista-detalle';
+            sub.textContent = ['#' + t.id_traspaso, t.fecha_hora, t.cajero || '']
+                .filter(Boolean).join(' · ');
+            texto.appendChild(sub);
+            fila.appendChild(texto);
+
+            const ins = document.createElement('span');
+            ins.className = 'lista-insignia';
+            ins.textContent = t.unidades + (t.unidades === 1 ? ' unidad' : ' unidades');
+            fila.appendChild(ins);
+
+            caja.appendChild(fila);
+        });
+    }
+
     async function loadStockSetup() {
         try {
             const response = await fetch('/api/productos');
             const data = await response.json();
 
-            const select = document.getElementById('stock-product');
-            select.innerHTML = '<option value="" disabled selected>Seleccione producto...</option>';
-            data.productos.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.id_producto;
-                opt.textContent = `${p.nombre} (Stock actual: ${p.stock_actual})`;
-                select.appendChild(opt);
+            // Los dos desplegables de la pestaña: el de corregir inventario y
+            // el de ingresar mercancía.
+            ['stock-product', 'ingreso-producto'].forEach(id => {
+                const select = document.getElementById(id);
+                if (!select) return;
+                select.innerHTML = '<option value="" disabled selected>Seleccione producto...</option>';
+                data.productos.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id_producto;
+                    opt.textContent = `${p.nombre} (Stock actual: ${p.stock_actual})`;
+                    select.appendChild(opt);
+                });
             });
+
+            cargarTraspasos();
         } catch (err) {
             console.error(err);
         }

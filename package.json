@@ -12,6 +12,7 @@
     "test:carga": "node tools/stress-test.js",
     "test:sync": "node tools/sync-test.js",
     "reiniciar": "node tools/reiniciar-ventas.js",
+    "medir": "node tools/medir.js",
     "capturas": "node tools/capturas.js"
   },
   "keywords": [

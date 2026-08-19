@@ -38,9 +38,11 @@ function check(nombre, ok, detalle) {
   if (!ok) fallos++;
 }
 
-async function post(ruta, cuerpo) {
+// El tercer argumento permite reutilizarla para DELETE, que también manda
+// cuerpo (el id del administrador que firma la acción en la auditoría).
+async function post(ruta, cuerpo, metodo) {
   const res = await fetch(URL + ruta, {
-    method: 'POST',
+    method: metodo || 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(cuerpo)
   });
@@ -396,27 +398,29 @@ const leer = sql => {
   // =======================================================================
   console.log(C.tit('\n  Identidad de la barra'));
   // =======================================================================
-  // El nombre de la barra sale del panel y de él depende el prefijo con el que
-  // se numeran las comandas, así que el servidor tiene que saber decir cuál es.
+  // El nombre de la barra sale del panel y encabeza tickets y cierre, así que
+  // el servidor tiene que saber decir cuál es.
   const ident = await get('/api/instancia');
-  check('El servidor dice quién es', !!ident.nombre && !!ident.prefijo,
-    ident.nombre + ' / ' + ident.prefijo);
+  check('El servidor dice cómo se llama la barra', !!ident.nombre, ident.nombre);
 
   const guardada = leer("SELECT clave, valor FROM instancia");
   const comoMapa = Object.fromEntries(guardada.map(r => [r.clave, r.valor]));
   check('La identidad queda grabada dentro de la propia base',
-    comoMapa.nombre === ident.nombre && comoMapa.prefijo === ident.prefijo,
+    comoMapa.nombre === ident.nombre,
     'la base se identifica sola aunque se copie a otro equipo');
   check('Queda registrado el primer arranque', !!comoMapa.primer_arranque, comoMapa.primer_arranque);
 
   const venta = await post('/api/comanda', Object.assign({}, base, {
-    observaciones: 'con prefijo',
+    observaciones: 'referencia',
     total: prod.precio_venta,
     items: [item(prod.id_producto, 1)],
     metodos_pago: [{ id_metodo_pago: 1, monto: prod.precio_venta }]
   }));
-  check('La venta devuelve la referencia con prefijo',
-    venta.json.ref_comanda === ident.prefijo + '-' + venta.json.id_comanda,
+  // Sólo el número: nada de letras delante. Es lo que el mesero canta en voz
+  // alta en la barra, y un "B1-" por delante sólo estorba.
+  check('La comanda se identifica sólo con su número',
+    venta.json.ref_comanda === String(venta.json.id_comanda) &&
+    /^\d+$/.test(String(venta.json.ref_comanda)),
     venta.json.ref_comanda);
 
   // =======================================================================
@@ -464,26 +468,14 @@ const leer = sql => {
     repCfg.evento.nombre_evento === 'Prueba de configuración' &&
     repCfg.evento.responsable === 'Responsable Ñ');
 
-  // El nombre de la barra ES la identidad en el montaje de un solo servidor:
-  // al cambiarlo desde el panel tienen que cambiar con él el prefijo de las
-  // comandas y lo que se ve en la caja, sin reiniciar nada.
+  // El nombre de la barra ES la identidad: al cambiarlo desde el panel tiene
+  // que cambiar lo que se ve en la caja y lo que se imprime, sin reiniciar.
   const identidadTrasGuardar = await get('/api/instancia');
   check('Cambiar la barra en el panel cambia la identidad al vuelo',
     identidadTrasGuardar.nombre === 'Barra de prueba',
-    identidadTrasGuardar.nombre + ' -> ' + identidadTrasGuardar.prefijo);
-  check('El prefijo sale de la inicial, ignorando el "Barra " de delante',
-    identidadTrasGuardar.prefijo === 'D', 'Barra de prueba -> ' + identidadTrasGuardar.prefijo);
-
-  const ventaConPrefijo = await post('/api/comanda', Object.assign({}, base, {
-    observaciones: 'prefijo nuevo',
-    clave_idempotencia: 'prefijo-' + Date.now(),
-    total: prod.precio_venta,
-    items: [item(prod.id_producto, 1)],
-    metodos_pago: [{ id_metodo_pago: 1, monto: prod.precio_venta }]
-  }));
-  check('Las comandas nuevas salen con el prefijo nuevo',
-    String(ventaConPrefijo.json.ref_comanda).startsWith(identidadTrasGuardar.prefijo + '-'),
-    ventaConPrefijo.json.ref_comanda);
+    identidadTrasGuardar.nombre);
+  check('La tabla barra sigue al nombre del panel',
+    leer('SELECT nombre_barra FROM barra')[0].nombre_barra === 'Barra de prueba');
 
   // =======================================================================
   console.log(C.tit(String.fromCharCode(10) + '  Una sola barra'));
@@ -653,6 +645,650 @@ const leer = sql => {
   check('El PDF nombra el evento y las secciones del cierre',
     texto.includes('MASTERDRINKS') && texto.includes('COBROS POR FORMA DE PAGO') &&
     texto.includes('EXISTENCIAS AL CIERRE'));
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Eliminar del catálogo y de la plantilla'));
+  // =======================================================================
+  // Borrar tiene dos comportamientos y la diferencia es la que protege el
+  // cierre de caja: lo que nunca se vendió se va entero; lo que ya se vendió se
+  // retira de la caja pero se conserva, porque el informe lo nombra.
+  const del = (url) => post(url, { id_admin: 1 }, 'DELETE');
+
+  // -- producto sin ventas: se va de verdad
+  const libre = leer(`SELECT p.id_producto, p.nombre FROM producto p
+                      WHERE p.activo = 1
+                        AND NOT EXISTS (SELECT 1 FROM detalle_comanda d WHERE d.id_producto = p.id_producto)
+                      LIMIT 1`)[0];
+  r = await del('/api/admin/productos/' + libre.id_producto);
+  check('Un producto sin ventas se elimina de verdad',
+    r.status === 200 && r.json.success && r.json.retirado === false, r.json.message);
+  check('Y desaparece de la tabla',
+    leer('SELECT id_producto FROM producto WHERE id_producto = ' + libre.id_producto).length === 0);
+  check('Con él se van sus movimientos de stock, que ya no significan nada',
+    leer('SELECT id_movimiento FROM movimiento_stock WHERE id_producto = ' + libre.id_producto).length === 0);
+
+  // -- producto vendido: se retira, no se borra
+  const vendidoId = leer(`SELECT d.id_producto FROM detalle_comanda d
+                          JOIN producto p ON p.id_producto = d.id_producto
+                          WHERE p.activo = 1 LIMIT 1`)[0].id_producto;
+  r = await del('/api/admin/productos/' + vendidoId);
+  check('Un producto ya vendido se retira, no se borra',
+    r.status === 200 && r.json.success && r.json.retirado === true, r.json.message);
+  const retirado = leer('SELECT activo FROM producto WHERE id_producto = ' + vendidoId)[0];
+  check('Sigue en la base, marcado como inactivo', retirado && retirado.activo === 0);
+  check('Sus líneas de venta siguen enteras',
+    leer('SELECT id_detalle FROM detalle_comanda WHERE id_producto = ' + vendidoId).length > 0,
+    'el cierre lo sigue nombrando');
+
+  const enCaja = await get('/api/productos');
+  check('La caja ya no lo ofrece',
+    !enCaja.productos.some(p => p.id_producto === vendidoId));
+
+  const repTrasRetirar = await get('/api/admin/reporte');
+  check('Pero el cierre lo sigue contando',
+    repTrasRetirar.productos.length > 0, repTrasRetirar.productos.length + ' producto(s) en el informe');
+
+  // -- categoría con productos dentro: no se toca
+  const catLlena = leer(`SELECT c.id_categoria, c.nombre FROM categoria_producto c
+                         WHERE (SELECT COUNT(*) FROM producto p
+                                 WHERE p.id_categoria = c.id_categoria AND p.activo = 1) > 0
+                         LIMIT 1`)[0];
+  r = await del('/api/admin/categorias/' + catLlena.id_categoria);
+  check('Una categoría con productos dentro no se puede eliminar',
+    r.status === 400 && !r.json.success, r.json.message);
+  check('Y sigue ahí',
+    leer('SELECT id_categoria FROM categoria_producto WHERE id_categoria = ' + catLlena.id_categoria).length === 1);
+
+  // -- cajero con comandas: se retira y deja de poder entrar
+  const cajConVentas = leer(`SELECT DISTINCT id_cajero FROM comanda LIMIT 1`)[0];
+  if (cajConVentas) {
+    const usuario = leer('SELECT usuario FROM cajero WHERE id_cajero = ' + cajConVentas.id_cajero)[0].usuario;
+    r = await del('/api/admin/cajeros/' + cajConVentas.id_cajero);
+    check('Un cajero que ya cobró se da de baja, no se borra',
+      r.status === 200 && r.json.success && r.json.retirado === true, r.json.message);
+    const entra = await post('/api/login', { usuario, password: 'demo123' });
+    check('Y deja de poder entrar', entra.status === 401, 'status ' + entra.status);
+    check('Sus comandas siguen a su nombre',
+      leer('SELECT id_comanda FROM comanda WHERE id_cajero = ' + cajConVentas.id_cajero).length > 0);
+  }
+
+  // -- cajero con meseros a su cargo: no se puede
+  const cajConMeseros = leer(`SELECT c.id_cajero FROM cajero c
+                              WHERE c.activo = 1
+                                AND (SELECT COUNT(*) FROM mesero m WHERE m.id_cajero = c.id_cajero) > 0
+                                AND (SELECT COUNT(*) FROM comanda k WHERE k.id_cajero = c.id_cajero) = 0
+                              LIMIT 1`)[0];
+  if (cajConMeseros) {
+    r = await del('/api/admin/cajeros/' + cajConMeseros.id_cajero);
+    check('Un cajero con meseros a su cargo no se puede eliminar',
+      r.status === 400 && !r.json.success, r.json.message);
+  }
+
+  // -- mesero sin comandas: se va entero
+  const mesLibre = leer(`SELECT m.id_mesero FROM mesero m
+                         WHERE m.activo = 1
+                           AND NOT EXISTS (SELECT 1 FROM comanda k WHERE k.id_mesero = m.id_mesero)
+                         LIMIT 1`)[0];
+  r = await del('/api/admin/meseros/' + mesLibre.id_mesero);
+  check('Un mesero sin comandas se elimina de verdad',
+    r.status === 200 && r.json.success && r.json.retirado === false, r.json.message);
+  check('Y su PIN deja de existir',
+    leer('SELECT id_mesero FROM mesero WHERE id_mesero = ' + mesLibre.id_mesero).length === 0);
+
+  // -- ids inventados
+  r = await del('/api/admin/productos/999999');
+  check('Eliminar algo que no existe da 404, no un error del servidor', r.status === 404);
+  r = await del('/api/admin/productos/abc');
+  check('Un id que no es número se rechaza', r.status === 400);
+
+  // -- las listas que alimentan el panel
+  const cat = await get('/api/admin/catalogo');
+  check('El panel puede listar el catálogo',
+    Array.isArray(cat.categorias) && Array.isArray(cat.productos) && cat.productos.length > 0,
+    cat.categorias.length + ' categorías y ' + cat.productos.length + ' productos');
+  check('Y marca cuáles están retirados y cuáles se vendieron',
+    cat.productos.some(p => p.activo === 0) && cat.productos.every(p => 'vendido' in p));
+
+  const per = await get('/api/admin/personal');
+  check('El panel puede listar el personal',
+    per.cajeros.length > 0 && per.meseros.length > 0,
+    per.cajeros.length + ' cajeros y ' + per.meseros.length + ' meseros');
+  check('Los meseros traen su PIN, para poder consultarlo en mitad del evento',
+    per.meseros.every(m => m.pin));
+
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Sondeo de existencias'));
+  // =======================================================================
+  // Cada tablet pregunta el stock cada doce segundos. Reutilizaba
+  // /api/productos, que con una foto por producto son 600 KB por sondeo: sobre
+  // el WiFi de un teléfono, con tres tablets, eso deja sin antena a las ventas.
+  const sondeo = await get('/api/stock');
+  check('El sondeo devuelve las existencias', Array.isArray(sondeo.stock) && sondeo.stock.length > 0,
+    sondeo.stock.length + ' productos');
+  check('Y sólo eso: id y cantidad, nada más',
+    sondeo.stock.every(p => Object.keys(p).length === 2 && 'id' in p && 's' in p),
+    JSON.stringify(sondeo.stock[0]));
+
+  const pesoSondeo = JSON.stringify(sondeo).length;
+  const pesoCatalogo = JSON.stringify(await get('/api/productos')).length;
+  check('Pesa mucho menos que el catálogo entero',
+    pesoSondeo < pesoCatalogo,
+    pesoSondeo + ' bytes frente a ' + pesoCatalogo);
+
+  check('Las cifras del sondeo coinciden con la base',
+    sondeo.stock.every(p => {
+      const real = leer('SELECT stock_actual FROM producto WHERE id_producto = ' + p.id)[0];
+      return real && real.stock_actual === p.s;
+    }));
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Fotos de producto'));
+  // =======================================================================
+  // La foto se guarda dentro de la base para que viaje con ella. Sólo se acepta
+  // el contenido de la imagen: una dirección remota no cargaría en el evento
+  // (no hay internet) y además dejaría meter cualquier cosa en la pantalla de
+  // la caja.
+  const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfF' +
+    'cSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const conFoto = leer('SELECT id_producto FROM producto WHERE activo = 1 LIMIT 1')[0].id_producto;
+  const ponerFoto = valor => post('/api/admin/productos/' + conFoto + '/foto', { foto: valor }, 'PUT');
+
+  r = await ponerFoto(PNG_1PX);
+  check('Se puede ponerle una foto a un producto',
+    r.status === 200 && r.json.success, r.json.message);
+  check('Y queda guardada dentro de la base',
+    (leer('SELECT foto FROM producto WHERE id_producto = ' + conFoto)[0].foto || '').startsWith('data:image/'),
+    'viaja con el .db, sin carpeta aparte que olvidar en la copia');
+
+  // La foto NO viaja dentro del catálogo: iría a 600 KB por tablet y la
+  // rejilla no se pintaría hasta que llegara la última. El catálogo sólo dice
+  // si hay foto; la imagen se pide aparte y el navegador la cachea.
+  const enCajaConFoto = await get('/api/productos');
+  const ficha = enCajaConFoto.productos.find(p => p.id_producto === conFoto) || {};
+  check('El catálogo avisa de que ese producto tiene foto', ficha.tiene_foto === 1);
+  check('Pero no arrastra la imagen dentro del JSON',
+    !('foto' in ficha),
+    JSON.stringify(enCajaConFoto.productos).length + ' bytes el catálogo entero');
+
+  const img = await fetch(URL + '/api/producto/' + conFoto + '/foto');
+  check('La foto se sirve aparte, como imagen de verdad',
+    img.ok && (img.headers.get('content-type') || '').startsWith('image/'),
+    img.headers.get('content-type'));
+  check('Y con permiso para quedarse en la caché del navegador',
+    (img.headers.get('cache-control') || '').includes('max-age'),
+    img.headers.get('cache-control'));
+  check('La dirección lleva versión, para que al cambiarla se entere el navegador',
+    typeof ficha.foto_v === 'number' && ficha.foto_v > 0, 'v=' + ficha.foto_v);
+
+  const sinImagen = await fetch(URL + '/api/producto/999999/foto');
+  check('Pedir la foto de algo que no existe da 404', sinImagen.status === 404);
+
+  // Lo que NO se acepta.
+  r = await ponerFoto('https://ejemplo.invalido/botella.png');
+  check('Rechaza una dirección remota, que en el evento no cargaría',
+    r.status === 400 && !r.json.success, r.json.message);
+  r = await ponerFoto('data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==');
+  check('Rechaza algo que no es una imagen aunque venga como data URI',
+    r.status === 400 && !r.json.success);
+  r = await ponerFoto('data:image/png;base64,' + 'A'.repeat(600000));
+  check('Rechaza una foto demasiado pesada para la base',
+    r.status === 400 && !r.json.success,
+    'veinte fotos de cámara harían el .db intransportable');
+
+  // Quitarla es mandar una cadena vacía, distinto de no mandar nada.
+  r = await ponerFoto('');
+  check('Se puede quitar la foto', r.status === 200 && r.json.success && r.json.foto === null);
+  check('Y el producto se queda sin ella, pero sigue existiendo',
+    leer('SELECT foto, nombre FROM producto WHERE id_producto = ' + conFoto)[0].foto === null);
+
+  r = await post('/api/admin/productos/999999/foto', { foto: PNG_1PX }, 'PUT');
+  check('Poner foto a un producto que no existe da 404', r.status === 404);
+
+  // Y también se puede dar de alta un producto ya con su foto.
+  const conFotoNuevo = await post('/api/admin/productos', {
+    id_categoria: 1, nombre: 'Producto con foto', descripcion: '', tipo_producto: 'BEBIDA_ALCOHOLICA',
+    precio_venta: 25, stock_actual: 5, id_admin: 1, id_evento: 1, foto: PNG_1PX
+  });
+  check('Un producto puede nacer ya con foto',
+    conFotoNuevo.status === 200 && conFotoNuevo.json.success);
+  check('Y la foto se guardó con él',
+    (leer("SELECT foto FROM producto WHERE nombre = 'Producto con foto'")[0].foto || '')
+      .startsWith('data:image/'));
+
+  const conFotoMala = await post('/api/admin/productos', {
+    id_categoria: 1, nombre: 'Producto con foto mala', descripcion: '', tipo_producto: 'COMIDA',
+    precio_venta: 25, stock_actual: 5, id_admin: 1, id_evento: 1, foto: 'javascript:alert(1)'
+  });
+  check('Un alta con una foto inválida se rechaza entera',
+    conFotoMala.status === 400 && !conFotoMala.json.success,
+    'y no deja el producto a medias');
+  check('Ese producto no se creó',
+    leer("SELECT id_producto FROM producto WHERE nombre = 'Producto con foto mala'").length === 0);
+
+
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Cambiar un producto ya dado de alta'));
+  // =======================================================================
+  // Se equivocaron con el precio del Etiqueta Roja y no había forma de
+  // corregirlo sin borrarlo y volver a crearlo, que además perdía el
+  // histórico. Se cambia el nombre, la descripción, el precio y la categoría;
+  // el stock no, que ése se mueve con ingresos y traspasos y tiene que dejar
+  // rastro.
+  const catId = leer('SELECT id_categoria FROM categoria_producto ORDER BY id_categoria LIMIT 1')[0].id_categoria;
+  const otraCat = (leer(`SELECT id_categoria FROM categoria_producto
+                         WHERE id_categoria <> ${catId} ORDER BY id_categoria LIMIT 1`)[0] || {}).id_categoria;
+  const editable = await post('/api/admin/productos', {
+    id_categoria: catId, nombre: 'Whisky Editable 750 ml', descripcion: 'antes',
+    tipo_producto: 'BEBIDA_ALCOHOLICA', precio_venta: 100, stock_actual: 30,
+    id_admin: 1, id_evento: 1
+  });
+  const idEd = editable.json.id_producto;
+  const editar = cuerpo => post('/api/admin/productos/' + idEd, cuerpo, 'PUT');
+  const filaEd = () => leer(`SELECT nombre, descripcion, precio_venta, stock_actual, id_categoria
+                             FROM producto WHERE id_producto = ${idEd}`)[0];
+
+  r = await editar({ nombre: 'Whisky Etiqueta Roja 750 ml', descripcion: 'después',
+                     precio_venta: 185.5, id_categoria: catId });
+  check('Se puede cambiar el precio de un producto ya dado de alta',
+    r.status === 200 && r.json.success && Number(filaEd().precio_venta) === 185.5,
+    'quedó en ' + filaEd().precio_venta);
+  check('Y también el nombre y la descripción',
+    filaEd().nombre === 'Whisky Etiqueta Roja 750 ml' && filaEd().descripcion === 'después');
+
+  if (otraCat) {
+    r = await editar({ nombre: 'Whisky Etiqueta Roja 750 ml', precio_venta: 185.5, id_categoria: otraCat });
+    check('Y se puede mudar de categoría, si se dio de alta en la que no era',
+      filaEd().id_categoria === otraCat);
+    await editar({ nombre: 'Whisky Etiqueta Roja 750 ml', precio_venta: 185.5, id_categoria: catId });
+  }
+
+  const stockAntesEd = filaEd().stock_actual;
+  r = await editar({ nombre: 'Whisky Etiqueta Roja 750 ml', precio_venta: 190,
+                     id_categoria: catId, stock_actual: 9999, stock_inicial: 9999 });
+  check('Editar no toca el stock aunque se lo manden',
+    filaEd().stock_actual === stockAntesEd,
+    'sigue en ' + filaEd().stock_actual + '; el stock se mueve con ingresos y traspasos');
+
+  const precioBueno = Number(filaEd().precio_venta);
+  for (const malo of [{ precio_venta: 0 }, { precio_venta: -5 }, { precio_venta: 'gratis' }]) {
+    r = await editar(Object.assign({ nombre: 'X', id_categoria: catId }, malo));
+    check('Un precio de "' + malo.precio_venta + '" se rechaza',
+      r.status === 400 && !r.json.success && Number(filaEd().precio_venta) === precioBueno);
+  }
+
+  r = await editar({ nombre: '   ', precio_venta: 50, id_categoria: catId });
+  check('Un nombre en blanco se rechaza',
+    r.status === 400 && filaEd().nombre === 'Whisky Etiqueta Roja 750 ml');
+
+  r = await editar({ nombre: 'X', precio_venta: 50, id_categoria: 999999 });
+  check('Una categoría que no existe se rechaza',
+    r.status === 400 && filaEd().id_categoria === catId);
+
+  r = await editar({ nombre: 'X', precio_venta: 50, id_categoria: catId });
+  r = await post('/api/admin/productos/999999', { nombre: 'X', precio_venta: 5, id_categoria: catId }, 'PUT');
+  check('Editar un producto que no existe da 404', r.status === 404);
+
+  const logEd = leer(`SELECT detalle FROM auditoria_admin
+                      WHERE accion = 'EDITAR_PRODUCTO' AND id_registro = ${idEd}
+                      ORDER BY id_auditoria`);
+  check('Cada edición queda en el registro de auditoría',
+    logEd.length >= 2, logEd.length + ' apuntes');
+  check('Y el apunte dice cómo cambió el precio',
+    logEd.some(l => /100/.test(l.detalle) && /185/.test(l.detalle)),
+    (logEd[0] || {}).detalle);
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Botellas con acompañante'));
+  // =======================================================================
+  // Una botella se vende con su refresco incluido. El refresco es gratis pero
+  // sale de la nevera igual, así que tiene que descontar stock: si no, el
+  // inventario diría al cerrar que quedan refrescos que ya no están.
+  const botella = leer(`SELECT id_producto, nombre, precio_venta FROM producto
+                        WHERE activo = 1 AND stock_actual > 20 ORDER BY precio_venta DESC LIMIT 1`)[0];
+  const refresco = leer(`SELECT id_producto, nombre FROM producto
+                         WHERE activo = 1 AND stock_actual > 20 AND id_producto <> ${botella.id_producto}
+                         LIMIT 1`)[0];
+  const marcar = (id, cuerpo) => post('/api/admin/productos/' + id + '/acompanamiento', cuerpo, 'PUT');
+
+  r = await marcar(botella.id_producto, { requiere_acompanante: true });
+  check('Se puede marcar una botella como "se vende con acompañante"',
+    r.status === 200 && r.json.success, r.json.message);
+  r = await marcar(refresco.id_producto, { es_acompanante: true });
+  check('Y un refresco como "puede ir de acompañante"',
+    r.status === 200 && r.json.success, r.json.message);
+
+  r = await marcar(botella.id_producto, { requiere_acompanante: true, es_acompanante: true });
+  check('Las dos marcas a la vez se rechazan',
+    r.status === 400 && !r.json.success,
+    'se llamarían la una a la otra y el cuadro no tendría fin');
+
+  const catAcomp = await get('/api/productos');
+  check('La caja sabe cuál pide acompañante y cuál puede serlo',
+    (catAcomp.productos.find(p => p.id_producto === botella.id_producto) || {}).requiere_acompanante === 1 &&
+    (catAcomp.productos.find(p => p.id_producto === refresco.id_producto) || {}).es_acompanante === 1);
+
+  // -- la venta -----------------------------------------------------------
+  const stockAntesBot = stockDe(botella.id_producto);
+  const stockAntesRef = stockDe(refresco.id_producto);
+  const precioBot = Number(botella.precio_venta);
+
+  const conAcomp = await post('/api/comanda', Object.assign({}, base, {
+    clave_idempotencia: 'acomp-' + Date.now(),
+    total: precioBot * 2,
+    items: [{ id_producto: botella.id_producto, cantidad: 2, precio_unitario: precioBot,
+              subtotal: precioBot * 2, acompanante: refresco.id_producto }],
+    metodos_pago: [{ id_metodo_pago: 1, monto: precioBot * 2 }]
+  }));
+  check('Se vende la botella con su acompañante',
+    conAcomp.status === 200 && conAcomp.json.success, conAcomp.json.message || '');
+  check('Sólo se cobra la botella',
+    Math.abs(conAcomp.json.total - precioBot * 2) < 0.01,
+    conAcomp.json.total + ' Bs. por dos botellas de ' + precioBot);
+  check('El acompañante viaja dentro de su línea, no como línea aparte',
+    conAcomp.json.items.length === 1 && conAcomp.json.items[0].acompanantes.length === 1,
+    JSON.stringify(conAcomp.json.items[0].acompanantes));
+
+  check('La botella descuenta stock', stockDe(botella.id_producto) === stockAntesBot - 2,
+    stockAntesBot + ' -> ' + stockDe(botella.id_producto));
+  check('Y el acompañante TAMBIÉN, aunque vaya gratis',
+    stockDe(refresco.id_producto) === stockAntesRef - 2,
+    stockAntesRef + ' -> ' + stockDe(refresco.id_producto) + ' · sale de la nevera igual');
+
+  const idNueva = conAcomp.json.id_comanda;
+  const lineas = leer(`SELECT id_detalle, id_producto, cantidad, precio_unitario, subtotal, id_detalle_padre
+                       FROM detalle_comanda WHERE id_comanda = ${idNueva} ORDER BY id_detalle`);
+  check('Se guardan dos líneas: la botella y su acompañante', lineas.length === 2);
+  const hija = lineas.find(l => l.id_detalle_padre);
+  check('El acompañante cuelga de la botella',
+    hija && hija.id_detalle_padre === lineas.find(l => !l.id_detalle_padre).id_detalle);
+  check('Y vale cero', hija && hija.precio_unitario === 0 && hija.subtotal === 0);
+  check('El total de la comanda no lo incluye',
+    Math.abs(leer(`SELECT total FROM comanda WHERE id_comanda = ${idNueva}`)[0].total - precioBot * 2) < 0.01);
+
+  // -- lo que NO se permite ------------------------------------------------
+  r = await post('/api/comanda', Object.assign({}, base, {
+    clave_idempotencia: 'acomp-sin-' + Date.now(),
+    total: precioBot,
+    items: [{ id_producto: botella.id_producto, cantidad: 1, precio_unitario: precioBot, subtotal: precioBot }],
+    metodos_pago: [{ id_metodo_pago: 1, monto: precioBot }]
+  }));
+  check('Una botella que pide acompañante no se puede cobrar sin él',
+    r.status === 400 && !r.json.success, r.json.message);
+
+  const noAcomp = leer(`SELECT id_producto, nombre FROM producto
+                        WHERE activo = 1 AND COALESCE(es_acompanante,0) = 0
+                          AND id_producto <> ${botella.id_producto} LIMIT 1`)[0];
+  r = await post('/api/comanda', Object.assign({}, base, {
+    clave_idempotencia: 'acomp-malo-' + Date.now(),
+    total: precioBot,
+    items: [{ id_producto: botella.id_producto, cantidad: 1, precio_unitario: precioBot,
+              subtotal: precioBot, acompanante: noAcomp.id_producto }],
+    metodos_pago: [{ id_metodo_pago: 1, monto: precioBot }]
+  }));
+  check('No vale poner de acompañante algo que no está marcado como tal',
+    r.status === 400 && !r.json.success, r.json.message);
+
+  // -- dos botellas iguales con acompañantes distintos ---------------------
+  const otroRef = leer(`SELECT id_producto, nombre FROM producto
+                        WHERE activo = 1 AND stock_actual > 20
+                          AND id_producto NOT IN (${botella.id_producto}, ${refresco.id_producto})
+                        LIMIT 1`)[0];
+  await marcar(otroRef.id_producto, { es_acompanante: true });
+
+  const dosDistintos = await post('/api/comanda', Object.assign({}, base, {
+    clave_idempotencia: 'acomp-dos-' + Date.now(),
+    total: precioBot * 2,
+    items: [
+      { id_producto: botella.id_producto, cantidad: 1, precio_unitario: precioBot,
+        subtotal: precioBot, acompanante: refresco.id_producto },
+      { id_producto: botella.id_producto, cantidad: 1, precio_unitario: precioBot,
+        subtotal: precioBot, acompanante: otroRef.id_producto }
+    ],
+    metodos_pago: [{ id_metodo_pago: 1, monto: precioBot * 2 }]
+  }));
+  check('Dos botellas iguales con acompañantes distintos son dos líneas',
+    dosDistintos.status === 200 && dosDistintos.json.items.length === 2,
+    'si se fundieran no se sabría cuál lleva cuál al prepararlas');
+  check('Cada una con el suyo',
+    dosDistintos.json.items[0].acompanantes[0].nombre !==
+    dosDistintos.json.items[1].acompanantes[0].nombre,
+    dosDistintos.json.items.map(i => i.acompanantes[0].nombre).join(' / '));
+
+  // -- varios acompañantes por botella -------------------------------------
+  // Si se acabó la Coca de dos litros se dan dos pequeñas: el acompañamiento
+  // es una lista con cantidades, no un producto suelto.
+  const stockA = stockDe(refresco.id_producto);
+  const stockB = stockDe(otroRef.id_producto);
+
+  const variosAcomp = await post('/api/comanda', Object.assign({}, base, {
+    clave_idempotencia: 'acomp-varios-' + Date.now(),
+    total: precioBot * 2,
+    items: [{
+      id_producto: botella.id_producto, cantidad: 2,
+      precio_unitario: precioBot, subtotal: precioBot * 2,
+      acompanantes: [
+        { id_producto: refresco.id_producto, cantidad: 2 },
+        { id_producto: otroRef.id_producto, cantidad: 1 }
+      ]
+    }],
+    metodos_pago: [{ id_metodo_pago: 1, monto: precioBot * 2 }]
+  }));
+  check('Una botella puede llevar varios acompañantes a la vez',
+    variosAcomp.status === 200 && variosAcomp.json.items[0].acompanantes.length === 2,
+    JSON.stringify(variosAcomp.json.items[0].acompanantes));
+  check('Sigue cobrándose sólo la botella',
+    Math.abs(variosAcomp.json.total - precioBot * 2) < 0.01);
+
+  // Las cantidades son POR BOTELLA: dos whiskys con dos colas cada uno son
+  // cuatro colas fuera de la nevera.
+  check('Las cantidades se multiplican por las botellas de la línea',
+    stockDe(refresco.id_producto) === stockA - 4 && stockDe(otroRef.id_producto) === stockB - 2,
+    '2 por botella x 2 botellas = 4');
+
+  const lineasVarias = leer(`SELECT id_detalle, id_detalle_padre, cantidad FROM detalle_comanda
+                             WHERE id_comanda = ${variosAcomp.json.id_comanda}`);
+  check('Se guardan tres líneas: la botella y sus dos acompañantes',
+    lineasVarias.length === 3 && lineasVarias.filter(l => l.id_detalle_padre).length === 2);
+  check('Las dos cuelgan de la misma botella',
+    new Set(lineasVarias.filter(l => l.id_detalle_padre).map(l => l.id_detalle_padre)).size === 1);
+
+  // -- el mismo refresco, suelto y de acompañante en la misma comanda ------
+  const stockMixto = stockDe(refresco.id_producto);
+  const mixto = await post('/api/comanda', Object.assign({}, base, {
+    clave_idempotencia: 'acomp-mixto-' + Date.now(),
+    total: precioBot + 1,
+    items: [
+      { id_producto: botella.id_producto, cantidad: 1, precio_unitario: precioBot,
+        subtotal: precioBot, acompanante: refresco.id_producto },
+      { id_producto: refresco.id_producto, cantidad: 1, precio_unitario: 1, subtotal: 1 }
+    ],
+    metodos_pago: [{ id_metodo_pago: 1, monto: precioBot + 100 }]
+  }));
+  check('El mismo refresco puede ir gratis dentro y cobrado aparte',
+    mixto.status === 200 && mixto.json.success, mixto.json.message || '');
+  check('Y salen las dos unidades del almacén',
+    stockDe(refresco.id_producto) === stockMixto - 2,
+    stockMixto + ' -> ' + stockDe(refresco.id_producto));
+
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Mover stock e ingresar mercancía'));
+  // =======================================================================
+  // La mercancía se mueve entre barras y entra por compra. Las dos cosas tocan
+  // el mismo stock que las ventas, así que van por la misma cola de
+  // transacciones: mientras se mueve una caja no se puede vender esa caja.
+  const prodMov = leer('SELECT id_producto, nombre, stock_actual FROM producto WHERE activo = 1 AND stock_actual > 30 LIMIT 1')[0];
+  const stockMov0 = stockDe(prodMov.id_producto);
+
+  // -- salida ---------------------------------------------------------------
+  let mov = await post('/api/traspaso', {
+    tipo: 'SALIDA', motivo: 'TRASPASO', contraparte: 'Barra VIP',
+    observaciones: 'Lo lleva Marcos', id_cajero: 1,
+    items: [{ id_producto: prodMov.id_producto, cantidad: 10 }]
+  });
+  check('Se puede mover stock a otra barra',
+    mov.status === 200 && mov.json.success, mov.json.message);
+  check('El stock baja en esta barra', stockDe(prodMov.id_producto) === stockMov0 - 10,
+    stockMov0 + ' -> ' + stockDe(prodMov.id_producto));
+  check('Queda el documento, con su número y su destino',
+    leer(`SELECT contraparte, tipo FROM traspaso WHERE id_traspaso = ${mov.json.id_traspaso}`)[0].contraparte === 'Barra VIP');
+  check('Y el apunte dice a dónde fue, no sólo que salió',
+    leer(`SELECT motivo FROM movimiento_stock WHERE motivo LIKE 'Traspaso #${mov.json.id_traspaso} a %'`).length > 0,
+    'Traspaso #' + mov.json.id_traspaso + ' a Barra VIP');
+
+  // -- entrada por compra ---------------------------------------------------
+  const stockMov1 = stockDe(prodMov.id_producto);
+  mov = await post('/api/traspaso', {
+    tipo: 'ENTRADA', motivo: 'COMPRA', contraparte: 'Distribuidora Central',
+    observaciones: 'Factura 4471', id_admin: 1,
+    items: [{ id_producto: prodMov.id_producto, cantidad: 48 }]
+  });
+  check('Se puede ingresar mercancía comprada',
+    mov.status === 200 && mov.json.success, mov.json.message);
+  check('Y el stock sube', stockDe(prodMov.id_producto) === stockMov1 + 48,
+    stockMov1 + ' -> ' + stockDe(prodMov.id_producto));
+  check('El apunte distingue la compra del traspaso',
+    leer(`SELECT motivo FROM movimiento_stock WHERE motivo LIKE 'Compra #${mov.json.id_traspaso} a %'`).length > 0,
+    'lo comprado costó dinero, lo traspasado ya estaba pagado');
+
+  // -- entrada por traspaso recibido ---------------------------------------
+  const stockMov2 = stockDe(prodMov.id_producto);
+  mov = await post('/api/traspaso', {
+    tipo: 'ENTRADA', motivo: 'TRASPASO', contraparte: 'Barra VIP', id_admin: 1,
+    items: [{ id_producto: prodMov.id_producto, cantidad: 5 }]
+  });
+  check('Y mercancía recibida de otra barra',
+    mov.status === 200 && stockDe(prodMov.id_producto) === stockMov2 + 5, mov.json.message);
+
+  // -- lo que no se permite -------------------------------------------------
+  const stockAntesFallo = stockDe(prodMov.id_producto);
+  mov = await post('/api/traspaso', {
+    tipo: 'SALIDA', motivo: 'TRASPASO', contraparte: 'Barra VIP',
+    items: [{ id_producto: prodMov.id_producto, cantidad: 999999 }]
+  });
+  check('No se puede mover más de lo que hay',
+    mov.status === 400 && !mov.json.success, mov.json.message);
+  check('Y el intento fallido no toca el stock',
+    stockDe(prodMov.id_producto) === stockAntesFallo);
+
+  mov = await post('/api/traspaso', {
+    tipo: 'SALIDA', motivo: 'TRASPASO', contraparte: '',
+    items: [{ id_producto: prodMov.id_producto, cantidad: 1 }]
+  });
+  check('Una salida sin destino se rechaza',
+    mov.status === 400, 'sin destino, dentro de tres horas nadie sabe dónde fue');
+
+  mov = await post('/api/traspaso', {
+    tipo: 'SALIDA', motivo: 'TRASPASO', contraparte: 'X',
+    items: [{ id_producto: prodMov.id_producto, cantidad: 0 }]
+  });
+  check('Cero unidades se rechaza', mov.status === 400);
+
+  mov = await post('/api/traspaso', {
+    tipo: 'INVENTADO', motivo: 'TRASPASO', contraparte: 'X',
+    items: [{ id_producto: prodMov.id_producto, cantidad: 1 }]
+  });
+  check('Un tipo de movimiento inventado se rechaza', mov.status === 400);
+
+  // -- un traspaso a medias no deja rastro ---------------------------------
+  // Dos productos, el segundo imposible: la primera resta ya se había hecho y
+  // tiene que deshacerse, o la mercancía desaparecería del inventario sin
+  // haber salido de la barra.
+  const otroProd = leer(`SELECT id_producto FROM producto WHERE activo = 1 AND stock_actual > 5
+                         AND id_producto <> ${prodMov.id_producto} LIMIT 1`)[0];
+  const antesA = stockDe(prodMov.id_producto);
+  const antesB = stockDe(otroProd.id_producto);
+  const docsAntes = leer('SELECT id_traspaso FROM traspaso').length;
+
+  mov = await post('/api/traspaso', {
+    tipo: 'SALIDA', motivo: 'TRASPASO', contraparte: 'Barra VIP',
+    items: [
+      { id_producto: prodMov.id_producto, cantidad: 2 },
+      { id_producto: otroProd.id_producto, cantidad: 999999 }
+    ]
+  });
+  check('Un traspaso que falla a medias no se guarda', mov.status === 400);
+  check('Ni descuenta lo que sí cabía',
+    stockDe(prodMov.id_producto) === antesA && stockDe(otroProd.id_producto) === antesB,
+    'o la mercancía desaparecería sin haber salido');
+  check('Ni deja el documento a medias',
+    leer('SELECT id_traspaso FROM traspaso').length === docsAntes);
+
+  // -- el historial ---------------------------------------------------------
+  const hist = await get('/api/traspasos');
+  check('El panel puede listar entradas y salidas',
+    Array.isArray(hist.traspasos) && hist.traspasos.length > 0,
+    hist.traspasos.length + ' movimientos');
+  check('Cada uno trae cuántas unidades movió',
+    hist.traspasos.every(t => typeof t.unidades === 'number'));
+  check('Y se sugieren los destinos ya usados, para no escribirlos distinto cada vez',
+    (hist.destinos || []).some(d => d.contraparte === 'Barra VIP'),
+    'si no, "Barra VIP" y "barra vip" serían dos destinos que no se pueden sumar');
+
+  const uno = await get('/api/traspaso/' + hist.traspasos[0].id_traspaso);
+  check('Se puede recuperar uno para reimprimir su comanda',
+    uno.success && Array.isArray(uno.items) && uno.items.length > 0);
+
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Todo queda en el log de auditoría'));
+  // =======================================================================
+  // Al día siguiente alguien pregunta quién cambió un precio o a dónde fueron
+  // doce cervezas. El log es lo único que puede responder, así que toda acción
+  // del encargado tiene que dejar rastro.
+  const auditoriaDe = accion =>
+    leer(`SELECT id_auditoria, detalle FROM auditoria_admin WHERE accion = '${accion}'`);
+
+  const antesLog = leer('SELECT id_auditoria FROM auditoria_admin').length;
+
+  const prodLog = await post('/api/admin/productos', {
+    id_categoria: 1, nombre: 'Whisky de prueba de auditoría', descripcion: '',
+    tipo_producto: 'BEBIDA_ALCOHOLICA', precio_venta: 95, stock_actual: 6,
+    id_admin: 1, id_evento: 1
+  });
+  check('Crear un producto queda en el log',
+    auditoriaDe('CREAR_PRODUCTO').some(a => a.detalle.includes('auditoría')),
+    'era la duda: sí se guarda');
+
+  await post('/api/admin/productos/' + prodLog.json.id_producto + '/acompanamiento',
+    { es_acompanante: true, id_admin: 1 }, 'PUT');
+  check('Marcarlo como acompañante también',
+    auditoriaDe('MARCAR_ACOMPANAMIENTO').length > 0);
+
+  await post('/api/admin/productos/' + prodLog.json.id_producto + '/foto',
+    { foto: PNG_1PX, id_admin: 1 }, 'PUT');
+  check('Ponerle una foto también', auditoriaDe('PONER_FOTO').length > 0);
+
+  await post('/api/traspaso', {
+    tipo: 'SALIDA', motivo: 'TRASPASO', contraparte: 'Barra de auditoría',
+    id_admin: 1, items: [{ id_producto: prodLog.json.id_producto, cantidad: 2 }]
+  });
+  check('Mover mercancía también, con destino y cantidades',
+    auditoriaDe('TRASPASO_SALIDA').some(a => a.detalle.includes('Barra de auditoría')),
+    auditoriaDe('TRASPASO_SALIDA').slice(-1)[0].detalle);
+
+  await post('/api/admin/configuracion-evento', {
+    evento: 'Evento de auditoría', fecha: '2026-09-12', lugar: 'X',
+    barra: 'Barra de prueba', responsable: 'Y', id_admin: 1
+  }, 'PUT');
+  check('Cambiar los datos del evento también',
+    auditoriaDe('CAMBIAR_DATOS_EVENTO').length > 0);
+
+  // Ese producto ya se movió en un traspaso, así que no se puede borrar del
+  // todo: el papel del traspaso lo nombra. Antes esto daba un 500 seco.
+  const borrado = await post('/api/admin/productos/' + prodLog.json.id_producto,
+    { id_admin: 1 }, 'DELETE');
+  check('Un producto ya traspasado se retira, no revienta',
+    borrado.status === 200 && borrado.json.success && borrado.json.retirado === true,
+    borrado.json.message);
+  check('Y eliminarlo queda en el log', auditoriaDe('ELIMINAR_PRODUCTO').length > 0);
+
+  check('Ninguna de esas acciones se quedó sin registrar',
+    leer('SELECT id_auditoria FROM auditoria_admin').length >= antesLog + 6,
+    (leer('SELECT id_auditoria FROM auditoria_admin').length - antesLog) + ' apuntes nuevos');
+
 
   // =======================================================================
   console.log(C.tit('\n  Estado final de la base'));

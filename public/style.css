@@ -1,3 +1,67 @@
+/* ==========================================================================
+   TOQUE EN TABLET
+   ==========================================================================
+   Android pinta un rectángulo azul translúcido sobre lo que tocas, y al
+   mantener el dedo saca el menú de selección de texto. En una aplicación que
+   recibe doscientos toques por hora eso no ayuda: es un destello azul en cada
+   venta y un menú que sale cuando el cajero apoya el dedo un instante de más.
+
+   Se quita en TODA la aplicación, no elemento por elemento: antes estaba en
+   diez sitios y faltaba en el resto, así que unos botones destellaban y otros
+   no, que se nota más que si destellaran todos.
+
+   El texto que sí hay que poder copiar recupera la selección más abajo. */
+html {
+    -webkit-tap-highlight-color: transparent;
+}
+
+button,
+label,
+a,
+summary,
+[role="button"],
+[role="tab"],
+.product-card,
+.category-btn,
+.pin-btn,
+.cart-item,
+.lista-fila,
+.acomp-opcion,
+.mover-producto,
+.mover-sugerencia,
+.ingreso-tipo,
+.turno-dato,
+.sidebar-title {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* El ticket sí se selecciona: a veces hay que copiar una referencia o leer un
+   número en voz alta buscándolo con el dedo. */
+.ticket-body,
+.thermal-ticket {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+/* Sello de versión. Deliberadamente pequeño y apagado: sólo importa cuando
+   algo no cuadra y hay que comprobar si la tablet tiene el código nuevo. */
+.version-sello {
+    margin-top: 14px;
+    text-align: center;
+    font-size: 0.68rem;
+    letter-spacing: 0.4px;
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+.version-num {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
 /* Design System Variables */
 :root {
     /* ------------------------------------------------------------------
@@ -17,7 +81,11 @@
     --card-border: rgba(255, 255, 255, 0.08);
     --text-primary: #fafafa;
     --text-secondary: #a1a1aa;
-    --text-muted: #71717a;
+    /* Subido de #71717a. Aquel daba 3.55 de contraste sobre la tarjeta, por
+       debajo del 4.5 que hace falta para texto pequeño: las existencias, los
+       detalles de las listas y las pistas de los campos se perdían en una
+       barra a oscuras. Este da 5.08 y sigue siendo claramente secundario. */
+    --text-muted: #8b8b94;
 
     /* Un único acento: ámbar cálido. Pega con una barra y, sobre gris neutro,
        destaca sin gritar. El texto encima va casi negro, no blanco. */
@@ -138,8 +206,10 @@ body::after {
     transition: border-color 0.3s ease;
 }
 
-.glass-card:hover {
-    border-color: rgba(255, 255, 255, 0.12);
+@media (hover: hover) and (pointer: fine) {
+    .glass-card:hover {
+        border-color: rgba(255, 255, 255, 0.12);
+    }
 }
 
 /* Typography elements */
@@ -201,9 +271,11 @@ body::after {
     -webkit-tap-highlight-color: transparent;
 }
 
-.secondary-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.2);
+@media (hover: hover) and (pointer: fine) {
+    .secondary-btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
 }
 
 .secondary-btn:active {
@@ -246,17 +318,22 @@ body::after {
     transition: color 0.2s ease;
 }
 
-.text-btn:hover {
-    color: var(--text-primary);
+@media (hover: hover) and (pointer: fine) {
+    .text-btn:hover {
+        color: var(--text-primary);
+    }
 }
 
+/* 44 px es el mínimo con el que un dedo acierta a la primera. Estos dos
+   botones viven en la esquina, que es donde peor se apunta con la tablet
+   apoyada, y fallarlos significa tocar sin querer el de al lado. */
 .icon-btn {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.08);
     color: var(--text-primary);
     font-size: 1.1rem;
-    width: 40px;
-    height: 40px;
+    width: var(--touch);
+    height: var(--touch);
     border-radius: 50%;
     cursor: pointer;
     display: flex;
@@ -443,6 +520,25 @@ select option {
     font-size: 2.2rem;
     display: block;
     margin-bottom: 8px;
+    /* Es también la salida escondida al login (pulsación larga). No lleva
+       ninguna marca que lo delate: quien no lo sabe, ve un icono y ya. */
+    cursor: default;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Mientras se mantiene pulsado, encoge poco a poco. Sin esto no hay forma de
+   saber si los tres segundos van corriendo o si el toque no se registró. */
+.security-icon.cargando {
+    transition: transform 3s linear, opacity 3s linear;
+    transform: scale(0.72);
+    opacity: 0.5;
+}
+
+.security-icon:not(.cargando) {
+    transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out);
+    transform: none;
+    opacity: 1;
 }
 
 .modal-header h2 {
@@ -497,7 +593,8 @@ select option {
     border-radius: 50%;
     border: 2px solid rgba(255, 255, 255, 0.25);
     background: transparent;
-    transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    transition: background 150ms var(--ease-out), border-color 150ms var(--ease-out),
+                transform 150ms var(--ease-out);
 }
 
 .pin-dots-container .dot.filled {
@@ -540,7 +637,8 @@ select option {
     justify-content: center;
     align-items: center;
     margin: 0 auto;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: background 200ms var(--ease-out), color 200ms var(--ease-out),
+                transform 120ms var(--ease-out);
     user-select: none;
     -webkit-user-select: none;
 }
@@ -569,9 +667,11 @@ select option {
     color: var(--text-secondary);
 }
 
-.pin-btn.system:hover {
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.08);
+@media (hover: hover) and (pointer: fine) {
+    .pin-btn.system:hover {
+        color: var(--text-primary);
+        background: rgba(255, 255, 255, 0.08);
+    }
 }
 
 .modal-close-btn {
@@ -589,15 +689,18 @@ select option {
     display: flex;
     justify-content: center;
     align-items: center;
-    transition: all 0.2s ease;
+    transition: background 200ms ease, border-color 200ms ease,
+                color 200ms ease, transform 160ms var(--ease-out);
     z-index: 10;
 }
 
-.modal-close-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.2);
-    color: var(--text-primary);
-    transform: scale(1.05);
+@media (hover: hover) and (pointer: fine) {
+    .modal-close-btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.2);
+        color: var(--text-primary);
+        transform: scale(1.05);
+    }
 }
 
 .modal-close-btn:active {
@@ -705,10 +808,79 @@ select option {
     letter-spacing: 1px;
 }
 
+/* Lo cobrado en esta tablet desde que se abrió la caja. Es lo que le preguntan
+   al cajero toda la noche, así que se lee de lejos y sin buscarlo. */
+.turno-dato {
+    margin-bottom: 14px;
+}
+
+.turno-cifra {
+    display: block;
+    font-family: var(--font-heading);
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    /* Cifras de ancho fijo: sin esto el número baila de sitio en cada venta y
+       el ojo tiene que volver a buscarlo. */
+    font-variant-numeric: tabular-nums;
+}
+
+.turno-unidad {
+    display: block;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.turno-nota {
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+    opacity: 0.8;
+    margin-top: 4px;
+}
+
+/* La parte de la columna que sigue reservada. Separada por una línea para que
+   se lea como "aquí vendrá algo" y no como un hueco de la interfaz. */
+.sidebar-reservado {
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-placeholder {
+    font-size: 0.74rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+    opacity: 0.5;
+}
+
+/* Tira horizontal bajo el buscador. Va en fila y no en columna porque comparte
+   sitio con la búsqueda: son las dos formas de llegar al mismo producto, y
+   tenerlas juntas ahorra cruzar la pantalla de lado a lado en cada venta.
+   Se desliza con el dedo cuando hay más categorías de las que caben. */
 .category-menu {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     gap: 8px;
+    margin-bottom: 16px;
+    /* .pos-main es una columna flexible: sin esto la tira cede su alto a la
+       rejilla de productos y las pastillas salen cortadas por la mitad. */
+    flex-shrink: 0;
+    overflow-x: auto;
+    /* Sin salto de línea: dos filas de categorías empujarían la rejilla de
+       productos hacia abajo cada vez que se añade una categoría nueva. */
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
+    /* La barra de desplazamiento se lleva 8 px de alto en escritorio y no
+       aporta nada: el arrastre con el dedo ya se entiende solo. */
+    scrollbar-width: none;
+}
+
+.category-menu::-webkit-scrollbar {
+    display: none;
 }
 
 .category-btn {
@@ -718,7 +890,11 @@ select option {
     font-family: var(--font-body);
     font-size: 0.9rem;
     font-weight: 600;
-    text-align: left;
+    text-align: center;
+    /* No se encoge ni parte el nombre: "Bebidas sin alcohol" en dos renglones
+       dentro de una pastilla se lee peor que deslizando un poco. */
+    flex: 0 0 auto;
+    white-space: nowrap;
     min-height: var(--touch);
     padding: 12px 16px;
     border-radius: 12px;
@@ -732,7 +908,6 @@ select option {
     .category-btn:hover {
         background: rgba(255, 255, 255, 0.08);
         color: var(--text-primary);
-        transform: translateX(2px);
     }
 }
 
@@ -922,6 +1097,10 @@ select option {
     letter-spacing: -0.02em;
     color: var(--text-primary);
     line-height: 1;
+    /* El precio no se parte nunca. En tarjetas estrechas salía "18" en una
+       línea y "Bs." en la siguiente, que es justo el dato que el cajero lee de
+       un vistazo y sin gafas. */
+    white-space: nowrap;
 }
 
 /* El stock, en pastilla: se distingue del precio de un vistazo y los colores
@@ -1012,8 +1191,10 @@ select option {
     cursor: pointer;
 }
 
-.clear-btn:hover {
-    color: var(--danger);
+@media (hover: hover) and (pointer: fine) {
+    .clear-btn:hover {
+        color: var(--danger);
+    }
 }
 
 .cart-items-container {
@@ -1056,6 +1237,23 @@ select option {
 @keyframes cart-item-enter {
     from { opacity: 0; transform: translateX(14px); }
     to   { opacity: 1; transform: none; }
+}
+
+/* Destello en la línea que acaba de cambiar. Cuando el carrito ya está a la
+   vista, el desplazamiento no se nota y no hay forma de saber cuál de las
+   quince líneas subió: el borde ámbar lo dice sin mover nada.
+
+   440 ms y no más: esto se dispara en CADA toque de producto, cientos de veces
+   por noche. Lo justo para verlo de reojo mientras la vista vuelve a la
+   rejilla, y lo bastante corto para haber terminado antes del toque siguiente
+   cuando se piden tres del mismo. */
+.cart-item.tocada {
+    animation: cart-item-tocada 440ms var(--ease-out);
+}
+
+@keyframes cart-item-tocada {
+    0%   { border-color: var(--accent-color); background: var(--accent-suave); }
+    100% { border-color: rgba(255, 255, 255, 0.07); background: var(--bg-elev-2); }
 }
 
 .cart-item-info {
@@ -1149,8 +1347,10 @@ select option {
     -webkit-tap-highlight-color: transparent;
 }
 
-.cart-item-controls .remove-item-btn:hover {
-    color: var(--danger);
+@media (hover: hover) and (pointer: fine) {
+    .cart-item-controls .remove-item-btn:hover {
+        color: var(--danger);
+    }
 }
 
 .cart-item-controls .remove-item-btn:active {
@@ -1186,7 +1386,6 @@ select option {
 }
 
 .search-clear-btn {
-    position: absolute;
     top: 50%;
     right: 10px;
     transform: translateY(-50%);
@@ -1196,6 +1395,10 @@ select option {
     border: none;
     background: rgba(255, 255, 255, 0.08);
     color: var(--text-secondary);
+    /* Se ve de 32 px para no tapar el texto que se está escribiendo, pero
+       responde en 44: el área que atiende al dedo no tiene por qué medir lo
+       mismo que la que se pinta. */
+    position: absolute;
     font-size: 0.9rem;
     cursor: pointer;
     display: flex;
@@ -1204,9 +1407,22 @@ select option {
     transition: background 200ms ease, color 200ms ease;
 }
 
-.search-clear-btn:hover {
-    background: rgba(255, 255, 255, 0.16);
-    color: var(--text-primary);
+/* El área invisible que atiende al dedo, centrada sobre el botón visible. */
+.search-clear-btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--touch);
+    height: var(--touch);
+    transform: translate(-50%, -50%);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .search-clear-btn:hover {
+        background: rgba(255, 255, 255, 0.16);
+        color: var(--text-primary);
+    }
 }
 
 .cart-notes {
@@ -1468,6 +1684,11 @@ select option {
     padding: 24px;
     display: flex;
     flex-direction: column;
+    /* En una tablet de 600 px de alto no caben los siete apartados, la ficha
+       del usuario y el botón de salir: sin esto el menú se cortaba por abajo y
+       "Cerrar Sesión" quedaba fuera de la pantalla, inalcanzable. */
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .admin-branding {
@@ -1512,6 +1733,9 @@ select option {
     flex-direction: column;
     gap: 8px;
     flex: 1;
+    /* No se encoge: si falta alto, el que desplaza es el carril entero, y así
+       ningún apartado se queda a media altura. */
+    flex-shrink: 0;
 }
 
 .nav-tab-btn {
@@ -1525,12 +1749,14 @@ select option {
     padding: 12px 16px;
     border-radius: 12px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background 200ms ease, color 200ms ease, transform 160ms var(--ease-out);
 }
 
-.nav-tab-btn:hover {
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--text-primary);
+@media (hover: hover) and (pointer: fine) {
+    .nav-tab-btn:hover {
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-primary);
+    }
 }
 
 .nav-tab-btn.active {
@@ -1690,8 +1916,10 @@ select option {
     vertical-align: middle;
 }
 
-.admin-table tbody tr:hover {
-    background: rgba(255, 255, 255, 0.02);
+@media (hover: hover) and (pointer: fine) {
+    .admin-table tbody tr:hover {
+        background: rgba(255, 255, 255, 0.02);
+    }
 }
 
 /* Order and badge elements inside tables */
@@ -1767,6 +1995,21 @@ select option {
     gap: 30px;
     justify-content: center;
     width: 100%;
+}
+
+/* Dos tickets de 32 columnas uno al lado del otro necesitan más de 1000 px.
+   En una tablet no caben: el segundo se salía de la pantalla y el primero
+   quedaba cortado por abajo. Apilados se ven enteros, uno tras otro. */
+@media (max-width: 1080px) {
+    .tickets-row {
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+    }
+
+    .print-title {
+        font-size: 1.35rem;
+    }
 }
 
 .thermal-ticket {
@@ -1938,23 +2181,37 @@ select option {
 }
 
 /* Animations */
+/* Entradas de los modales.
+   ------------------------------------------------------------------
+   Estas pantallas no son una sorpresa que haya que presentar: son el
+   siguiente paso de un trabajo que se repite toda la noche. La del PIN sale
+   cada vez que cambia el mesero y la de cobro en cada venta, así que la
+   animación tiene que quitarse de en medio, no lucirse.
+
+   Antes: 350 ms con rebote para el PIN y 600 ms con 250 ms de retraso para
+   los tickets. Casi un segundo hasta poder tocar, multiplicado por cientos
+   de ventas. Ahora entran en 180-220 ms, sin rebote. */
 .animate-pop {
-    animation: popIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    animation: popIn 180ms var(--ease-out) forwards;
 }
 
 .animate-slide-up {
-    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    transform: translateY(50px);
+    animation: slideUp 220ms var(--ease-out) forwards;
+    transform: translateY(12px);
     opacity: 0;
 }
 
+/* Escalonado corto: lo justo para que se lean como dos papeles y no como un
+   bloque. Más de 80 ms ya se percibe como espera. */
 .delay-1 {
-    animation-delay: 0.25s;
+    animation-delay: 60ms;
 }
 
 @keyframes popIn {
     from {
-        transform: scale(0.85);
+        /* Desde 0.96 y no desde 0.85: un salto grande llama la atención sobre
+           la animación en vez de sobre el contenido. */
+        transform: scale(0.96);
         opacity: 0;
     }
     to {
@@ -1965,7 +2222,7 @@ select option {
 
 @keyframes slideUp {
     from {
-        transform: translateY(50px);
+        transform: translateY(12px);
         opacity: 0;
     }
     to {
@@ -1994,13 +2251,16 @@ select option {
     justify-content: space-between;
     position: relative;
     box-shadow: var(--shadow-card);
-    transition: all 0.3s ease;
+    transition: border-color 200ms ease, background 200ms ease,
+                transform 160ms var(--ease-out);
 }
 
-.comanda-mini-card:hover {
-    border-color: rgba(255, 255, 255, 0.15);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-glow);
+@media (hover: hover) and (pointer: fine) {
+    .comanda-mini-card:hover {
+        border-color: rgba(255, 255, 255, 0.15);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-glow);
+    }
 }
 
 .comanda-card-header {
@@ -2191,9 +2451,11 @@ select option {
     transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease;
 }
 
-.quick-cash-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.22);
+@media (hover: hover) and (pointer: fine) {
+    .quick-cash-btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.22);
+    }
 }
 
 .quick-cash-btn:active {
@@ -2283,6 +2545,1301 @@ select option {
 .qr-cobro-monto strong {
     color: var(--accent-color);
     font-size: 1.05rem;
+}
+
+/* ==========================================================================
+   AJUSTES DE DENSIDAD DEL PANEL
+   ==========================================================================
+   El panel se usa de pie, con prisa y antes de abrir puertas. Lo que hacía
+   falta no era decorarlo más, sino que cupiera más cosa en pantalla: con la
+   separación anterior, los dos formularios llenaban el alto entero y las
+   listas de "qué hay dado de alta" quedaban debajo del pliegue, donde nadie
+   las encontraba.
+
+   Los campos siguen midiendo lo mismo (--touch): se recorta el aire entre
+   ellos, no el objetivo del dedo. */
+.admin-main .form-group {
+    margin-bottom: 14px;
+}
+
+.admin-main .form-card {
+    padding: 22px;
+}
+
+.admin-main .form-card h2 {
+    margin-bottom: 16px;
+}
+
+/* Las listas van en dos columnas cuando hay sitio. Categorías junto a
+   productos, y cajeros junto a meseros: son pares que se consultan a la vez
+   ("¿de qué categoría era esto?", "¿de qué cajero cuelga este mesero?"). */
+.listas-par {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 20px;
+    align-items: start;
+    margin-top: 20px;
+}
+
+.listas-par .lista-card {
+    margin-top: 0;
+}
+
+/* En una columna estrecha la lista se queda sin sitio para desplegarse; con
+   dos, cada una lleva su propio scroll y el conjunto no se dispara de alto. */
+.listas-par .lista {
+    max-height: 340px;
+}
+
+/* Título de página más contenido: ocupaba 32 px de margen inferior para decir
+   dos palabras. */
+.admin-main .page-title {
+    margin-bottom: 22px;
+}
+
+.page-subtitle {
+    margin: -14px 0 22px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    max-width: 70ch;
+}
+
+/* Foco visible en todo el panel. Antes sólo algunos controles lo marcaban, y
+   con teclado no se sabía dónde estabas. */
+.admin-main button:focus-visible,
+.admin-main input:focus-visible,
+.admin-main select:focus-visible,
+.admin-main textarea:focus-visible {
+    outline: 2px solid var(--accent-borde);
+    outline-offset: 2px;
+}
+
+/* Los botones del panel también responden al toque, como los de la caja. */
+@media (hover: hover) {
+    .admin-main .primary-btn:hover,
+    .admin-main .secondary-btn:hover {
+        transform: translateY(-1px);
+    }
+}
+
+.admin-main .primary-btn,
+.admin-main .secondary-btn,
+.admin-main .danger-btn {
+    transition: transform 160ms var(--ease-out), background 160ms var(--ease-out),
+                border-color 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+
+.admin-main .primary-btn:active,
+.admin-main .secondary-btn:active,
+.admin-main .danger-btn:active {
+    transform: scale(0.97);
+}
+
+/* ==========================================================================
+   LISTAS DEL PANEL  (catálogo y personal)
+   ========================================================================== */
+/* Filas densas y legibles: en el montaje se repasan veinte productos y cuarenta
+   y cinco meseros de un tirón, así que prima ver muchos de golpe sobre que cada
+   uno luzca. La altura mínima sigue siendo la del dedo. */
+.lista-card {
+    margin-top: 20px;
+}
+
+.lista-cabecera {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.lista-cabecera h2 {
+    font-family: var(--font-heading);
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.lista-cuenta {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 999px;
+    padding: 3px 10px;
+}
+
+.lista-buscador {
+    margin-left: auto;
+    flex: 0 1 260px;
+    min-width: 160px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    padding: 9px 12px;
+    transition: border-color 200ms ease, background 200ms ease;
+}
+
+.lista-buscador:focus {
+    outline: none;
+    border-color: var(--accent-borde);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.lista {
+    display: flex;
+    flex-direction: column;
+    /* Sin gap: las filas se separan con una línea, que ocupa menos y ayuda a
+       seguir el renglón de izquierda a derecha en una lista larga. */
+    max-height: 420px;
+    overflow-y: auto;
+}
+
+.lista-fila {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-height: var(--touch);
+    padding: 10px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    /* No se aplasta. La lista es un flex en columna con alto máximo, y por
+       defecto flexbox reparte la falta de sitio encogiendo a los hijos: con
+       veinte productos las filas se quedaban en los 44 px del mínimo y el
+       nombre acababa pisando el precio de la fila de abajo. La lista tiene su
+       barra de desplazamiento; las filas conservan su alto. */
+    flex-shrink: 0;
+}
+
+.lista-fila:last-child {
+    border-bottom: none;
+}
+
+/* El resalte al pasar sólo tiene sentido con ratón: en una tablet se queda
+   pegado en la última fila tocada y parece seleccionada. */
+@media (hover: hover) {
+    .lista-fila:hover {
+        background: rgba(255, 255, 255, 0.03);
+    }
+}
+
+.lista-fila.inactiva {
+    opacity: 0.5;
+}
+
+/* El cuerpo de la fila: nombre arriba con todo el ancho, datos y marcas
+   debajo. En una sola línea las insignias dejaban al nombre en "Ballant…". */
+.lista-cuerpo {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    flex: 1;
+}
+
+.lista-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* Las acciones, siempre juntas y a la derecha: el ✕ tiene que estar en el
+   mismo sitio en todas las filas o se pulsa el de la de al lado. */
+.lista-acciones {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    align-self: flex-start;
+}
+
+.lista-editar {
+    flex-shrink: 0;
+    width: var(--touch);
+    height: var(--touch);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    color: var(--text-muted);
+    font-size: 1rem;
+    cursor: pointer;
+    transition: color 160ms var(--ease-out), background 160ms var(--ease-out),
+                border-color 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .lista-editar:hover {
+        color: var(--accent-color);
+        background: var(--accent-suave);
+        border-color: var(--accent-borde);
+    }
+}
+
+.lista-editar:active {
+    transform: scale(0.92);
+}
+
+.lista-editar:focus-visible {
+    outline: 2px solid var(--accent-borde);
+    outline-offset: 2px;
+}
+
+.lista-nombre {
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--text-primary);
+    /* Se lee entero. Antes se cortaba en "Ballant…" y "Chivas …", que son dos
+       whiskys distintos leídos igual, porque las insignias le robaban el
+       ancho. Ahora tiene su propio renglón y sólo salta de línea si de verdad
+       no cabe. */
+    overflow-wrap: anywhere;
+}
+
+.lista-detalle {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lista-insignia {
+    flex-shrink: 0;
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--accent-color);
+    background: var(--accent-suave);
+    border: 1px solid var(--accent-borde);
+    border-radius: 999px;
+    padding: 3px 9px;
+    white-space: nowrap;
+}
+
+/* Lo retirado se marca en gris, no en rojo: no es un error, es algo que ya no
+   se vende pero que el cierre sigue nombrando. */
+.lista-insignia.retirada {
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.lista-borrar {
+    flex-shrink: 0;
+    width: var(--touch);
+    height: var(--touch);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 160ms var(--ease-out), background 160ms var(--ease-out),
+                border-color 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+
+@media (hover: hover) {
+    .lista-borrar:hover {
+        color: var(--danger);
+        background: rgba(242, 109, 109, 0.1);
+        border-color: rgba(242, 109, 109, 0.3);
+    }
+}
+
+/* Se hunde al pulsar: en una tablet es la única señal de que el toque contó,
+   porque el diálogo de confirmación tarda un instante en salir. */
+.lista-borrar:active {
+    transform: scale(0.92);
+    color: var(--danger);
+}
+
+.lista-borrar:focus-visible {
+    outline: 2px solid var(--accent-borde);
+    outline-offset: 2px;
+}
+
+.lista-vacia {
+    padding: 24px 4px;
+    text-align: center;
+    font-size: 0.88rem;
+    color: var(--text-muted);
+}
+
+/* ==========================================================================
+   FOTOS DE PRODUCTO
+   ========================================================================== */
+/* En la tarjeta de la caja la foto ocupa el sitio del emoji, con la misma
+   altura, para que poner o quitar una foto no descoloque la rejilla ni cambie
+   dónde cae el dedo del cajero. */
+.product-card .product-foto {
+    display: block;
+    width: 100%;
+    /* Alto pensado para una botella, que es lo que se fotografía: son altas y
+       estrechas. A 62 px y recortando ("cover") de una foto vertical sólo se
+       veía una franja del centro, sin cuello ni base, y dos whiskys distintos
+       salían casi iguales. */
+    height: 92px;
+    /* Entera, sin recortar. Sobra sitio a los lados y ahí se ve el fondo de la
+       tarjeta: preferible a cortar la etiqueta, que es justo lo que se mira
+       para reconocer el producto de un vistazo. */
+    object-fit: contain;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* Las tarjetas agotadas ya se atenúan enteras; la foto además se dessatura,
+   porque una imagen a todo color sigue llamando al dedo aunque el texto diga
+   "Agotado". */
+.product-card.out-of-stock .product-foto {
+    filter: grayscale(1);
+    opacity: 0.5;
+}
+
+/* ---- Campo de foto en el formulario de alta ---------------------------- */
+.foto-campo {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.foto-vista {
+    flex: 0 0 88px;
+    height: 88px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--card-border);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+}
+
+.foto-vista.tiene {
+    border-style: solid;
+    border-color: var(--accent-borde);
+}
+
+/* Igual que en la tarjeta de venta: se ve lo mismo que verá el cajero, no un
+   recorte distinto que engañe al elegir la foto. */
+.foto-vista img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.foto-vacia {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.foto-acciones {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+/* El control de archivo nativo no se puede maquetar y en Android sale con un
+   texto en inglés. Se esconde y se dispara desde la etiqueta, que sí es un
+   botón de verdad del resto de la interfaz. */
+.foto-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Es un <label> para poder disparar el control de archivo escondido, pero se
+   comporta como un botón. Sin esto heredaba las mayúsculas y el espaciado de
+   las etiquetas del formulario y salía "ELEGIR IMAGEN", que no se parece a
+   ningún otro botón de la aplicación. */
+.form-group label.foto-elegir {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--touch);
+    margin-bottom: 0;
+    padding: 0 18px;
+    font-size: 0.9rem;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+/* El foco del control escondido tiene que verse en la etiqueta, o con teclado
+   no hay forma de saber que está seleccionado. */
+.foto-input:focus-visible + .form-group label.foto-elegir,
+.form-group label.foto-elegir:focus-visible {
+    outline: 2px solid var(--accent-borde);
+    outline-offset: 2px;
+}
+
+.etiqueta-opcional {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+/* ---- Miniatura en la lista del catálogo -------------------------------- */
+.lista-foto {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed var(--card-border);
+    border-radius: 10px;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+
+.lista-foto.tiene {
+    border-style: solid;
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.lista-foto img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .lista-foto:hover {
+        border-color: var(--accent-borde);
+    }
+}
+
+.lista-foto:active {
+    transform: scale(0.94);
+}
+
+.lista-foto:focus-visible {
+    outline: 2px solid var(--accent-borde);
+    outline-offset: 2px;
+}
+
+.lista-quitar-foto {
+    flex-shrink: 0;
+    width: var(--touch);
+    height: var(--touch);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    opacity: 0.45;
+    cursor: pointer;
+    transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .lista-quitar-foto:hover {
+        opacity: 1;
+    }
+}
+
+.lista-quitar-foto:active {
+    transform: scale(0.92);
+}
+
+.lista-quitar-foto:focus-visible {
+    outline: 2px solid var(--accent-borde);
+    outline-offset: 2px;
+}
+
+/* En una columna estrecha el campo de foto se apila en vez de dejar el bloque
+   de botones sin sitio. */
+@media (max-width: 520px) {
+    .foto-campo {
+        flex-direction: column;
+    }
+
+    .foto-vista {
+        flex: 0 0 auto;
+        width: 100%;
+        height: 120px;
+    }
+}
+
+/* ==========================================================================
+   ACOMPAÑAMIENTOS
+   ========================================================================== */
+/* El cuadro sale entre que el cajero toca la botella y el producto entra en el
+   carrito, así que interrumpe. Tiene que resolverse de un toque: opciones
+   grandes, sin desplegables y sin botón de confirmar. */
+.acomp-card {
+    width: min(460px, 100%);
+}
+
+.acomp-para {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+}
+
+.acomp-card .modal-header h2 {
+    margin-top: 2px;
+}
+
+.acomp-nota {
+    font-size: 0.82rem;
+    color: var(--accent-color);
+    margin-top: 4px;
+}
+
+.acomp-opciones {
+    /* En columna y no en rejilla: cada fila lleva nombre, stock y los botones
+       de cantidad, y eso no cabe en 150 px. */
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 20px;
+    /* Con muchos refrescos la lista se desplaza dentro del cuadro en vez de
+       empujar el modal fuera de una pantalla de 600 px de alto. */
+    max-height: 46vh;
+    overflow-y: auto;
+}
+
+.acomp-opcion {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 64px;
+    padding: 10px 12px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out),
+                transform 140ms var(--ease-out);
+    -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .acomp-opcion:hover {
+        border-color: var(--accent-borde);
+        background: var(--accent-suave);
+    }
+}
+
+.acomp-opcion:active {
+    transform: scale(0.97);
+}
+
+.acomp-opcion:focus-visible {
+    outline: 2px solid var(--accent-borde);
+    outline-offset: 2px;
+}
+
+/* Elegida: borde ámbar. Repasando cinco refrescos con el dedo, el color dice
+   cuáles llevas puestos sin tener que leer las cantidades. */
+.acomp-opcion.elegida {
+    border-color: var(--accent-borde);
+    background: var(--accent-suave);
+}
+
+/* Agotada: se ve, pero no se puede tocar. Esconderla dejaba al cajero buscando
+   una Coca-Cola que existe pero se acabó, sin entender por qué no aparece. */
+.acomp-opcion.agotada {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.acomp-opcion-texto {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    flex: 1;
+    cursor: pointer;
+}
+
+.acomp-opcion.agotada .acomp-opcion-texto {
+    cursor: default;
+}
+
+.acomp-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.acomp-cantidad {
+    min-width: 26px;
+    text-align: center;
+    font-family: var(--font-heading);
+    font-size: 1.1rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.acomp-opcion-stock.agotado {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+/* Pie del cuadro: resumen de lo elegido y el botón de aceptar. Antes bastaba
+   tocar un refresco y el cuadro se cerraba solo, así que no había manera de
+   dar dos colas pequeñas cuando se acababa la de dos litros. */
+.acomp-pie {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--card-border);
+}
+
+.acomp-resumen {
+    margin-bottom: 10px;
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    min-height: 20px;
+}
+
+.acomp-resumen.tiene {
+    color: var(--accent-color);
+    font-weight: 600;
+}
+
+.acomp-opcion-nombre {
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.acomp-opcion-stock {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.acomp-vacio {
+    margin-top: 20px;
+    padding: 20px;
+    text-align: center;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed var(--card-border);
+    border-radius: 12px;
+}
+
+/* ---- El acompañante dentro de la línea del carrito --------------------- */
+/* Sangrado y sin importe. La sangría es lo que dice "esto va dentro de lo de
+   arriba"; poner un 0.00 a la derecha lo haría parecer un cargo de cero, que
+   es justo lo que hace preguntar al cliente. */
+.cart-acomp {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding-left: 4px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.cart-acomp-flecha {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.cart-acomp-nombre {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cart-acomp-cant {
+    flex-shrink: 0;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.cart-acomp-gratis {
+    flex-shrink: 0;
+    margin-left: auto;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--accent-color);
+}
+
+/* ---- Casillas del formulario de producto ------------------------------- */
+.form-group label.casilla {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 8px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .form-group label.casilla:hover {
+        border-color: rgba(255, 255, 255, 0.16);
+    }
+}
+
+.form-group label.casilla input[type="checkbox"] {
+    /* El cuadrado nativo mide 13 px: imposible de acertar con el dedo. La
+       etiqueta entera es el objetivo, y el cuadro se agranda para que se vea. */
+    width: 20px;
+    height: 20px;
+    margin-top: 2px;
+    flex-shrink: 0;
+    accent-color: var(--accent-color);
+    cursor: pointer;
+}
+
+.casilla-texto {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.casilla-texto strong {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.casilla-texto small {
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+}
+
+/* Cerrar sesión, en la cabecera junto al nombre. Discreto pero siempre a la
+   vista: abajo del todo obligaba a desplazar el menú para encontrarlo. */
+.admin-user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.admin-user-info .user-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-salir {
+    flex-shrink: 0;
+    min-height: 32px;
+    padding: 0 12px;
+    background: rgba(242, 109, 109, 0.1);
+    border: 1px solid rgba(242, 109, 109, 0.25);
+    border-radius: 8px;
+    color: var(--danger);
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 160ms var(--ease-out), transform 140ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .admin-salir:hover {
+        background: rgba(242, 109, 109, 0.2);
+    }
+}
+
+.admin-salir:active {
+    transform: scale(0.94);
+}
+
+.admin-salir:focus-visible {
+    outline: 2px solid var(--accent-borde);
+    outline-offset: 2px;
+}
+
+/* Modal de edición: los campos de una ficha, sin más. */
+.editar-card {
+    width: min(440px, 100%);
+    max-width: min(440px, 100%);
+}
+
+/* Los rótulos, a la izquierda de su campo. .modal-card centra su contenido,
+   que está bien para un aviso de dos líneas pero no para un formulario: con
+   los rótulos centrados no se sigue la columna al bajar de campo en campo, y
+   además no se parecen a los del formulario de alta que hay detrás. */
+.editar-card .form-group,
+.editar-card label {
+    text-align: left;
+}
+
+/* Separador de grupo (categoría o cajero). Pegajoso: al desplazar una lista
+   larga, siempre se ve de qué bloque es la fila que estás mirando. */
+.lista-grupo {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 4px 6px;
+    margin-top: 10px;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--accent-borde);
+}
+
+.lista-grupo:first-child {
+    margin-top: 0;
+}
+
+.lista-grupo-nombre {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--accent-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lista-grupo-cuenta {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+/* ---- Marcas en la lista del catálogo ----------------------------------- */
+.lista-marcas {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.lista-marca {
+    padding: 5px 10px;
+    min-height: 32px;
+    background: none;
+    border: 1px dashed var(--card-border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-family: var(--font-body);
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 160ms var(--ease-out), border-color 160ms var(--ease-out),
+                background 160ms var(--ease-out), transform 140ms var(--ease-out);
+}
+
+/* Encendida: sólida y en ámbar. Apagada: punteada y apagada. La diferencia
+   tiene que leerse de un vistazo repasando veinte productos seguidos. */
+.lista-marca.activa {
+    border-style: solid;
+    border-color: var(--accent-borde);
+    background: var(--accent-suave);
+    color: var(--accent-color);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .lista-marca:hover {
+        color: var(--text-primary);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+}
+
+.lista-marca:active {
+    transform: scale(0.94);
+}
+
+.lista-marca:focus-visible {
+    outline: 2px solid var(--accent-borde);
+    outline-offset: 2px;
+}
+
+/* En pantalla estrecha las marcas se van bajo el nombre en vez de apretar la
+   fila hasta que no cabe el botón de borrar. */
+@media (max-width: 700px) {
+    .lista-fila {
+        flex-wrap: wrap;
+    }
+
+    .lista-marcas {
+        order: 10;
+        width: 100%;
+        margin-top: 4px;
+    }
+}
+
+/* ==========================================================================
+   MOVER STOCK / INGRESO DE MERCANCÍA
+   ========================================================================== */
+.mover-card {
+    width: min(480px, 100%);
+}
+
+/* Los tres pasos, siempre a la vista. Saber cuántos quedan es lo que evita que
+   se abandone a la mitad y la mercancía se vaya sin registrar. */
+.mover-pasos {
+    display: flex;
+    gap: 6px;
+    list-style: none;
+    margin: 4px 0 18px;
+    padding: 0;
+}
+
+.mover-paso {
+    flex: 1;
+    padding: 6px 4px;
+    text-align: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: var(--text-muted);
+    border-top: 2px solid rgba(255, 255, 255, 0.08);
+    transition: color 200ms ease, border-color 200ms ease;
+}
+
+.mover-paso.hecha {
+    color: var(--text-secondary);
+    border-top-color: rgba(255, 255, 255, 0.2);
+}
+
+.mover-paso.activa {
+    color: var(--accent-color);
+    border-top-color: var(--accent-color);
+}
+
+.mover-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.mover-sugerencias {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.mover-sugerencia {
+    padding: 8px 14px;
+    min-height: var(--touch);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--card-border);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: border-color 160ms var(--ease-out), color 160ms var(--ease-out),
+                transform 140ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .mover-sugerencia:hover {
+        border-color: var(--accent-borde);
+        color: var(--text-primary);
+    }
+}
+
+.mover-sugerencia:active {
+    transform: scale(0.96);
+}
+
+.mover-productos {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 44vh;
+    overflow-y: auto;
+}
+
+.mover-producto {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: var(--touch);
+    padding: 12px 14px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 160ms var(--ease-out), transform 140ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .mover-producto:hover {
+        border-color: var(--accent-borde);
+    }
+}
+
+.mover-producto:active {
+    transform: scale(0.98);
+}
+
+.mover-producto-nombre {
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+.mover-producto-stock {
+    flex-shrink: 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.mover-vacio {
+    padding: 20px;
+    text-align: center;
+    font-size: 0.88rem;
+    color: var(--text-muted);
+}
+
+.mover-elegido {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: center;
+}
+
+/* La cantidad, en grande y con los botones a los lados: mover mercancía va de
+   caja en caja, y teclear "24" con el dedo es donde más se falla. */
+.mover-cantidad {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+}
+
+.mover-unidades {
+    width: 110px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-family: var(--font-heading);
+    font-size: 1.7rem;
+    font-weight: 800;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.mover-unidades:focus {
+    outline: none;
+    border-color: var(--accent-borde);
+}
+
+.mover-disponible {
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.mover-rapidos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.mover-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.mover-pendiente {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.mover-pendiente span:first-child {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mover-quitar {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 160ms var(--ease-out), transform 140ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .mover-quitar:hover { color: var(--danger); }
+}
+
+.mover-quitar:active { transform: scale(0.9); }
+
+.mover-acciones {
+    display: flex;
+    gap: 10px;
+}
+
+.mover-acciones button {
+    flex: 1;
+}
+
+/* ---- Ingreso de mercancía en el panel ---------------------------------- */
+/* Los dos botones de mercancía en la caja. Van uno debajo del otro y no en
+   fila: con el icono delante se distinguen de un vistazo, y en una columna de
+   130 px en tablet dos botones en fila no caben sin partir el texto. */
+.herramienta-btn {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 0 12px;
+    font-size: 0.85rem;
+    text-align: left;
+}
+
+/* Pista bajo la lista, antes de los botones. Se lee en el sitio donde surge
+   la duda: "¿tengo que guardar uno por uno?". */
+.acciones-pista {
+    margin: 10px 0 12px;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+
+.acciones-fila {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.acciones-fila button {
+    flex: 1;
+    min-width: 160px;
+}
+
+.ingreso-tipos {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.ingreso-tipo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-height: 62px;
+    padding: 10px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out),
+                color 160ms var(--ease-out), transform 140ms var(--ease-out);
+}
+
+.ingreso-tipo small {
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.ingreso-tipo.activa {
+    border-color: var(--accent-borde);
+    background: var(--accent-suave);
+    color: var(--text-primary);
+}
+
+.ingreso-tipo:active {
+    transform: scale(0.97);
+}
+
+/* Salidas y entradas se distinguen por color y dirección: repasando el
+   historial de madrugada, la flecha se lee antes que el texto. */
+.traspaso-flecha {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.traspaso-flecha.sale {
+    background: rgba(242, 109, 109, 0.12);
+    color: var(--danger);
+}
+
+.traspaso-flecha.entra {
+    background: rgba(52, 211, 153, 0.12);
+    color: var(--success);
 }
 
 /* ==========================================================================
@@ -2381,6 +3938,7 @@ select option {
     .product-card.enter,
     .product-card .cart-badge.bump,
     .cart-item.enter,
+    .cart-item.tocada,
     .skeleton-card {
         animation: none;
     }
@@ -2394,62 +3952,176 @@ select option {
     }
 }
 
-/* Responsive */
-@media (max-width: 1024px) {
+/* ==========================================================================
+   TABLET
+   ==========================================================================
+   La caja se usa casi siempre en una tablet apaisada de 10", que en píxeles CSS
+   suele quedarse en 960×600 o 1024×768. Ahí sobra ancho y falta ALTO.
+
+   La regla anterior miraba sólo el ancho: por debajo de 1024 px mandaba el
+   carrito debajo de los productos. En una pantalla de 600 px de alto eso
+   partía la caja en dos mitades y dejaba visible una sola fila de productos,
+   con el cajero desplazando arriba y abajo en cada venta.
+
+   Ahora se apila sólo cuando la pantalla es de verdad estrecha (móvil o tablet
+   en vertical). En apaisado se mantienen las tres columnas y lo que se recorta
+   es el relleno: barra superior más baja, tarjetas más pequeñas y carril de
+   categorías más fino. Los objetivos del dedo siguen midiendo --touch. */
+
+/* ---- Apaisado con poco ancho: tres columnas, todo más justo -------------- */
+@media (min-width: 821px) and (max-width: 1200px) {
     .pos-layout {
-        grid-template-columns: 180px 1fr;
+        grid-template-columns: 150px 1fr 300px;
     }
+
+    .pos-sidebar { padding: 14px 12px; }
+    .pos-main    { padding: 16px; }
+    .pos-cart    { padding: 16px; }
+
+    /* Tarjetas más pequeñas: en 640 px de ancho útil entran tres cómodas en
+       vez de dos con hueco desaprovechado al lado. */
+    .product-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+    }
+
+    .product-card { padding: 11px; gap: 7px; }
+}
+
+@media (min-width: 821px) and (max-width: 980px) {
+    .pos-layout {
+        grid-template-columns: 128px 1fr 272px;
+    }
+}
+
+/* ---- Pantalla baja: se recorta alto, no anchura ------------------------- */
+/* 720 px de alto es la frontera práctica: por debajo, cada píxel que gaste la
+   barra superior o el icono de una tarjeta es una fila de productos menos. */
+@media (max-height: 720px) {
+    .top-nav {
+        height: 56px;
+        padding: 0 16px;
+    }
+
+    .pos-main   { padding: 14px 16px; }
+    .pos-cart   { padding: 14px 16px; }
+    .pos-sidebar { padding: 12px; }
+
+    .search-header { margin-bottom: 12px; }
+
+    #product-search {
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    /* El icono grande del producto es lo primero que sobra: el nombre y el
+       precio son lo que se lee, el emoji sólo ayuda a distinguir de un vistazo. */
+    .product-card .product-icon {
+        font-size: 1.35rem;
+    }
+
+    .product-card { padding: 10px; gap: 6px; }
+    .product-card h4 { font-size: 0.82rem; }
+
+    .cart-notes { margin-bottom: 10px; }
+
+    .cart-notes textarea {
+        min-height: 44px;
+        rows: 1;
+    }
+}
+
+/* ---- Vertical o estrecho: ahí sí se apila ------------------------------- */
+@media (max-width: 820px) {
+    .pos-layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr auto;
+    }
+
+    /* La columna de herramientas se esconde: está reservada para más adelante y
+       vacía no puede robarle una franja de alto a los productos, que es lo
+       único que hay que poder tocar en una pantalla estrecha. Vuelve sola en
+       cuanto hay ancho de sobra. */
+    .pos-sidebar {
+        display: none;
+    }
+
     .pos-cart {
         grid-column: 1 / -1;
         border-left: none;
         border-top: 1px solid rgba(255, 255, 255, 0.08);
-        height: auto;
+        /* Tope en la mitad de la pantalla: el carrito no puede tragarse los
+           productos, que es lo que hay que poder tocar. */
+        max-height: 46vh;
+    }
+
+    .product-grid {
+        grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
+        gap: 10px;
     }
 }
 
-@media (max-width: 768px) {
-    .pos-layout {
-        grid-template-columns: 1fr;
+/* ---- El panel de administración en tablet ------------------------------- */
+/* La barra lateral fija de 260 px se come un cuarto de una pantalla de 960. */
+@media (max-width: 1100px) {
+    .admin-layout {
+        grid-template-columns: 210px 1fr;
     }
-    /* En pantalla estrecha las categorías pasan a ser una tira horizontal que
-       se desliza con el dedo. Antes se ocultaban por completo y el cajero se
-       quedaba sin poder filtrar, teniendo que buscar entre todos los productos. */
-    .pos-sidebar {
-        border-right: none;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-        padding: 12px 16px;
-        overflow-x: auto;
-        overflow-y: hidden;
-    }
-    .pos-sidebar .sidebar-title {
-        display: none;
-    }
-    .category-menu {
-        flex-direction: row;
-        flex-wrap: nowrap;
-        gap: 8px;
-    }
-    .category-btn {
-        white-space: nowrap;
-        min-height: 44px;
-    }
-    .category-btn:hover {
-        transform: none;
-    }
+
+    .admin-main { padding: 22px; }
+}
+
+@media (max-width: 820px) {
     .admin-layout {
         grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
     }
+
     .admin-sidebar {
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    /* Las pestañas del panel, en tira horizontal deslizable. */
+    .admin-nav {
+        flex-direction: row;
+        overflow-x: auto;
+        gap: 6px;
+        padding-bottom: 4px;
+    }
+
+    .admin-nav .nav-tab-btn {
+        white-space: nowrap;
+        flex: 0 0 auto;
+    }
+
+    .admin-branding,
+    .admin-user-info,
+    .sidebar-footer {
         display: none;
     }
+
+    .admin-main { padding: 16px; }
+}
+
+/* Lo que sigue valía y no cambia: en pantalla estrecha los tickets se apilan
+   y los indicadores pasan a una columna. */
+@media (max-width: 820px) {
     .tickets-row {
         flex-direction: column;
         align-items: center;
     }
+
     .kpi-grid {
         grid-template-columns: 1fr;
     }
+
+    .admin-grid-forms,
+    .listas-par {
+        grid-template-columns: 1fr;
+    }
 }
+
 
 /* Rejilla del formulario de datos del evento: en pantalla ancha caben tres por
    fila; en tablet estrecha se apilan solas. */

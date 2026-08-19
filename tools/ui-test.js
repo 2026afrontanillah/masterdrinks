@@ -202,6 +202,73 @@ const check = (nombre, ok, extra) => {
   await esperar(60);
   check('El − también', fila.querySelector('.qty').textContent === '2');
 
+  // Volver a pulsar un producto que YA está en el carrito tiene que señalar su
+  // línea, no la última. Si el whisky está arriba del todo y la lista se fuera
+  // al final, el cajero miraría un sitio donde no ha pasado nada.
+  click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
+  await esperar(120);
+  const senalada = window.document.querySelector('.cart-item.tocada');
+  check('Repetir un producto resalta SU línea, no la última',
+    senalada && senalada.dataset.id === String(idPrimera),
+    senalada ? 'resaltó ' + senalada.dataset.id : 'no resaltó ninguna');
+  click(fila.querySelector('.decrease-btn'));
+  await esperar(60);
+
+  // El botón "Vaciar" limpiaba la lista pero dejaba el contador y el total con
+  // las cifras de antes: la pantalla decía 3 productos sobre un carrito vacío.
+  click(id('clear-cart'));
+  await esperar(80);
+  check('"Vaciar" deja también el contador y el total en cero',
+    id('cart-count').textContent === '0' &&
+    parseFloat(id('cart-total-amount').textContent) === 0,
+    id('cart-count').textContent + ' / ' + id('cart-total-amount').textContent);
+
+  const idSeg = tarjetas[1].dataset.id;
+  click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
+  click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
+  click(window.document.querySelector(`.product-card[data-id="${idSeg}"]`));
+  await esperar(120);
+  check('Y se puede volver a montar el pedido', id('cart-count').textContent === '2');
+
+  // Salir sin cobrar tiene que dejar la caja en blanco. Si no, el siguiente
+  // mesero entra con su PIN y se encuentra el pedido a medias del anterior.
+  const antesDeSalir = id('cart-count').textContent;
+  click(id('lock-pos-btn'));
+  await esperar(120);
+  check('Cambiar de mesero sin cobrar vacía el carrito',
+    id('cart-count').textContent === '0' &&
+    !id('cart-count').classList.contains('tiene'),
+    'estaba en ' + antesDeSalir);
+  check('Y el total vuelve a cero',
+    parseFloat(id('cart-total-amount').textContent) === 0,
+    id('cart-total-amount').textContent);
+  check('Y las tarjetas ya no marcan unidades en el carrito',
+    window.document.querySelectorAll('.product-card .cart-badge').length === 0);
+  check('Y se avisa de lo que se descartó',
+    (id('toast-stack').textContent || '').includes('sin cobrar'));
+
+  // Se vuelve a entrar y se rehace el carrito: el resto de la prueba sigue
+  // desde aquí, así que hay que dejarlo como estaba.
+  for (const d of '1009') click($('.pin-btn[data-key="' + d + '"]'));
+  await esperar(300);
+  const idSegunda = tarjetas[1].dataset.id;
+  click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
+  click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
+  click(window.document.querySelector(`.product-card[data-id="${idSegunda}"]`));
+  await esperar(120);
+  check('Tras volver a entrar, el carrito se rehace',
+    id('cart-count').textContent === '2', id('cart-count').textContent);
+
+  // -- la salida al login ya no es un botón visible ---------------------
+  // Se quitó la flecha que devolvía al login desde la pantalla del PIN: con
+  // cola en la barra, pulsarla por error obligaba a teclear otra vez usuario y
+  // contraseña. La salida sigue existiendo para el encargado, escondida tras
+  // una pulsación larga en el candado.
+  check('Ya no hay botón de volver al login en la pantalla del PIN',
+    !id('logout-cajero-btn'));
+  check('Pero el candado sigue ahí para la pulsación larga',
+    !!id('salida-oculta'));
+
   // =======================================================================
   console.log(C.tit('\n  Buscador'));
   // =======================================================================
@@ -286,11 +353,12 @@ const check = (nombre, ok, extra) => {
     Math.abs(pagos.reduce((s, p) => s + Number(p.monto), 0) - Number(nueva.total)) < 0.01);
 
   const previa = id('ticket-cajero-body').textContent;
-  // La referencia lleva el prefijo de la barra (N-47): con tres servidores
-  // independientes el número solo no distingue una comanda de otra.
-  check('El ticket lleva la marca y la referencia con prefijo de barra',
-    previa.includes('MASTERDRINKS') && /COMANDA [A-Z0-9]{1,3}-\d+/.test(previa),
-    (previa.match(/COMANDA [A-Z0-9-]+\d/) || [])[0]);
+  // El número de comanda va solo, sin letras delante: es lo que el mesero
+  // canta en la barra y lo que el cliente busca en su ticket.
+  check('El ticket lleva la marca y el número de comanda, sólo numérico',
+    previa.includes('MASTERDRINKS') && /COMANDA \d/.test(previa)
+      && !/COMANDA [A-Z]+\d*-/.test(previa),
+    (previa.match(/COMANDA \d+/) || [])[0]);
   // El nombre de la barra lo escribe el encargado en Datos del evento y tiene
   // que llegar tal cual a la cabecera del ticket: es lo que lee el cliente y lo
   // que distingue un comprobante de otro si se juntan varias cajas.
@@ -304,6 +372,69 @@ const check = (nombre, ok, extra) => {
   check('El ticket de barra lleva casillas para tachar', previaMesero.includes('[ ]'));
   check('El ticket de barra avisa de que no es comprobante',
     previaMesero.includes('No es comprobante de pago'));
+  // El maquetado del ticket se comprueba aparte, sobre un modelo hecho a mano:
+  // así se puede meter una observación y nombres largos sin ensuciar la venta
+  // de prueba, y el texto viene con saltos de línea de verdad para poder medir
+  // el ancho.
+  const TP = window.ThermalPrinter;
+  const ajustes = TP.getSettings();
+  const maqueta = TP.buildTickets({
+    id: 47, ref: '47', barra: 'Chivas', evento: 'Festival Sonidos de Verano 2026',
+    fecha: '18/08/2026 22:41', fechaDia: '18/08/2026', hora: '22:41',
+    cajero: 'Ana Torres', mesero: 'Paola Mendez', total: 186, recibido: 200,
+    items: [
+      { nombre: 'Cerveza Pacena 350 ml', cantidad: 3, precio_unitario: 18, subtotal: 54 },
+      { nombre: 'Johnnie Walker Black Label', cantidad: 2, precio_unitario: 55, subtotal: 110 },
+      { nombre: 'Papas fritas', cantidad: 1, precio_unitario: 22, subtotal: 22 }
+    ],
+    pagos: [{ etiqueta: 'Efectivo', monto: 186 }],
+    observaciones: 'Sin hielo en los whiskys'
+  }, ajustes);
+  const textoCajero = TP.renderText(maqueta.cajero);
+  const textoMesero = TP.renderText(maqueta.mesero);
+
+  check('El ticket de cobro destaca el total a pagar',
+    textoCajero.includes('TOTAL A PAGAR') && textoCajero.includes('186.00 Bs.'));
+  check('Y lleva la observación del cliente, que es con lo que reclama',
+    textoCajero.includes('NOTA') && textoCajero.includes('Sin hielo'));
+  check('El ticket de barra destaca la observación aparte',
+    textoMesero.includes('OJO') && textoMesero.includes('Sin hielo'));
+  check('El vuelto sale cuando el cliente paga con un billete mayor',
+    textoCajero.includes('CAMBIO') && textoCajero.includes('14.00'));
+
+  // Los dos son el mismo papel: si una copia gastara más columnas que la otra,
+  // saldría desbordada de la impresora.
+  const anchoDe = txt => Math.max.apply(null, txt.split('\n').map(l => l.length));
+  check('Ninguna copia se pasa del ancho del papel',
+    anchoDe(textoCajero) <= ajustes.width && anchoDe(textoMesero) <= ajustes.width,
+    anchoDe(textoCajero) + ' y ' + anchoDe(textoMesero) + ' de ' + ajustes.width + ' columnas');
+
+  // Un pedido sin nota no debe gastar papel diciendo que no hay nota.
+  const sinNota = TP.buildTickets({
+    id: 48, ref: '48', barra: 'Chivas', fecha: '18/08/2026 22:45', hora: '22:45',
+    cajero: 'Ana Torres', mesero: 'Paola Mendez', total: 18,
+    items: [{ nombre: 'Cerveza', cantidad: 1, precio_unitario: 18, subtotal: 18 }],
+    pagos: [{ etiqueta: 'Efectivo', monto: 18 }],
+    observaciones: 'Sin observaciones'
+  }, ajustes);
+  // Los tickets se dibujan con caracteres de línea de CP850, no con guiones.
+  // Es lo que separa un ticket que parece de máquina de escribir de uno que
+  // parece impreso.
+  check('Los tickets usan líneas continuas, no filas de guiones',
+    textoCajero.includes('═') && textoCajero.includes('─') &&
+    !/^-{10,}$/m.test(textoCajero) && !/^={10,}$/m.test(textoCajero),
+    'CP850 los trae; en modo ascii vuelven a - y =');
+
+  // Y si la impresora no habla CP850, tienen que volver a ASCII legible en vez
+  // de imprimir símbolos raros.
+  const enAscii = TP.renderText(maqueta.cajero, Object.assign({}, ajustes, { encoding: 'ascii' }));
+  check('Sin CP850 vuelven a guiones, no a basura',
+    enAscii.includes('===') && enAscii.includes('---') &&
+    !enAscii.includes('═') && !enAscii.includes('─'));
+
+  check('Sin observaciones, el ticket no imprime la sección',
+    !TP.renderText(sinNota.cajero).includes('NOTA') &&
+    !TP.renderText(sinNota.mesero).includes('OJO'));
 
   // =======================================================================
   console.log(C.tit('\n  Reporte de cierre desde el panel'));
@@ -317,6 +448,85 @@ const check = (nombre, ok, extra) => {
   $('#login-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await esperar(500);
   check('El administrador entra al panel', visible(id('admin-view')));
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Altas y listas del panel'));
+  // =======================================================================
+  // Las nueve observaciones del equipo, comprobadas ejecutándolas. Antes de
+  // esto sólo se podía decir "está en el código", que no es lo mismo que
+  // "funciona al pulsarlo".
+  click($('[data-tab="tab-crear-personal"]'));
+  await esperar(500);
+
+  // -- 2. el cajero nuevo aparece sin recargar ------------------------------
+  const cajerosAntes = window.document.querySelectorAll('#lista-cajeros .lista-fila').length;
+  const sufijo = Date.now().toString().slice(-6);
+  escribir(id('caj-name'), 'Cajero Prueba ' + sufijo);
+  escribir(id('caj-user'), 'cajero_p' + sufijo);
+  escribir(id('caj-pass'), 'demo123');
+  $('#form-create-cajero').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await esperar(700);
+  check('El cajero recién creado aparece en la lista SIN recargar la página',
+    window.document.querySelectorAll('#lista-cajeros .lista-fila').length === cajerosAntes + 1,
+    cajerosAntes + ' -> ' + window.document.querySelectorAll('#lista-cajeros .lista-fila').length);
+
+  // -- 4. el cajero elegido se queda puesto ---------------------------------
+  const selCajero = id('mes-cajero');
+  selCajero.value = selCajero.options[1].value;
+  const cajeroElegido = selCajero.value;
+
+  const meserosAntes = window.document.querySelectorAll('#lista-meseros .lista-fila').length;
+  escribir(id('mes-name'), 'Mesero Prueba ' + sufijo);
+  escribir(id('mes-user'), 'mesero_p' + sufijo);
+  escribir(id('mes-pass'), '9' + sufijo.slice(-3));
+  $('#form-create-mesero').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await esperar(700);
+
+  // -- 3. el mesero nuevo también aparece -----------------------------------
+  check('El mesero recién creado aparece en la lista SIN recargar',
+    window.document.querySelectorAll('#lista-meseros .lista-fila').length === meserosAntes + 1,
+    meserosAntes + ' -> ' + window.document.querySelectorAll('#lista-meseros .lista-fila').length);
+
+  check('Y el cajero elegido sigue puesto, para dar de alta varios seguidos',
+    id('mes-cajero').value === cajeroElegido,
+    'quedó en ' + (id('mes-cajero').selectedOptions[0] || {}).textContent);
+  check('Pero el nombre y el usuario sí se limpian',
+    id('mes-name').value === '' && id('mes-user').value === '');
+
+  // -- 5. meseros agrupados por cajero --------------------------------------
+  const gruposMeseros = window.document.querySelectorAll('#lista-meseros .lista-grupo');
+  check('Los meseros salen agrupados por cajero',
+    gruposMeseros.length > 1,
+    gruposMeseros.length + ' grupos: ' +
+    [...gruposMeseros].slice(0, 3).map(g => g.textContent.trim()).join(' / '));
+
+  // -- 6 y 7. catálogo ------------------------------------------------------
+  click($('[data-tab="tab-crear-producto"]'));
+  await esperar(600);
+
+  const gruposProd = window.document.querySelectorAll('#lista-productos .lista-grupo');
+  check('Los productos salen agrupados por categoría',
+    gruposProd.length > 1,
+    [...gruposProd].map(g => g.textContent.trim()).join(' / '));
+
+  const nombres = window.document.querySelectorAll('#lista-productos .lista-nombre');
+  check('El nombre del producto se lee entero, sin recortar',
+    [...nombres].every(n => !n.textContent.endsWith('…') && n.textContent.trim().length > 0),
+    (nombres[0] || {}).textContent);
+
+  // -- 8. botones de inventario ---------------------------------------------
+  click($('[data-tab="tab-stock"]'));
+  await esperar(600);
+  check('El botón de añadir dice qué hace',
+    id('ingreso-otro').textContent.includes('Añadir a la lista'),
+    id('ingreso-otro').textContent.trim());
+  check('Y el de guardar también',
+    id('ingreso-guardar').textContent.includes('Guardar ingreso'),
+    id('ingreso-guardar').textContent.trim());
+  check('Con una línea que explica que se pueden meter varios',
+    (window.document.querySelector('.acciones-pista') || {}).textContent.includes('varios'));
+
+
 
   click(id('rep-hoy-btn'));
   await esperar(60);

@@ -57,3 +57,6 @@ diagnostico-npm.txt
 
 # Copia previa al reinicio de ventas
 *.antes-de-reiniciar.db*
+
+# Copia desechable de la herramienta de medición
+pos_evento.medir.db*

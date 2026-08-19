@@ -15,7 +15,38 @@ const PORT = process.env.PORT || 3000;
 // comanda larga con muchas líneas los rozaba, devolviendo un 413 que en la
 // tablet se veía como "no se pudo cobrar" sin más explicación.
 app.use(express.json({ limit: '3mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// La tablet tiene que preguntar SIEMPRE si el archivo cambió.
+//
+// Con 'max-age=0' Chrome puede servir de su caché sin consultar en cuanto la
+// red parpadea, y en una tablet con la página añadida a la pantalla de inicio
+// eso se queda pegado durante horas: se arreglan cosas en el servidor y en la
+// barra sigue corriendo el código de anoche. Con 'no-cache' sigue guardando el
+// archivo, pero pregunta antes de usarlo; en red local la respuesta es un 304
+// de nada.
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: true,
+  lastModified: true,
+  setHeaders: res => res.set('Cache-Control', 'no-cache')
+}));
+
+// Sello de versión de la interfaz que está sirviendo este servidor.
+//
+// Sale de la fecha de los archivos de public/. Sirve para responder de un
+// vistazo a "¿la tablet tiene los cambios o sigue con los de ayer?", que sin
+// esto sólo se averigua probando y discutiendo.
+const VERSION_UI = (() => {
+  const fsv = require('fs');
+  let ultima = 0;
+  for (const nombre of ['index.html', 'app.js', 'style.css', 'rawbt.js']) {
+    try {
+      const st = fsv.statSync(path.join(__dirname, 'public', nombre));
+      if (st.mtimeMs > ultima) ultima = st.mtimeMs;
+    } catch (e) { /* si falta uno, cuenta el resto */ }
+  }
+  const d = new Date(ultima || Date.now());
+  const dos = n => String(n).padStart(2, '0');
+  return dos(d.getDate()) + dos(d.getMonth() + 1) + '-' + dos(d.getHours()) + dos(d.getMinutes());
+})();
 
 // Dynamic route to serve Wallpaper.jpg from the project root directory
 const fs = require('fs');
@@ -169,6 +200,25 @@ class BusinessError extends Error {
 }
 
 const nowSql = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+/**
+ * Deja constancia de lo que hace el encargado.
+ *
+ * Se registra TODO lo que cambia el montaje: altas, bajas, marcas, fotos,
+ * traspasos y los datos del evento. Al día siguiente, cuando alguien pregunte
+ * por qué faltan doce cervezas o quién cambió el precio, el log es lo único
+ * que puede responder.
+ *
+ * Nunca corta la operación: si el apunte falla, la acción ya se hizo y no
+ * tiene sentido deshacerla por no poder anotarla. Se avisa por consola.
+ */
+function registrarAuditoria(id_admin, accion, entidad, id_registro, detalle) {
+  return dbRun(
+    `INSERT INTO auditoria_admin (id_admin, id_evento, accion, entidad, id_registro, detalle, fecha_hora)
+     VALUES (?, 1, ?, ?, ?, ?, ?)`,
+    [id_admin || 1, accion, entidad, id_registro, String(detalle).slice(0, 250), nowSql()]
+  ).catch(err => console.error('No se pudo registrar en auditoría:', err.message));
+}
 // Money is stored as REAL; rounding every intermediate step keeps 0.1 + 0.2 artefacts
 // out of the totals that end up printed on the ticket.
 const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -181,7 +231,7 @@ const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 // inside whatever scope is chosen — /api/admin/meseros enforces exactly that same scope.
 const MESERO_PIN_SCOPE = process.env.MESERO_PIN_SCOPE || 'servidor';
 
-// Identidad de la barra: su nombre y el prefijo que llevan sus comandas.
+// Identidad de la barra: su nombre.
 //
 // Hay UNA barra por instalación. El nombre sale de la tabla `configuracion`,
 // es decir, de lo que el encargado escribe en el panel (Datos del evento), y
@@ -191,21 +241,8 @@ const MESERO_PIN_SCOPE = process.env.MESERO_PIN_SCOPE || 'servidor';
 // Nombre de partida, hasta que alguien lo cambie desde el panel.
 const BARRA_POR_DEFECTO = 'Barra 1';
 
-// Del nombre se saca el prefijo de las comandas: "Barra Norte" -> N-47.
-// Se ignora el "Barra " de delante, que no distingue nada por estar siempre.
-function prefijoDeNombre(nombre) {
-  const limpio = String(nombre || '').trim().replace(/^barra\s+/i, '');
-  // Cuando lo que queda es un número ("Barra 1"), la inicial sería un "1"
-  // suelto y las comandas saldrían "1-47", que no se entiende. Se conserva la
-  // B para que quede "B1-47".
-  if (/^\d+$/.test(limpio)) return ('B' + limpio).slice(0, 3);
-  const bruto = (limpio.charAt(0) || 'X').toUpperCase();
-  return (bruto.replace(/[^A-Z0-9]/g, '') || 'X').slice(0, 3);
-}
-
 const INSTANCIA = {
   nombre: BARRA_POR_DEFECTO,
-  prefijo: prefijoDeNombre(BARRA_POR_DEFECTO),
   // Fila de `barra` en la base. Es siempre la misma: sólo cambia su nombre.
   id_barra: null
 };
@@ -218,15 +255,12 @@ function refrescarIdentidad() {
       // Manda lo que diga el panel; si aún no se ha tocado, el de partida.
       const puesto = (cfg && cfg.barra ? String(cfg.barra) : '').trim();
       INSTANCIA.nombre = puesto || BARRA_POR_DEFECTO;
-      INSTANCIA.prefijo = prefijoDeNombre(INSTANCIA.nombre);
       // Se copia también a la tabla `instancia` para que el archivo .db siga
       // sabiendo de qué barra es aunque el nombre se haya cambiado desde el
       // panel: es lo que lo identifica si un día se copia a otro equipo.
       return Promise.all([
         dbRun(`INSERT INTO instancia (clave, valor) VALUES ('nombre', ?)
                ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.nombre]),
-        dbRun(`INSERT INTO instancia (clave, valor) VALUES ('prefijo', ?)
-               ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.prefijo]),
         sincronizarBarra(INSTANCIA.nombre)
       ]).then(() => INSTANCIA);
     })
@@ -333,8 +367,10 @@ function respaldarBase() {
   return dbRun(`VACUUM INTO '${RESPALDO.replace(/'/g, "''")}'`).then(() => {});
 }
 
-/** Número de comanda tal como lo ve la gente: N-47 en vez de 47. */
-const refComanda = id => INSTANCIA.prefijo + '-' + id;
+// El número de comanda es el número y nada más. Llevó un prefijo de barra
+// mientras se preveían varias; con una sola sólo añadía ruido a lo que el
+// mesero tiene que cantar en voz alta y el cliente leer en el ticket.
+const refComanda = id => String(id);
 
 // Turns raw SQLite errors into something a cashier can act on.
 function friendlyDbError(err, entidad) {
@@ -731,6 +767,33 @@ function initializeDatabase() {
       FOREIGN KEY(id_admin) REFERENCES administrador_evento(id_admin)
     )`);
 
+    // Traspasos e ingresos de mercancía.
+    //
+    // Van en su propia tabla y no sólo en movimiento_stock porque un traspaso
+    // es un documento: tiene número, se imprime para el bartender que entrega
+    // la mercancía, y al día siguiente hay que poder decir qué salió, a dónde
+    // y quién lo mandó. `movimiento_stock` sigue llevando el apunte contable
+    // de cada producto; esto lleva el papel.
+    db.run(`CREATE TABLE IF NOT EXISTS traspaso (
+      id_traspaso INTEGER PRIMARY KEY AUTOINCREMENT,
+      tipo TEXT,             -- 'SALIDA' (se va) | 'ENTRADA' (llega)
+      motivo TEXT,           -- 'TRASPASO' | 'COMPRA'
+      contraparte TEXT,      -- a dónde va, o de dónde viene / a quién se compró
+      observaciones TEXT,
+      id_cajero INTEGER,
+      id_admin INTEGER,
+      fecha_hora TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS traspaso_detalle (
+      id_detalle_traspaso INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_traspaso INTEGER,
+      id_producto INTEGER,
+      cantidad INTEGER,
+      FOREIGN KEY(id_traspaso) REFERENCES traspaso(id_traspaso) ON DELETE CASCADE,
+      FOREIGN KEY(id_producto) REFERENCES producto(id_producto)
+    )`);
+
     db.run(`CREATE TABLE IF NOT EXISTS auditoria_admin (
       id_auditoria INTEGER PRIMARY KEY AUTOINCREMENT,
       id_admin INTEGER,
@@ -763,7 +826,31 @@ function initializeDatabase() {
     // Migration: databases created before this fix lack these two columns on `producto`,
     // which made every "Crear Producto" call fail with "no such column: creado_por_admin".
     ensureColumn('producto', 'creado_por_admin', 'INTEGER');
+    // Foto del producto, guardada como data URI dentro de la propia base.
+    // Va en la base y no como archivo suelto para que viaje con ella: el .db
+    // se copia a otra tablet y las fotos siguen ahí, sin una carpeta aparte
+    // que se olvide al hacer la copia de seguridad.
+    ensureColumn('producto', 'foto', 'TEXT');
     ensureColumn('producto', 'fecha_creacion', 'TEXT');
+
+    // Acompañamientos.
+    //
+    // Una botella se vende con su refresco incluido. Son dos marcas distintas:
+    //
+    //   requiere_acompanante  la botella: al ponerla en el carrito hay que
+    //                         elegir con qué va
+    //   es_acompanante        el refresco: puede ir de acompañante
+    //
+    // No son excluyentes ni simétricas. El mismo refresco se vende suelto y
+    // cobrado, y va gratis dentro de una botella: es el mismo producto y el
+    // mismo stock, sólo cambia si se cobra o no.
+    ensureColumn('producto', 'requiere_acompanante', 'INTEGER DEFAULT 0');
+    ensureColumn('producto', 'es_acompanante', 'INTEGER DEFAULT 0');
+
+    // La línea del acompañante cuelga de la de su botella. Sin esto, en el
+    // ticket y en el cierre saldrían como dos productos sueltos y no se sabría
+    // cuál iba con cuál ni por qué uno vale cero.
+    ensureColumn('detalle_comanda', 'id_detalle_padre', 'INTEGER');
 
     // Identificador único del intento de cobro, para no guardar dos veces la
     // misma venta. La tablet lo genera al abrir el modal de cobro y lo repite
@@ -782,8 +869,8 @@ function initializeDatabase() {
     // Identidad de la barra, grabada DENTRO de la propia base.
     //
     // Los archivos .db de dos eventos son idénticos por fuera. Guardando aquí el
-    // nombre de la barra y su prefijo, un archivo suelto se explica solo aunque
-    // aparezca meses después en una copia de seguridad.
+    // nombre de la barra, un archivo suelto se explica solo aunque aparezca
+    // meses después en una copia de seguridad.
     db.run(`CREATE TABLE IF NOT EXISTS instancia (
       clave TEXT PRIMARY KEY,
       valor TEXT
@@ -821,13 +908,11 @@ function initializeDatabase() {
       });
     });
 
-    // La base deja constancia de cómo se llama la barra y con qué prefijo
-    // numera. No lo usa el servidor para decidir nada: sirve para saber de qué
-    // evento es un archivo .db cuando aparece suelto en una copia de seguridad.
+    // La base deja constancia de cómo se llama la barra. No lo usa el servidor
+    // para decidir nada: sirve para saber de qué evento es un archivo .db
+    // cuando aparece suelto en una copia de seguridad.
     db.run(`INSERT INTO instancia (clave, valor) VALUES ('nombre', ?)
             ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.nombre]);
-    db.run(`INSERT INTO instancia (clave, valor) VALUES ('prefijo', ?)
-            ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`, [INSTANCIA.prefijo]);
     db.run(`INSERT INTO instancia (clave, valor) VALUES ('primer_arranque', ?)
             ON CONFLICT(clave) DO NOTHING`, [nowSql()]);
 
@@ -1131,7 +1216,7 @@ app.post('/api/login/mesero', (req, res) => {
 // barra está atendiendo y cómo numerar sus comandas. Es público a propósito:
 // lo necesita el POS antes de que nadie inicie sesión.
 app.get('/api/instancia', (req, res) => {
-  res.json({ nombre: INSTANCIA.nombre, prefijo: INSTANCIA.prefijo, id_barra: INSTANCIA.id_barra });
+  res.json({ nombre: INSTANCIA.nombre, id_barra: INSTANCIA.id_barra, version: VERSION_UI });
 });
 
 // ==========================================
@@ -1190,13 +1275,17 @@ app.put('/api/admin/configuracion-evento', (req, res) => {
     [limpio.evento, limpio.fecha, limpio.lugar, limpio.barra, limpio.responsable]
   )
     // El nombre de la barra es la identidad: al cambiarlo aquí, cambia también
-    // el prefijo de las comandas y lo que se ve en la caja, sin reiniciar.
+    // lo que se ve en la caja y lo que se imprime, sin reiniciar.
     .then(() => refrescarIdentidad())
     .then(() => unificarBarras())
+    .then(() => registrarAuditoria(
+      req.body && req.body.id_admin, 'CAMBIAR_DATOS_EVENTO', 'configuracion', 1,
+      `Evento "${limpio.evento}", barra "${limpio.barra}", ${limpio.lugar || 'sin lugar'}, ` +
+      `responsable ${limpio.responsable || 'sin asignar'}`))
     .then(() => res.json({
       success: true,
       configuracion: limpio,
-      instancia: { nombre: INSTANCIA.nombre, prefijo: INSTANCIA.prefijo, id_barra: INSTANCIA.id_barra }
+      instancia: { nombre: INSTANCIA.nombre, id_barra: INSTANCIA.id_barra }
     }))
     .catch(err => {
       console.error('Error al guardar la configuración:', err);
@@ -1207,6 +1296,31 @@ app.put('/api/admin/configuracion-evento', (req, res) => {
 // ==========================================
 // 2. API: GET PRODUCT DATA
 // ==========================================
+// Sólo las existencias. Es lo que cada tablet pregunta cada doce segundos para
+// enterarse de lo que han vendido las demás.
+//
+// Antes reutilizaba /api/productos, que devuelve el catálogo entero. Con una
+// foto por producto eso son 600 KB por sondeo y por tablet: sobre el WiFi de un
+// teléfono, y con tres tablets, medio megabyte por segundo compitiendo con las
+// ventas por la misma antena. Lo único que cambia entre sondeo y sondeo es un
+// número por producto, y eso cabe en dos kilobytes.
+app.get('/api/stock', (req, res) => {
+  if (useMockDb) {
+    return res.json({
+      stock: mockDb.producto.filter(p => p.activo === 1)
+        .map(p => ({ id: p.id_producto, s: p.stock_actual }))
+    });
+  }
+  // Nombres de campo de una letra: con veinte productos ahorra poco, pero esto
+  // viaja miles de veces por noche.
+  dbAll('SELECT id_producto AS id, stock_actual AS s FROM producto WHERE activo = 1')
+    .then(filas => res.json({ stock: filas }))
+    .catch(err => {
+      console.error('Error al leer el stock:', err);
+      res.status(500).json({ stock: [] });
+    });
+});
+
 app.get('/api/productos', (req, res) => {
   if (useMockDb) {
     const activeCats = mockDb.categoria_producto.filter(c => c.activo === 1);
@@ -1214,7 +1328,18 @@ app.get('/api/productos', (req, res) => {
     return res.json({ categorias: activeCats, productos: activeProds });
   } else {
     const queryCats = `SELECT * FROM categoria_producto WHERE activo = 1`;
-    const queryProds = `SELECT * FROM producto WHERE activo = 1`;
+    // La foto NO viaja aquí: sólo si la hay. Metida dentro del JSON, veinte
+    // fotos convertían esta respuesta en 600 KB y la rejilla no se pintaba
+    // hasta que llegaba la última. Ahora el catálogo pesa unos 5 KB, las
+    // tarjetas aparecen enseguida y cada foto llega por su cuenta a
+    // /api/producto/:id/foto, donde el navegador puede guardarla en caché.
+    const queryProds = `SELECT id_producto, id_categoria, nombre, descripcion, tipo_producto,
+                               precio_venta, stock_actual, activo,
+                               COALESCE(requiere_acompanante, 0) AS requiere_acompanante,
+                               COALESCE(es_acompanante, 0) AS es_acompanante,
+                               CASE WHEN foto IS NULL OR foto = '' THEN 0 ELSE 1 END AS tiene_foto,
+                               LENGTH(COALESCE(foto, '')) AS foto_v
+                          FROM producto WHERE activo = 1`;
     pool.query(queryCats, (err, cats) => {
       if (err) return res.status(500).json({ error: err.message });
       pool.query(queryProds, (err2, prods) => {
@@ -1223,6 +1348,40 @@ app.get('/api/productos', (req, res) => {
       });
     });
   }
+});
+
+// La foto de un producto, como imagen de verdad y no como texto dentro de un
+// JSON. Así el navegador la guarda en caché y no vuelve a pedirla en toda la
+// noche, y con loading="lazy" sólo baja las que se ven.
+//
+// `foto_v` (el tamaño del dato) va en la dirección: al cambiar la foto cambia
+// la dirección y el navegador se entera. Sin eso seguiría enseñando la vieja.
+app.get('/api/producto/:id/foto', (req, res) => {
+  if (useMockDb) return res.status(404).end();
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).end();
+
+  dbGet('SELECT foto FROM producto WHERE id_producto = ?', [id])
+    .then(fila => {
+      const dato = fila && fila.foto;
+      if (!dato) return res.status(404).end();
+
+      const corte = dato.indexOf(';base64,');
+      if (corte === -1) return res.status(404).end();
+      const tipo = dato.slice(5, corte);            // "image/jpeg"
+      const bytes = Buffer.from(dato.slice(corte + 8), 'base64');
+
+      // Un año e "immutable": la dirección lleva el tamaño dentro, así que una
+      // foto distinta es otra dirección. El navegador no tiene que preguntar.
+      res.set('Content-Type', tipo);
+      res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      res.send(bytes);
+    })
+    .catch(err => {
+      console.error('Error al servir la foto:', err);
+      res.status(500).end();
+    });
 });
 
 // ==========================================
@@ -1314,18 +1473,33 @@ app.post('/api/comanda', (req, res) => {
           'SELECT id_comanda, total FROM comanda WHERE clave_idempotencia = ?', [String(clave)]
         );
         if (yaExiste) {
+          // Sólo las líneas de verdad, con su acompañante dentro. Devolverlas
+          // todas planas haría que en la reimpresión el refresco saliera como
+          // una línea suelta de 0.00 Bs., como si se hubiera regalado sin más.
           const lineas = await dbAll(`
-            SELECT d.id_producto, d.cantidad, d.precio_unitario, d.subtotal, p.nombre
+            SELECT d.id_detalle, d.id_producto, d.cantidad, d.precio_unitario, d.subtotal,
+                   d.id_detalle_padre, p.nombre
             FROM detalle_comanda d
             LEFT JOIN producto p ON p.id_producto = d.id_producto
-            WHERE d.id_comanda = ?`, [yaExiste.id_comanda]);
+            WHERE d.id_comanda = ?
+            ORDER BY d.id_detalle`, [yaExiste.id_comanda]);
+
+          const hijos = new Map();
+          lineas.filter(l => l.id_detalle_padre).forEach(l => {
+            if (!hijos.has(l.id_detalle_padre)) hijos.set(l.id_detalle_padre, []);
+            hijos.get(l.id_detalle_padre).push(l);
+          });
+
           return {
             id_comanda: yaExiste.id_comanda,
             total: yaExiste.total,
             repetida: true,
-            lines: lineas.map(l => ({
+            lines: lineas.filter(l => !l.id_detalle_padre).map(l => ({
               idProd: l.id_producto, qty: l.cantidad,
-              precio: l.precio_unitario, subtotal: l.subtotal, nombre: l.nombre
+              precio: l.precio_unitario, subtotal: l.subtotal, nombre: l.nombre,
+              acomps: (hijos.get(l.id_detalle) || []).map(h => ({
+                idProd: h.id_producto, nombre: h.nombre, qty: h.cantidad
+              }))
             }))
           };
         }
@@ -1341,8 +1515,13 @@ app.post('/api/comanda', (req, res) => {
         throw new BusinessError('Falta la barra, el cajero o el mesero de la comanda.');
       }
 
-      // Collapse repeated lines for the same product and reject nonsense quantities.
-      const wanted = new Map();
+      // Agrupar las líneas.
+      //
+      // Una línea es "una botella con su acompañante". Dos líneas se funden
+      // sólo si coinciden EN LAS DOS COSAS: mismo producto y mismo
+      // acompañante. Si el cliente pide dos whiskys, uno con Coca y otro con
+      // Sprite, son dos líneas distintas aunque el whisky sea el mismo.
+      const grupos = new Map();
       for (const item of items) {
         const idProd = parseInt(item.id_producto, 10);
         // Number en vez de parseInt: parseInt('1.5') daba 1 y la comanda se
@@ -1352,7 +1531,45 @@ app.post('/api/comanda', (req, res) => {
         if (!idProd || !Number.isInteger(qty) || qty <= 0) {
           throw new BusinessError('Cantidad inválida en la comanda.');
         }
-        wanted.set(idProd, (wanted.get(idProd) || 0) + qty);
+        // El acompañamiento es una LISTA con cantidades, no un producto suelto.
+        // Si se acabó la Coca de 2 litros se pueden dar dos pequeñas, y eso son
+        // dos unidades de otro producto: con un solo id no cabía.
+        //
+        // Las cantidades son POR BOTELLA. Si se piden dos whiskys con dos
+        // colas pequeñas cada uno, salen cuatro colas.
+        const acomps = [];
+        const crudos = Array.isArray(item.acompanantes) ? item.acompanantes
+          : (item.acompanante ? [{ id_producto: item.acompanante, cantidad: 1 }] : []);
+        for (const a of crudos) {
+          const idA = parseInt(a && a.id_producto, 10);
+          const qtyA = Number(a && a.cantidad);
+          if (!idA || !Number.isInteger(qtyA) || qtyA <= 0) {
+            throw new BusinessError('Acompañante inválido en la comanda.');
+          }
+          const ya = acomps.find(x => x.idProd === idA);
+          if (ya) ya.qty += qtyA;
+          else acomps.push({ idProd: idA, qty: qtyA });
+        }
+        // Orden estable para poder comparar dos líneas: sin esto, elegir
+        // "2 colas + 1 tónica" y "1 tónica + 2 colas" serían líneas distintas.
+        acomps.sort((a, b) => a.idProd - b.idProd);
+
+        const clave = idProd + '|' + acomps.map(a => a.idProd + 'x' + a.qty).join(',');
+        const ya = grupos.get(clave);
+        if (ya) ya.qty += qty;
+        else grupos.set(clave, { idProd, qty, acomps });
+      }
+
+      // Lo que hay que descontar del almacén, sumando botellas y acompañantes.
+      // El acompañante va gratis, pero sale de la nevera igual: si no se
+      // descontara, el stock diría que quedan refrescos que ya no están.
+      const wanted = new Map();
+      for (const g of grupos.values()) {
+        wanted.set(g.idProd, (wanted.get(g.idProd) || 0) + g.qty);
+        // Cantidad por botella x botellas de la línea.
+        g.acomps.forEach(a => {
+          wanted.set(a.idProd, (wanted.get(a.idProd) || 0) + a.qty * g.qty);
+        });
       }
 
       // Cada pago se valida por separado ANTES de sumarlos. Sumar a ciegas dejaba
@@ -1383,21 +1600,49 @@ app.post('/api/comanda', (req, res) => {
 
       const ids = [...wanted.keys()];
       const rows = await dbAll(
-        `SELECT id_producto, nombre, precio_venta, stock_actual FROM producto
-         WHERE activo = 1 AND id_producto IN (${ids.map(() => '?').join(',')})`,
+        `SELECT id_producto, nombre, precio_venta, stock_actual,
+                COALESCE(requiere_acompanante, 0) AS requiere_acompanante,
+                COALESCE(es_acompanante, 0) AS es_acompanante
+           FROM producto
+          WHERE activo = 1 AND id_producto IN (${ids.map(() => '?').join(',')})`,
         ids
       );
       const byId = new Map(rows.map(r => [r.id_producto, r]));
 
+      // El precio lo pone SIEMPRE la base, nunca lo que mande la tablet. Y el
+      // acompañante vale cero: es lo que hace que sea un acompañante y no una
+      // segunda venta.
       let total = 0;
       const lines = [];
-      for (const [idProd, qty] of wanted) {
-        const prod = byId.get(idProd);
-        if (!prod) throw new BusinessError(`El producto #${idProd} ya no está disponible.`);
+      for (const g of grupos.values()) {
+        const prod = byId.get(g.idProd);
+        if (!prod) throw new BusinessError(`El producto #${g.idProd} ya no está disponible.`);
+
+        const acompanantes = g.acomps.map(a => {
+          const prodA = byId.get(a.idProd);
+          if (!prodA) {
+            throw new BusinessError(`El acompañante #${a.idProd} ya no está disponible.`);
+          }
+          if (!prodA.es_acompanante) {
+            throw new BusinessError(`${prodA.nombre} no está marcado como acompañante.`);
+          }
+          return { idProd: a.idProd, nombre: prodA.nombre, qty: a.qty * g.qty };
+        });
+
+        // Si la botella lo exige, no se puede cobrar sin nada: la caja abriría
+        // el cuadro igualmente, pero una petición hecha a mano se colaría y el
+        // cliente se quedaría sin su refresco.
+        if (prod.requiere_acompanante && acompanantes.length === 0) {
+          throw new BusinessError(`${prod.nombre} necesita que elijas un acompañante.`);
+        }
+
         const precio = Number(prod.precio_venta);
-        const subtotal = round2(precio * qty);
+        const subtotal = round2(precio * g.qty);
         total = round2(total + subtotal);
-        lines.push({ idProd, qty, precio, subtotal, nombre: prod.nombre });
+        lines.push({
+          idProd: g.idProd, qty: g.qty, precio, subtotal, nombre: prod.nombre,
+          acomps: acompanantes
+        });
       }
 
       const pagado = round2(pagosLimpios.reduce((sum, p) => sum + p.monto, 0));
@@ -1415,30 +1660,51 @@ app.post('/api/comanda', (req, res) => {
       );
       const comId = comanda.insertId;
 
-      for (const line of lines) {
+      // 1. El almacén, producto a producto.
+      //
+      // Se descuenta agrupado y no línea a línea: si el mismo refresco va suelto
+      // en una línea y de acompañante en otra, son dos líneas del ticket pero
+      // una sola salida de la nevera, y así queda un movimiento por producto en
+      // vez de dos que hay que sumar a mano para saber cuántos salieron.
+      for (const [idProd, qty] of wanted) {
+        const prod = byId.get(idProd);
+        if (!prod) throw new BusinessError(`El producto #${idProd} ya no está disponible.`);
+
         // Conditional update: if another till sold the last unit a moment earlier,
         // affectedRows is 0 and the sale rolls back instead of pushing stock negative.
         const upd = await dbRun(
           'UPDATE producto SET stock_actual = stock_actual - ? WHERE id_producto = ? AND stock_actual >= ?',
-          [line.qty, line.idProd, line.qty]
+          [qty, idProd, qty]
         );
         if (upd.affectedRows === 0) {
           throw new BusinessError(
-            `Stock insuficiente de ${line.nombre} (quedan ${byId.get(line.idProd).stock_actual}).`
+            `Stock insuficiente de ${prod.nombre} (quedan ${prod.stock_actual}).`
           );
         }
 
-        await dbRun(
-          'INSERT INTO detalle_comanda (id_comanda, id_producto, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)',
-          [comId, line.idProd, line.qty, line.precio, line.subtotal]
-        );
-
-        const after = await dbGet('SELECT stock_actual FROM producto WHERE id_producto = ?', [line.idProd]);
+        const after = await dbGet('SELECT stock_actual FROM producto WHERE id_producto = ?', [idProd]);
         await dbRun(
           `INSERT INTO movimiento_stock (id_producto, id_admin, tipo_movimiento, cantidad, stock_anterior, stock_nuevo, motivo, fecha_hora)
            VALUES (?, NULL, 'SALIDA', ?, ?, ?, ?, ?)`,
-          [line.idProd, line.qty, after.stock_actual + line.qty, after.stock_actual, `Venta comanda #${comId}`, nowSql()]
+          [idProd, qty, after.stock_actual + qty, after.stock_actual, `Venta comanda #${comId}`, nowSql()]
         );
+      }
+
+      // 2. Las líneas del ticket. El acompañante se guarda colgando de su
+      // botella (id_detalle_padre) y con importe cero, que es como se imprime y
+      // como lo lee después el reporte de cierre.
+      for (const line of lines) {
+        const det = await dbRun(
+          'INSERT INTO detalle_comanda (id_comanda, id_producto, cantidad, precio_unitario, subtotal, id_detalle_padre) VALUES (?, ?, ?, ?, ?, NULL)',
+          [comId, line.idProd, line.qty, line.precio, line.subtotal]
+        );
+
+        for (const a of line.acomps) {
+          await dbRun(
+            'INSERT INTO detalle_comanda (id_comanda, id_producto, cantidad, precio_unitario, subtotal, id_detalle_padre) VALUES (?, ?, ?, 0, 0, ?)',
+            [comId, a.idProd, a.qty, det.insertId]
+          );
+        }
       }
 
       for (const pay of pagosLimpios) {
@@ -1477,7 +1743,10 @@ app.post('/api/comanda', (req, res) => {
             nombre: l.nombre,
             cantidad: l.qty,
             precio_unitario: l.precio,
-            subtotal: l.subtotal
+            subtotal: l.subtotal,
+            // Va dentro de su botella y no como línea aparte: el ticket lo
+            // imprime sangrado debajo y sin importe.
+            acompanantes: (l.acomps || []).map(a => ({ nombre: a.nombre, cantidad: a.qty }))
           }))
         });
       })
@@ -1492,8 +1761,680 @@ app.post('/api/comanda', (req, res) => {
 });
 
 // ==========================================
+// 3b. API: TRASPASOS E INGRESOS DE MERCANCÍA
+// ==========================================
+// Dos direcciones, un solo endpoint:
+//
+//   SALIDA   la mercancía se va a otra barra. Descuenta stock y devuelve el
+//            documento para imprimírselo al bartender que la entrega.
+//   ENTRADA  llega mercancía, por compra a un proveedor o por traspaso que
+//            manda otra barra. Suma stock.
+//
+// Todo dentro de la misma transacción serializada que las ventas: mientras se
+// mueve una caja de cerveza no se puede vender esa misma caja.
+
+const TIPOS_TRASPASO = ['SALIDA', 'ENTRADA'];
+const MOTIVOS_TRASPASO = ['TRASPASO', 'COMPRA'];
+
+app.post('/api/traspaso', (req, res) => {
+  if (useMockDb) {
+    return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+  }
+
+  const tipo = String(req.body.tipo || '').toUpperCase();
+  const motivo = String(req.body.motivo || '').toUpperCase();
+  const contraparte = String(req.body.contraparte || '').trim().slice(0, 120);
+  const observaciones = String(req.body.observaciones || '').trim().slice(0, 250);
+  const items = req.body.items;
+
+  if (!TIPOS_TRASPASO.includes(tipo)) {
+    return res.status(400).json({ success: false, message: 'Tipo de movimiento no válido.' });
+  }
+  if (!MOTIVOS_TRASPASO.includes(motivo)) {
+    return res.status(400).json({ success: false, message: 'Motivo no válido.' });
+  }
+  // Una salida sin destino es mercancía perdida: dentro de tres horas nadie
+  // sabrá a qué barra fue ni a quién reclamársela.
+  if (!contraparte) {
+    return res.status(400).json({
+      success: false,
+      message: tipo === 'SALIDA' ? 'Falta decir a dónde va.' : 'Falta decir de dónde viene.'
+    });
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ success: false, message: 'No hay ningún producto en el movimiento.' });
+  }
+
+  withTransaction(async () => {
+    // Se agrupa por producto: si el mismo aparece dos veces, es una sola salida
+    // del almacén y un solo apunte.
+    const pedido = new Map();
+    for (const item of items) {
+      const idProd = parseInt(item && item.id_producto, 10);
+      const qty = Number(item && item.cantidad);
+      if (!idProd || !Number.isInteger(qty) || qty <= 0) {
+        throw new BusinessError('Cantidad inválida en el movimiento.');
+      }
+      pedido.set(idProd, (pedido.get(idProd) || 0) + qty);
+    }
+
+    const ids = [...pedido.keys()];
+    const filas = await dbAll(
+      `SELECT id_producto, nombre, stock_actual FROM producto
+        WHERE activo = 1 AND id_producto IN (${ids.map(() => '?').join(',')})`,
+      ids
+    );
+    const porId = new Map(filas.map(f => [f.id_producto, f]));
+
+    const cabecera = await dbRun(
+      `INSERT INTO traspaso (tipo, motivo, contraparte, observaciones, id_cajero, id_admin, fecha_hora)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [tipo, motivo, contraparte, observaciones,
+       req.body.id_cajero || null, req.body.id_admin || null, nowSql()]
+    );
+    const idTraspaso = cabecera.insertId;
+
+    const lineas = [];
+    for (const [idProd, qty] of pedido) {
+      const prod = porId.get(idProd);
+      if (!prod) throw new BusinessError(`El producto #${idProd} ya no está disponible.`);
+
+      if (tipo === 'SALIDA') {
+        // Condicional: si otra tablet acaba de vender lo último, la resta no
+        // entra y el traspaso entero se deshace en vez de dejar stock negativo.
+        const upd = await dbRun(
+          'UPDATE producto SET stock_actual = stock_actual - ? WHERE id_producto = ? AND stock_actual >= ?',
+          [qty, idProd, qty]
+        );
+        if (upd.affectedRows === 0) {
+          throw new BusinessError(
+            `No hay ${qty} de ${prod.nombre} para mover (quedan ${prod.stock_actual}).`
+          );
+        }
+      } else {
+        await dbRun('UPDATE producto SET stock_actual = stock_actual + ? WHERE id_producto = ?',
+          [qty, idProd]);
+      }
+
+      await dbRun(
+        'INSERT INTO traspaso_detalle (id_traspaso, id_producto, cantidad) VALUES (?, ?, ?)',
+        [idTraspaso, idProd, qty]
+      );
+
+      // El apunte por producto, con el motivo escrito de forma que se entienda
+      // solo al leer el reporte de stock tres días después.
+      const despues = await dbGet('SELECT stock_actual FROM producto WHERE id_producto = ?', [idProd]);
+      const antes = tipo === 'SALIDA' ? despues.stock_actual + qty : despues.stock_actual - qty;
+      const texto = tipo === 'SALIDA'
+        ? `Traspaso #${idTraspaso} a ${contraparte}`
+        : (motivo === 'COMPRA'
+            ? `Compra #${idTraspaso} a ${contraparte}`
+            : `Traspaso #${idTraspaso} recibido de ${contraparte}`);
+
+      await dbRun(
+        `INSERT INTO movimiento_stock (id_producto, id_admin, tipo_movimiento, cantidad, stock_anterior, stock_nuevo, motivo, fecha_hora)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [idProd, req.body.id_admin || null, tipo, qty, antes, despues.stock_actual, texto, nowSql()]
+      );
+
+      lineas.push({
+        id_producto: idProd, nombre: prod.nombre, cantidad: qty,
+        stock_despues: despues.stock_actual
+      });
+    }
+
+    return { idTraspaso, lineas };
+  })
+    .then(r => {
+      // El traspaso deja constancia: al día siguiente, cuando falten doce
+      // cervezas, el log es lo único que puede decir a dónde fueron.
+      registrarAuditoria(
+        req.body.id_admin,
+        tipo === 'SALIDA' ? 'TRASPASO_SALIDA'
+          : (motivo === 'COMPRA' ? 'COMPRA_MERCANCIA' : 'TRASPASO_ENTRADA'),
+        'traspaso', r.idTraspaso,
+        (tipo === 'SALIDA' ? 'Salieron ' : 'Entraron ') +
+        r.lineas.reduce((n, l) => n + l.cantidad, 0) + ' unidades ' +
+        (tipo === 'SALIDA' ? 'a ' : 'de ') + contraparte + ': ' +
+        r.lineas.map(l => l.cantidad + ' x ' + l.nombre).join(', ')
+      );
+      return res.json({
+        success: true,
+        id_traspaso: r.idTraspaso,
+        tipo, motivo, contraparte, observaciones,
+        items: r.lineas,
+        message: tipo === 'SALIDA'
+          ? `Traspaso #${r.idTraspaso} a ${contraparte} registrado.`
+          : (motivo === 'COMPRA'
+              ? `Compra #${r.idTraspaso} registrada: el stock ya está actualizado.`
+              : `Traspaso #${r.idTraspaso} recibido de ${contraparte}.`)
+      });
+    })
+    .catch(err => {
+      if (err instanceof BusinessError) {
+        return res.status(err.status).json({ success: false, message: err.message });
+      }
+      console.error('Error al registrar el traspaso:', err);
+      res.status(500).json({ success: false, message: 'No se pudo registrar el movimiento.' });
+    });
+});
+
+// Los últimos movimientos, para el historial y para sugerir destinos.
+//
+// Las sugerencias importan más de lo que parece: escribir "Barra VIP" a mano en
+// cada traspaso acaba dando "barra vip", "Barra Vip" y "VIP", y luego no hay
+// forma de sumar cuánto se mandó allí en toda la noche.
+app.get('/api/traspasos', (req, res) => {
+  if (useMockDb) return res.json({ traspasos: [], destinos: [] });
+
+  Promise.all([
+    dbAll(`SELECT t.id_traspaso, t.tipo, t.motivo, t.contraparte, t.observaciones, t.fecha_hora,
+                  c.nombre AS cajero,
+                  (SELECT COUNT(*) FROM traspaso_detalle d WHERE d.id_traspaso = t.id_traspaso) AS lineas,
+                  (SELECT COALESCE(SUM(d.cantidad), 0) FROM traspaso_detalle d WHERE d.id_traspaso = t.id_traspaso) AS unidades
+             FROM traspaso t
+             LEFT JOIN cajero c ON c.id_cajero = t.id_cajero
+            ORDER BY t.id_traspaso DESC LIMIT 60`),
+    dbAll(`SELECT contraparte, tipo, MAX(id_traspaso) AS ultimo
+             FROM traspaso WHERE contraparte <> ''
+            GROUP BY contraparte, tipo ORDER BY ultimo DESC LIMIT 20`)
+  ])
+    .then(([traspasos, destinos]) => res.json({ traspasos, destinos }))
+    .catch(err => {
+      console.error('Error al leer los traspasos:', err);
+      res.status(500).json({ traspasos: [], destinos: [] });
+    });
+});
+
+// El detalle de uno, para reimprimir su comanda.
+app.get('/api/traspaso/:id', (req, res) => {
+  if (useMockDb) return res.status(404).json({ success: false });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Traspaso no válido.' });
+  }
+
+  Promise.all([
+    dbGet(`SELECT t.*, c.nombre AS cajero FROM traspaso t
+             LEFT JOIN cajero c ON c.id_cajero = t.id_cajero
+            WHERE t.id_traspaso = ?`, [id]),
+    dbAll(`SELECT d.id_producto, d.cantidad, COALESCE(p.nombre, 'Producto eliminado') AS nombre
+             FROM traspaso_detalle d
+             LEFT JOIN producto p ON p.id_producto = d.id_producto
+            WHERE d.id_traspaso = ?`, [id])
+  ])
+    .then(([cabecera, items]) => {
+      if (!cabecera) return res.status(404).json({ success: false, message: 'Ese traspaso no existe.' });
+      res.json({ success: true, traspaso: cabecera, items });
+    })
+    .catch(err => {
+      console.error('Error al leer el traspaso:', err);
+      res.status(500).json({ success: false });
+    });
+});
+
+// ==========================================
 // 4. API: ADMIN OPERATIONS
 // ==========================================
+
+// ==========================================
+// 4a. API: ELIMINAR DEL CATÁLOGO Y DE LA PLANTILLA
+// ==========================================
+// Eliminar tiene dos comportamientos, y la diferencia importa:
+//
+//   · Sin historial  -> se borra de verdad. Es el caso del montaje: quitas los
+//     productos de ejemplo que no vas a vender y no dejan rastro.
+//
+//   · Con historial  -> se retira (activo = 0). Desaparece de la caja y de las
+//     listas, pero las ventas ya cobradas siguen nombrándolo. Borrarlo del todo
+//     dejaría el cierre de caja con líneas sin producto y descuadrado, que es
+//     justo el documento con el que se cuenta el dinero al final de la noche.
+//
+// La respuesta dice cuál de los dos ocurrió, para poder decírselo a quien pulsa.
+
+/** ¿Cuántas veces aparece este id en una tabla? */
+function cuantas(tabla, columna, id) {
+  return dbGet(`SELECT COUNT(*) AS n FROM ${tabla} WHERE ${columna} = ?`, [id])
+    .then(f => (f ? f.n : 0));
+}
+
+
+// ---- Producto --------------------------------------------------------------
+app.delete('/api/admin/productos/:id', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Producto no válido.' });
+  }
+
+  withTransaction(async () => {
+    const prod = await dbGet('SELECT id_producto, nombre FROM producto WHERE id_producto = ?', [id]);
+    if (!prod) return { estado: 404, cuerpo: { success: false, message: 'Ese producto ya no existe.' } };
+
+    const vendido = await cuantas('detalle_comanda', 'id_producto', id);
+    // También cuenta haberse movido entre barras: el documento del traspaso lo
+    // nombra, y borrarlo dejaría ese papel apuntando a un producto que ya no
+    // existe. Antes ni se comprobaba, y la clave foránea del traspaso hacía
+    // fallar el borrado con un 500 que no explicaba nada.
+    const movido = await cuantas('traspaso_detalle', 'id_producto', id);
+
+    if (vendido > 0 || movido > 0) {
+      await dbRun('UPDATE producto SET activo = 0 WHERE id_producto = ?', [id]);
+      const motivo = vendido > 0
+        ? `ya se vendió ${vendido} ${vendido === 1 ? 'vez' : 'veces'}`
+        : `ya se movió en ${movido} ${movido === 1 ? 'traspaso' : 'traspasos'}`;
+      return {
+        estado: 200,
+        cuerpo: {
+          success: true, retirado: true,
+          message: `"${prod.nombre}" se retiró del catálogo. Como ${motivo}, ` +
+                   `se conserva para que el historial cuadre.`
+        }
+      };
+    }
+
+    // Nunca se vendió: se va entero, con sus movimientos de stock, que sin él
+    // no significan nada.
+    await dbRun('DELETE FROM movimiento_stock WHERE id_producto = ?', [id]);
+    await dbRun('DELETE FROM producto WHERE id_producto = ?', [id]);
+    return {
+      estado: 200,
+      cuerpo: { success: true, retirado: false, message: `"${prod.nombre}" se eliminó.` }
+    };
+  })
+    .then(r => {
+      if (r.cuerpo.success) {
+        registrarAuditoria(req.body && req.body.id_admin, 'ELIMINAR_PRODUCTO', 'producto', id,
+          r.cuerpo.retirado ? 'Producto retirado del catálogo' : 'Producto eliminado');
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al eliminar producto:', err);
+      res.status(500).json({ success: false, message: 'No se pudo eliminar el producto.' });
+    });
+});
+
+// ---- Categoría -------------------------------------------------------------
+app.delete('/api/admin/categorias/:id', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Categoría no válida.' });
+  }
+
+  withTransaction(async () => {
+    const cat = await dbGet('SELECT id_categoria, nombre FROM categoria_producto WHERE id_categoria = ?', [id]);
+    if (!cat) return { estado: 404, cuerpo: { success: false, message: 'Esa categoría ya no existe.' } };
+
+    // Una categoría con productos dentro no se toca: borrarla dejaría esos
+    // productos sin pestaña donde aparecer en la caja.
+    const dentro = await dbGet(
+      'SELECT COUNT(*) AS n FROM producto WHERE id_categoria = ? AND activo = 1', [id]);
+    if (dentro && dentro.n > 0) {
+      return {
+        estado: 400,
+        cuerpo: {
+          success: false,
+          message: `"${cat.nombre}" todavía tiene ${dentro.n} ` +
+                   `${dentro.n === 1 ? 'producto' : 'productos'}. Elimínalos o cámbialos de categoría primero.`
+        }
+      };
+    }
+
+    await dbRun('DELETE FROM categoria_producto WHERE id_categoria = ?', [id]);
+    return { estado: 200, cuerpo: { success: true, message: `"${cat.nombre}" se eliminó.` } };
+  })
+    .then(r => {
+      if (r.cuerpo.success) {
+        registrarAuditoria(req.body && req.body.id_admin, 'ELIMINAR_CATEGORIA', 'categoria_producto', id,
+          'Categoría eliminada');
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al eliminar categoría:', err);
+      res.status(500).json({ success: false, message: 'No se pudo eliminar la categoría.' });
+    });
+});
+
+// ---- Cajero ----------------------------------------------------------------
+app.delete('/api/admin/cajeros/:id', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Cajero no válido.' });
+  }
+
+  withTransaction(async () => {
+    const caj = await dbGet('SELECT id_cajero, nombre FROM cajero WHERE id_cajero = ?', [id]);
+    if (!caj) return { estado: 404, cuerpo: { success: false, message: 'Ese cajero ya no existe.' } };
+
+    const cobradas = await cuantas('comanda', 'id_cajero', id);
+    const susMeseros = await cuantas('mesero', 'id_cajero', id);
+
+    if (cobradas > 0) {
+      await dbRun('UPDATE cajero SET activo = 0 WHERE id_cajero = ?', [id]);
+      return {
+        estado: 200,
+        cuerpo: {
+          success: true, retirado: true,
+          message: `${caj.nombre} ya no podrá entrar. Se conserva porque cobró ` +
+                   `${cobradas} ${cobradas === 1 ? 'comanda' : 'comandas'} y el cierre las lleva a su nombre.`
+        }
+      };
+    }
+
+    if (susMeseros > 0) {
+      return {
+        estado: 400,
+        cuerpo: {
+          success: false,
+          message: `${caj.nombre} todavía tiene ${susMeseros} ` +
+                   `${susMeseros === 1 ? 'mesero' : 'meseros'} a su cargo. Elimínalos o pásalos a otro cajero primero.`
+        }
+      };
+    }
+
+    await dbRun('DELETE FROM cajero WHERE id_cajero = ?', [id]);
+    return { estado: 200, cuerpo: { success: true, retirado: false, message: `${caj.nombre} se eliminó.` } };
+  })
+    .then(r => {
+      if (r.cuerpo.success) {
+        registrarAuditoria(req.body && req.body.id_admin, 'ELIMINAR_CAJERO', 'cajero', id,
+          r.cuerpo.retirado ? 'Cajero dado de baja' : 'Cajero eliminado');
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al eliminar cajero:', err);
+      res.status(500).json({ success: false, message: 'No se pudo eliminar el cajero.' });
+    });
+});
+
+// ---- Mesero ----------------------------------------------------------------
+app.delete('/api/admin/meseros/:id', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Mesero no válido.' });
+  }
+
+  withTransaction(async () => {
+    const mes = await dbGet('SELECT id_mesero, nombre FROM mesero WHERE id_mesero = ?', [id]);
+    if (!mes) return { estado: 404, cuerpo: { success: false, message: 'Ese mesero ya no existe.' } };
+
+    const suyas = await cuantas('comanda', 'id_mesero', id);
+
+    if (suyas > 0) {
+      await dbRun('UPDATE mesero SET activo = 0 WHERE id_mesero = ?', [id]);
+      return {
+        estado: 200,
+        cuerpo: {
+          success: true, retirado: true,
+          message: `${mes.nombre} ya no podrá entrar con su PIN. Se conserva porque tiene ` +
+                   `${suyas} ${suyas === 1 ? 'comanda' : 'comandas'} a su nombre en el cierre.`
+        }
+      };
+    }
+
+    await dbRun('DELETE FROM mesero WHERE id_mesero = ?', [id]);
+    return { estado: 200, cuerpo: { success: true, retirado: false, message: `${mes.nombre} se eliminó.` } };
+  })
+    .then(r => {
+      if (r.cuerpo.success) {
+        registrarAuditoria(req.body && req.body.id_admin, 'ELIMINAR_MESERO', 'mesero', id,
+          r.cuerpo.retirado ? 'Mesero dado de baja' : 'Mesero eliminado');
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al eliminar mesero:', err);
+      res.status(500).json({ success: false, message: 'No se pudo eliminar el mesero.' });
+    });
+});
+
+// ---- Plantilla completa, para poder verla ----------------------------------
+// El panel dejaba crear cajeros y meseros pero no enseñaba los que ya había:
+// se daba de alta a la misma persona dos veces sin saberlo, y no había forma de
+// consultar un PIN olvidado en mitad del evento.
+app.get('/api/admin/personal', (req, res) => {
+  if (useMockDb) return res.json({ cajeros: [], meseros: [] });
+
+  Promise.all([
+    dbAll(`SELECT c.id_cajero, c.nombre, c.usuario, c.activo,
+                  (SELECT COUNT(*) FROM mesero m WHERE m.id_cajero = c.id_cajero AND m.activo = 1) AS meseros,
+                  (SELECT COUNT(*) FROM comanda k WHERE k.id_cajero = c.id_cajero) AS comandas
+             FROM cajero c ORDER BY c.activo DESC, c.nombre`),
+    dbAll(`SELECT m.id_mesero, m.nombre, m.usuario, m.password AS pin, m.activo, m.id_cajero,
+                  c.nombre AS cajero,
+                  (SELECT COUNT(*) FROM comanda k WHERE k.id_mesero = m.id_mesero) AS comandas
+             FROM mesero m
+             LEFT JOIN cajero c ON c.id_cajero = m.id_cajero
+            ORDER BY m.activo DESC, m.nombre`)
+  ])
+    .then(([cajeros, meseros]) => res.json({ cajeros, meseros }))
+    .catch(err => {
+      console.error('Error al leer el personal:', err);
+      res.status(500).json({ cajeros: [], meseros: [] });
+    });
+});
+
+// ---- Catálogo completo, para poder verlo -----------------------------------
+app.get('/api/admin/catalogo', (req, res) => {
+  if (useMockDb) return res.json({ categorias: [], productos: [] });
+
+  Promise.all([
+    dbAll(`SELECT c.id_categoria, c.nombre, c.descripcion, c.tipo, c.activo,
+                  (SELECT COUNT(*) FROM producto p WHERE p.id_categoria = c.id_categoria AND p.activo = 1) AS productos
+             FROM categoria_producto c ORDER BY c.activo DESC, c.nombre`),
+    dbAll(`SELECT p.id_producto, p.nombre, p.precio_venta, p.stock_actual, p.activo,
+                  p.id_categoria, c.nombre AS categoria,
+                  COALESCE(p.requiere_acompanante, 0) AS requiere_acompanante,
+                  COALESCE(p.es_acompanante, 0) AS es_acompanante,
+                  CASE WHEN p.foto IS NULL OR p.foto = '' THEN 0 ELSE 1 END AS tiene_foto,
+                  LENGTH(COALESCE(p.foto, '')) AS foto_v,
+                  (SELECT COUNT(*) FROM detalle_comanda d WHERE d.id_producto = p.id_producto) AS vendido
+             FROM producto p
+             LEFT JOIN categoria_producto c ON c.id_categoria = p.id_categoria
+            ORDER BY p.activo DESC, c.nombre, p.nombre`)
+  ])
+    .then(([categorias, productos]) => res.json({ categorias, productos }))
+    .catch(err => {
+      console.error('Error al leer el catálogo:', err);
+      res.status(500).json({ categorias: [], productos: [] });
+    });
+});
+
+// ==========================================
+// 4b. API: FOTO DE PRODUCTO
+// ==========================================
+// La foto entra ya reducida desde el navegador (unos 400 px de lado, JPEG).
+// Aquí sólo se comprueba que sea de verdad una imagen y que no pese de más:
+// veinte productos con fotos de 8 MP convertirían el .db en un archivo que no
+// cabe en la tarjeta de la tablet ni se copia en un rato.
+//
+// Sólo se acepta el contenido de la imagen, nunca una dirección: en el evento
+// no hay internet, así que una URL remota se vería como un hueco roto, y
+// además dejaría meter cualquier cosa dentro de la pantalla de la caja.
+const FOTO_MAX_BYTES = 400 * 1024;
+const FOTO_PATRON = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+
+/**
+ * Devuelve la foto lista para guardar, '' para borrarla, o false si no vale.
+ * Se distingue el "no viene" (undefined -> null, no tocar) del "viene vacía"
+ * (borrar), porque son dos intenciones distintas del panel.
+ */
+function validarFoto(valor) {
+  if (valor === undefined || valor === null) return null;   // no se toca
+  const texto = String(valor);
+  if (!texto) return '';                                    // borrar
+  if (!FOTO_PATRON.test(texto)) return false;
+  // base64 crece un tercio sobre el binario; se mide lo que se va a guardar.
+  if (texto.length > FOTO_MAX_BYTES * 1.4) return false;
+  return texto;
+}
+
+// Editar un producto que ya existe.
+//
+// El catálogo se monta con prisa y siempre hay algo que corregir: un precio
+// mal tecleado, un nombre a medias, una categoría equivocada. Sin esto había
+// que borrar el producto y volver a crearlo, y si ya se había vendido eso ni
+// siquiera era posible.
+//
+// El stock NO se toca aquí: se mueve con entradas y salidas, que dejan su
+// apunte. Cambiarlo a mano desde una ficha rompería el cuadre del inventario.
+app.put('/api/admin/productos/:id', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Producto no válido.' });
+  }
+
+  const nombre = String(req.body.nombre == null ? '' : req.body.nombre).trim().slice(0, 120);
+  const descripcion = String(req.body.descripcion == null ? '' : req.body.descripcion).trim().slice(0, 250);
+  const precio = Number(req.body.precio_venta);
+  const idCategoria = parseInt(req.body.id_categoria, 10);
+
+  if (!nombre) {
+    return res.status(400).json({ success: false, message: 'El producto necesita un nombre.' });
+  }
+  // Las mismas reglas que al crearlo: un precio con letras se colaba como NaN
+  // y dejaba el producto invendible; uno negativo restaría del total.
+  if (!Number.isFinite(precio) || precio <= 0) {
+    return res.status(400).json({ success: false, message: 'El precio debe ser un número mayor que cero.' });
+  }
+  if (!Number.isInteger(idCategoria) || idCategoria <= 0) {
+    return res.status(400).json({ success: false, message: 'Elige una categoría.' });
+  }
+
+  dbGet('SELECT id_producto, nombre, precio_venta FROM producto WHERE id_producto = ?', [id])
+    .then(antes => {
+      if (!antes) return { estado: 404, cuerpo: { success: false, message: 'Ese producto ya no existe.' } };
+
+      return dbGet('SELECT id_categoria FROM categoria_producto WHERE id_categoria = ?', [idCategoria])
+        .then(cat => {
+          if (!cat) {
+            return { estado: 400, cuerpo: { success: false, message: 'Esa categoría no existe.' } };
+          }
+          return dbRun(
+            'UPDATE producto SET nombre = ?, descripcion = ?, precio_venta = ?, id_categoria = ? WHERE id_producto = ?',
+            [nombre, descripcion, round2(precio), idCategoria, id]
+          ).then(() => {
+            // El cambio de precio se detalla: es el dato que después explica
+            // por qué dos comandas del mismo producto no valen lo mismo.
+            const cambioPrecio = Number(antes.precio_venta) !== round2(precio)
+              ? ` · precio ${Number(antes.precio_venta).toFixed(2)} -> ${round2(precio).toFixed(2)}`
+              : '';
+            return registrarAuditoria(req.body.id_admin, 'EDITAR_PRODUCTO', 'producto', id,
+              `"${antes.nombre}" -> "${nombre}"` + cambioPrecio);
+          }).then(() => ({
+            estado: 200,
+            cuerpo: { success: true, message: `"${nombre}" actualizado.` }
+          }));
+        });
+    })
+    .then(r => res.status(r.estado).json(r.cuerpo))
+    .catch(err => {
+      console.error('Error al editar el producto:', err);
+      res.status(500).json({ success: false, message: friendlyDbError(err, 'producto') });
+    });
+});
+
+// Marcar un producto que ya existe. Hace falta porque el catálogo se montó
+// antes de que existieran los acompañamientos: sin esto habría que borrar los
+// veinte productos y volver a crearlos.
+app.put('/api/admin/productos/:id/acompanamiento', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Producto no válido.' });
+  }
+
+  const requiere = req.body && req.body.requiere_acompanante ? 1 : 0;
+  const esAcomp = req.body && req.body.es_acompanante ? 1 : 0;
+
+  // Un producto que necesita acompañante no puede ser a la vez acompañante de
+  // otro: se llamarían el uno al otro y el cuadro no tendría fin.
+  if (requiere && esAcomp) {
+    return res.status(400).json({
+      success: false,
+      message: 'Un producto no puede necesitar acompañante y ser acompañante a la vez.'
+    });
+  }
+
+  dbGet('SELECT id_producto, nombre FROM producto WHERE id_producto = ?', [id])
+    .then(prod => {
+      if (!prod) return { estado: 404, cuerpo: { success: false, message: 'Ese producto ya no existe.' } };
+      return dbRun(
+        'UPDATE producto SET requiere_acompanante = ?, es_acompanante = ? WHERE id_producto = ?',
+        [requiere, esAcomp, id]
+      ).then(() => registrarAuditoria(
+        req.body && req.body.id_admin, 'MARCAR_ACOMPANAMIENTO', 'producto', id,
+        `"${prod.nombre}": pide acompañante = ${requiere ? 'sí' : 'no'}, ` +
+        `puede serlo = ${esAcomp ? 'sí' : 'no'}`)
+      ).then(() => ({
+        estado: 200,
+        cuerpo: {
+          success: true, requiere_acompanante: requiere, es_acompanante: esAcomp,
+          message: requiere ? `"${prod.nombre}" pedirá acompañante al venderse.`
+            : esAcomp ? `"${prod.nombre}" ya se puede elegir como acompañante.`
+            : `"${prod.nombre}" se vende suelto, sin acompañamiento.`
+        }
+      }));
+    })
+    .then(r => res.status(r.estado).json(r.cuerpo))
+    .catch(err => {
+      console.error('Error al marcar el acompañamiento:', err);
+      res.status(500).json({ success: false, message: 'No se pudo guardar.' });
+    });
+});
+
+app.put('/api/admin/productos/:id/foto', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Producto no válido.' });
+  }
+
+  const foto = validarFoto(req.body ? req.body.foto : undefined);
+  if (foto === false) {
+    return res.status(400).json({
+      success: false,
+      message: 'La foto no es válida. Usa una imagen PNG, JPG o WEBP.'
+    });
+  }
+
+  dbGet('SELECT id_producto, nombre FROM producto WHERE id_producto = ?', [id])
+    .then(prod => {
+      if (!prod) return { estado: 404, cuerpo: { success: false, message: 'Ese producto ya no existe.' } };
+      return dbRun('UPDATE producto SET foto = ? WHERE id_producto = ?', [foto || null, id])
+        .then(() => registrarAuditoria(
+          req.body && req.body.id_admin, foto ? 'PONER_FOTO' : 'QUITAR_FOTO', 'producto', id,
+          (foto ? 'Se puso foto a "' : 'Se quitó la foto de "') + prod.nombre + '"')
+        ).then(() => ({
+          estado: 200,
+          cuerpo: {
+            success: true,
+            foto: foto || null,
+            message: foto ? `Foto de "${prod.nombre}" guardada.` : `Foto de "${prod.nombre}" quitada.`
+          }
+        }));
+    })
+    .then(r => res.status(r.estado).json(r.cuerpo))
+    .catch(err => {
+      console.error('Error al guardar la foto:', err);
+      res.status(500).json({ success: false, message: 'No se pudo guardar la foto.' });
+    });
+});
 
 // GET ALL COMMANDAS (WITH JOIN DETAILS)
 app.get('/api/admin/comandas', (req, res) => {
@@ -1735,6 +2676,12 @@ app.post('/api/admin/categorias', (req, res) => {
 // CREATE PRODUCT
 app.post('/api/admin/productos', (req, res) => {
   const { id_categoria, nombre, descripcion, tipo_producto, precio_venta, stock_actual, id_admin, id_evento } = req.body;
+  const requiere = req.body.requiere_acompanante ? 1 : 0;
+  const esAcomp = req.body.es_acompanante ? 1 : 0;
+  const fotoNueva = validarFoto(req.body.foto);
+  if (fotoNueva === false) {
+    return res.status(400).json({ success: false, message: 'La foto no es una imagen válida.' });
+  }
   const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
   if (useMockDb) {
@@ -1796,8 +2743,8 @@ app.post('/api/admin/productos', (req, res) => {
     }
 
     // Real MySQL Insertion
-    const query = `INSERT INTO producto (id_categoria, nombre, descripcion, tipo_producto, precio_venta, stock_actual, creado_por_admin, fecha_creacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-    pool.query(query, [id_categoria, String(nombre).trim(), descripcion, tipo_producto, round2(precio), stockInicial, id_admin, nowStr], (err, result) => {
+    const query = `INSERT INTO producto (id_categoria, nombre, descripcion, tipo_producto, precio_venta, stock_actual, foto, requiere_acompanante, es_acompanante, creado_por_admin, fecha_creacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    pool.query(query, [id_categoria, String(nombre).trim(), descripcion, tipo_producto, round2(precio), stockInicial, fotoNueva || null, requiere, esAcomp, id_admin, nowStr], (err, result) => {
       if (err) return res.status(400).json({ success: false, message: friendlyDbError(err, 'producto') });
       const newProdId = result.insertId;
 
@@ -2385,7 +3332,6 @@ const servidor = app.listen(PORT, '0.0.0.0', async () => {
   const rotulo = INSTANCIA.nombre.toUpperCase();
   console.log(`\n==================================================`);
   console.log(`   B A R R A :   ${rotulo}`);
-  console.log(`   Comandas de esta barra: ${INSTANCIA.prefijo}-1, ${INSTANCIA.prefijo}-2, ...`);
   console.log(`==================================================`);
   console.log(`🚀 MasterDrinks POS iniciado`);
   console.log(`   En esta misma tablet:  http://localhost:${PORT}`);
@@ -2398,6 +3344,8 @@ const servidor = app.listen(PORT, '0.0.0.0', async () => {
   // El nombre encabeza los tickets y el cierre. Se recuerda dónde se cambia,
   // porque el de partida sirve para arrancar pero rara vez es el definitivo.
   console.log(`\n   Nombre de la barra: Dashboard → Datos del evento → Barra.`);
+  console.log(`   Versión de la interfaz: ${VERSION_UI}` +
+    `   (debe coincidir con la que sale abajo en la tablet)`);
   console.log(`\n   Ctrl+C para detener.`);
   console.log(`==================================================\n`);
 });

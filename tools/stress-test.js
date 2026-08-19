@@ -326,11 +326,21 @@ function auditar(stockInicial, resultados) {
 
   // Catálogo y stock de partida, leídos de la copia antes de empezar.
   const db = new DatabaseSync(BASE);
+  const conAcomp = db.prepare(`SELECT COUNT(*) AS n FROM producto
+                                WHERE activo = 1 AND COALESCE(requiere_acompanante, 0) = 1`).get().n;
   const catalogo = {
-    productos: db.prepare('SELECT id_producto, precio_venta FROM producto WHERE activo = 1').all(),
+    // Se dejan fuera las botellas que piden acompañante: aquí se mide la
+    // concurrencia, y esas exigen elegir refresco, así que el servidor las
+    // rechaza con razón y el informe se llenaba de "errores" que no lo son.
+    // La corrección del acompañamiento la comprueban las pruebas de lógica.
+    productos: db.prepare(`SELECT id_producto, precio_venta FROM producto
+                            WHERE activo = 1 AND COALESCE(requiere_acompanante, 0) = 0`).all(),
     cajeros: db.prepare('SELECT id_cajero, usuario FROM cajero WHERE activo = 1').all(),
     meseros: db.prepare('SELECT id_mesero, password FROM mesero WHERE activo = 1').all()
   };
+  if (conAcomp > 0) {
+    console.log(C.dim('  ' + conAcomp + ' producto(s) con acompañante obligatorio quedan fuera de esta prueba.'));
+  }
   const stockInicial = new Map(
     db.prepare('SELECT id_producto, stock_actual FROM producto').all().map(p => [p.id_producto, p.stock_actual])
   );
