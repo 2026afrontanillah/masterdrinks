@@ -130,6 +130,23 @@ summary,
        Nunca ease-in en la interfaz: empieza lento justo cuando el ojo mira. */
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+    /* La de los paneles que suben desde abajo. Sale disparada y frena largo,
+       que es como se mueve una hoja de papel empujada con la mano. */
+    --ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
+
+    /* ------------------------------------------------------------------
+       Luz.
+
+       Un tema oscuro plano parece sin terminar: todas las superficies tienen
+       el mismo valor y nada dice cuál está encima de cuál. La solución no es
+       subir el brillo de las tarjetas —eso apaga el contraste con el texto—
+       sino insinuar de dónde viene la luz: una línea clarísima en el borde de
+       arriba de cada superficie, como el canto de una hoja iluminada desde el
+       techo. Es un píxel al 6 % y no se ve conscientemente; quitarlo sí se
+       nota, porque todo vuelve a parecer pegado al fondo.
+       ------------------------------------------------------------------ */
+    --luz-canto: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    --luz-canto-fuerte: inset 0 1px 0 rgba(255, 255, 255, 0.10);
 
     /* Alto mínimo de cualquier cosa que se toque con el dedo. */
     --touch: 44px;
@@ -178,8 +195,14 @@ body::after {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: linear-gradient(180deg, #0b0b0d 0%, #09090b 100%);
-    opacity: 0.92;
+    /* El negro plano es un negro muerto. Un foco ámbar muy tenue arriba —al
+       6 %, que es casi nada— le da al fondo un arriba y un abajo, y de paso
+       ata el color de acento a toda la pantalla en vez de dejarlo suelto en
+       tres botones. Se nota sobre todo en la pantalla de acceso, que es casi
+       todo fondo. */
+    background:
+        radial-gradient(130% 85% at 50% -25%, rgba(224, 163, 62, 0.06), transparent 62%),
+        linear-gradient(180deg, #0e0e12 0%, #08080a 100%);
     z-index: -1;
 }
 
@@ -202,7 +225,7 @@ body::after {
        dejar una sola barra. Las variantes que traen el suyo (.form-card,
        .reporte-card) lo siguen mandando por ser más específicas. */
     padding: 24px;
-    box-shadow: var(--shadow-card);
+    box-shadow: var(--luz-canto), var(--shadow-card);
     transition: border-color 0.3s ease;
 }
 
@@ -457,9 +480,45 @@ select option {
     margin-bottom: 32px;
 }
 
+/* ---- La marca ----------------------------------------------------------
+   Un emoji suelto en medio de la pantalla parece un carácter que se coló, no
+   un logotipo. Metido en una pastilla redondeada con un fondo ámbar tenue ya
+   se lee como una marca: tiene borde, tiene peso y ocupa un sitio pensado.
+   Es el mismo emoji; lo que cambia es que ahora está enmarcado. */
 .logo-container {
-    font-size: 3rem;
-    margin-bottom: 12px;
+    width: 76px;
+    height: 76px;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.4rem;
+    line-height: 1;
+    border-radius: 22px;
+    background: var(--accent-suave);
+    border: 1px solid var(--accent-borde);
+    /* Un resplandor por dentro y otro, muy abierto, por fuera: la pastilla
+       parece encendida en vez de pegada encima del fondo. */
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 10px 30px rgba(224, 163, 62, 0.10);
+}
+
+/* La misma pastilla, en pequeño, en las dos cabeceras. Así la marca es una
+   sola cosa en toda la aplicación y no un emoji de tres tamaños distintos. */
+.nav-branding .logo,
+.admin-branding .logo {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    line-height: 1;
+    border-radius: 12px;
+    background: var(--accent-suave);
+    border: 1px solid var(--accent-borde);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
 
 .auth-header h1 {
@@ -674,6 +733,17 @@ select option {
     }
 }
 
+/* La hoja de cualquier cuadro es el marco de referencia de lo que lleva
+   colocado por encima —la ← de volver, sin ir más lejos—. Iba sin declarar y
+   funcionaba de rebote: la animación de entrada terminaba dejando un
+   `transform` puesto, y un transform crea marco de referencia. En cuanto la
+   entrada dejó de fijar el estado final, la ← se fue a la esquina de la
+   pantalla. Ahora lo dice la regla, que es donde tiene que estar dicho. */
+.modal-card,
+.pay-sheet {
+    position: relative;
+}
+
 .modal-close-btn {
     position: absolute;
     top: 14px;
@@ -719,8 +789,13 @@ select option {
 
 .top-nav {
     height: 70px;
-    background: rgba(18, 22, 35, 0.8);
+    /* Gris neutro, no azulado. Estas superficies venían del tema anterior y se
+       quedaron con su tinte frío mientras la paleta pasaba a gris: media
+       aplicación tiraba a azul y la otra media a gris, que es de esas cosas
+       que no se saben nombrar pero hacen que algo parezca sin terminar. */
+    background: rgba(20, 20, 23, 0.82);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: var(--luz-canto);
     backdrop-filter: blur(10px);
     display: flex;
     justify-content: space-between;
@@ -732,10 +807,6 @@ select option {
     display: flex;
     align-items: center;
     gap: 12px;
-}
-
-.nav-branding .logo {
-    font-size: 1.8rem;
 }
 
 .nav-branding h2 {
@@ -791,7 +862,7 @@ select option {
 
 /* POS Sidebar: Category Menu */
 .pos-sidebar {
-    background: rgba(11, 13, 23, 0.5);
+    background: rgba(0, 0, 0, 0.28);
     border-right: 1px solid rgba(255, 255, 255, 0.06);
     padding: 20px;
     display: flex;
@@ -927,7 +998,9 @@ select option {
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-    background: rgba(7, 8, 14, 0.2);
+    /* El centro, un punto más claro que los flancos. Es donde se trabaja: si
+       las tres columnas valen lo mismo, la mirada no tiene dónde caer. */
+    background: rgba(255, 255, 255, 0.012);
 }
 
 .search-header {
@@ -964,6 +1037,7 @@ select option {
     background: var(--bg-elev-1);
     border: 1px solid var(--card-border);
     border-radius: 12px;
+    box-shadow: var(--luz-canto);
     padding: 14px;
     display: flex;
     flex-direction: column;
@@ -988,7 +1062,7 @@ select option {
     .product-card:hover:not(.out-of-stock) {
         transform: translateY(-4px);
         border-color: rgba(255, 255, 255, 0.18);
-        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
+        box-shadow: var(--luz-canto-fuerte), 0 12px 24px rgba(0, 0, 0, 0.45);
     }
 }
 
@@ -996,6 +1070,10 @@ select option {
    toque entró, antes incluso de mirar el carrito. */
 .product-card:active:not(.out-of-stock) {
     transform: scale(0.97);
+    /* Además de hundirse, se aclara. El hundimiento se ve de refilón; el
+       cambio de claridad se percibe aunque el dedo tape media tarjeta, que es
+       exactamente lo que pasa al tocarla. */
+    background: var(--bg-elev-2);
     transition-duration: 100ms;
 }
 
@@ -1161,7 +1239,7 @@ select option {
 
 /* POS Cart Panel */
 .pos-cart {
-    background: rgba(11, 13, 23, 0.75);
+    background: rgba(0, 0, 0, 0.28);
     border-left: 1px solid rgba(255, 255, 255, 0.08);
     padding: 24px;
     display: flex;
@@ -1222,6 +1300,7 @@ select option {
     background: var(--bg-elev-2);
     border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 14px;
+    box-shadow: var(--luz-canto);
     padding: 12px 12px 10px;
     display: flex;
     flex-direction: column;
@@ -1679,7 +1758,7 @@ select option {
 }
 
 .admin-sidebar {
-    background: rgba(11, 13, 23, 0.85);
+    background: rgba(0, 0, 0, 0.3);
     border-right: 1px solid rgba(255, 255, 255, 0.08);
     padding: 24px;
     display: flex;
@@ -1698,11 +1777,6 @@ select option {
     margin-bottom: 16px;
 }
 
-.admin-branding .logo {
-    font-size: 1.8rem;
-    color: #ec4899;
-}
-
 .admin-branding h2 {
     font-family: var(--font-heading);
     font-size: 1.15rem;
@@ -1717,7 +1791,9 @@ select option {
     padding: 2px 6px;
     border-radius: 4px;
     letter-spacing: 0.5px;
-    color: #ec4899;
+    /* Iba en magenta, del tema anterior. Era el único magenta que quedaba en
+       toda la aplicación y saltaba a la vista justo al lado del ámbar. */
+    color: var(--accent-color);
 }
 
 .admin-user-info {
@@ -1746,10 +1822,29 @@ select option {
     font-size: 0.95rem;
     font-weight: 500;
     text-align: left;
-    padding: 12px 16px;
+    padding: 12px 14px;
     border-radius: 12px;
     cursor: pointer;
+    /* En fila, con el icono en su propia columna. Antes el emoji iba pegado al
+       texto y en los apartados de nombre largo la segunda línea se metía
+       debajo del icono: los siete rótulos empezaban a alturas distintas y el
+       carril se leía torcido. */
+    display: flex;
+    align-items: center;
+    gap: 10px;
     transition: background 200ms ease, color 200ms ease, transform 160ms var(--ease-out);
+}
+
+.nav-icono {
+    flex: 0 0 22px;
+    font-size: 1.05rem;
+    line-height: 1;
+    text-align: center;
+}
+
+.nav-texto {
+    flex: 1;
+    min-width: 0;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1759,11 +1854,16 @@ select option {
     }
 }
 
+/* El apartado abierto. Lleva el ámbar en una barrita a la izquierda y no en
+   el fondo: pintar el fondo entero de color deja el rótulo peleándose con él,
+   y además el ámbar ya significa "esto se toca" en los botones de cobrar. Aquí
+   sólo tiene que decir dónde estás. */
 .nav-tab-btn.active {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.07);
     border: 1px solid rgba(255, 255, 255, 0.08);
     color: var(--text-primary);
     font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--accent-color);
 }
 
 .sidebar-footer {
@@ -1774,7 +1874,7 @@ select option {
 .admin-main {
     padding: 40px;
     overflow-y: auto;
-    background: rgba(7, 8, 14, 0.2);
+    background: rgba(255, 255, 255, 0.012);
 }
 
 .page-title {
@@ -1793,7 +1893,7 @@ select option {
 }
 
 .kpi-card {
-    background: rgba(18, 22, 35, 0.6);
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
     padding: 24px;
@@ -1884,7 +1984,7 @@ select option {
 
 /* Admin Tables */
 .table-container {
-    background: rgba(18, 22, 35, 0.6);
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
     overflow-x: auto;
@@ -1995,6 +2095,13 @@ select option {
     gap: 30px;
     justify-content: center;
     width: 100%;
+    /* La sombra de los dos papeles. Va aquí y no en .thermal-ticket: ahí
+       convive con la máscara del dentado y el papel se quedaba en blanco.
+       Sombra de contacto pegada al papel + sombra ambiente amplia; una sola
+       sombra grande deja el papel flotando sin apoyarse en nada. */
+    filter:
+        drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4))
+        drop-shadow(0 14px 28px rgba(0, 0, 0, 0.5));
 }
 
 /* Dos tickets de 32 columnas uno al lado del otro necesitan más de 1000 px.
@@ -2012,31 +2119,61 @@ select option {
     }
 }
 
+/* ---- El papel ----------------------------------------------------------
+   La vista previa imita al papel térmico de verdad, no a un rectángulo blanco:
+
+   - El corte de arriba y el de abajo son dentados, porque el rollo se arranca
+     contra la cuchilla de la impresora. Antes había dientes NEGROS pintados
+     encima del borde de abajo, que no es un corte: es una cenefa. Ahora el
+     recorte se hace con una máscara, así que el papel de verdad no está ahí y
+     por el hueco se ve el fondo.
+   - La sombra va con `drop-shadow` y no con `box-shadow` a propósito: una
+     sombra de caja quedaría recortada por la propia máscara y no se vería
+     nada. `drop-shadow` sigue la silueta, así que los picos proyectan sus
+     propios picos. Y va en `.tickets-row`, no aquí: puesto sobre el mismo
+     elemento que lleva la máscara, y estando todo dentro de un modal con
+     `backdrop-filter`, el papel se quedaba en blanco.
+   - El blanco es cálido y no puro. El papel térmico tira a crema, y un blanco
+     de pantalla puro sobre un tema oscuro deslumbra al mirarlo de cerca en una
+     barra a oscuras.
+   - Encima lleva una trama de rayas horizontales al 2 %: es el grano del
+     papel. No se ve; se nota si se quita. */
 .thermal-ticket {
-    background: #fdfdfd;
-    color: #111111;
+    --diente-ancho: 12px;
+    --diente-alto: 7px;
+
+    background:
+        repeating-linear-gradient(
+            180deg,
+            rgba(0, 0, 0, 0.018) 0 1px,
+            transparent 1px 3px
+        ),
+        linear-gradient(180deg, #fbfaf6 0%, #f4f2ec 100%);
+    color: #17150f;
     font-family: var(--font-mono);
     /* El ancho lo marca el propio contenido (32 o 48 columnas monoespaciadas),
        igual que el papel real. */
     width: max-content;
     max-width: 100%;
-    padding: 20px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    border-radius: 4px;
+    /* Relleno de sobra arriba y abajo: ahí va el dentado, y el texto no puede
+       quedar cortado por un pico. */
+    padding: calc(20px + var(--diente-alto)) 22px;
     font-size: 0.85rem;
     position: relative;
-    border-bottom: 6px dashed #fdfdfd;
-}
 
-.thermal-ticket::before {
-    content: '';
-    position: absolute;
-    bottom: -6px;
-    left: 0;
-    width: 100%;
-    height: 6px;
-    background: linear-gradient(-45deg, #111 3px, transparent 0), linear-gradient(45deg, #111 3px, transparent 0);
-    background-size: 6px 12px;
+    /* Dos hileras de dientes, arriba y abajo, y el cuerpo entero en medio. */
+    --dentado:
+        conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg)
+            bottom / var(--diente-ancho) var(--diente-alto) repeat-x,
+        conic-gradient(from 135deg at top, #0000, #000 1deg 89deg, #0000 90deg)
+            top / var(--diente-ancho) var(--diente-alto) repeat-x,
+        linear-gradient(#000 0 0)
+            center / 100% calc(100% - 2 * var(--diente-alto)) no-repeat;
+    -webkit-mask: var(--dentado);
+    mask: var(--dentado);
+
+    /* Sombra de contacto pegada al papel + sombra ambiente amplia. Una sola
+       sombra grande deja el papel flotando sin apoyarse en nada. */
 }
 
 .ticket-header {
@@ -2081,7 +2218,7 @@ select option {
 
 .ticket-notes-box {
     margin-top: 10px;
-    border: 1px solid #111111;
+    border: 1px solid #17150f;
     padding: 8px;
 }
 
@@ -2191,6 +2328,12 @@ select option {
    Antes: 350 ms con rebote para el PIN y 600 ms con 250 ms de retraso para
    los tickets. Casi un segundo hasta poder tocar, multiplicado por cientos
    de ventas. Ahora entran en 180-220 ms, sin rebote. */
+/* Quedan por si algo suelto las necesita, pero ya no las lleva ningún modal:
+   la entrada de lo que va dentro de un velo se decide más abajo, en un solo
+   sitio. Convivían mal —esta fija `opacity: 0` como estado de reposo y confía
+   en `forwards` para deshacerlo, así que cualquier regla que le cambie la
+   animación deja el elemento invisible para siempre— y eso fue exactamente lo
+   que pasó con la hoja de cobro. */
 .animate-pop {
     animation: popIn 180ms var(--ease-out) forwards;
 }
@@ -2199,6 +2342,76 @@ select option {
     animation: slideUp 220ms var(--ease-out) forwards;
     transform: translateY(12px);
     opacity: 0;
+}
+
+/* ==========================================================================
+   ENTRADAS
+   ==========================================================================
+   Nada aparece de golpe y nada aparece de la nada. Un elemento que sale
+   pegando un salto desde el vacío se lee como un fallo de pintado; uno que
+   sube dos dedos y se aclara se lee como algo que llega.
+
+   Todas por debajo de 300 ms y todas con curvas que arrancan rápido: lo que
+   hace que una tablet parezca ágil no es que la animación sea corta, es que
+   el movimiento empiece en el instante del toque.
+
+   Y ninguna lleva `backwards`. Ese relleno mantiene el fotograma inicial
+   —opacidad cero— mientras la animación no arranca, así que si por lo que sea
+   no arranca, el elemento no se ve nunca. En una caja eso es tocar "Cobrar" y
+   que no aparezca nada: el peor fallo posible, y silencioso. Sin `backwards`
+   el estado de reposo es el visible y la animación sólo lo adorna; si falla,
+   lo único que se pierde es el movimiento. */
+
+/* El velo del modal. Se atenúa y se desenfoca el fondo a la vez, en vez de
+   plantar una capa negra encima. */
+.modal-overlay:not(.hide) {
+    animation: velo-entra 180ms ease-out;
+}
+
+@keyframes velo-entra {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* Y el panel sube. Desde 0.98 y no desde más pequeño: un salto grande llama
+   la atención sobre la animación en lugar de sobre lo que hay que decidir. */
+.modal-overlay:not(.hide) > * {
+    animation: panel-entra 240ms var(--ease-panel);
+}
+
+@keyframes panel-entra {
+    from { opacity: 0; transform: translateY(14px) scale(0.98); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* Los dos papeles, uno detrás del otro. El escalonado es corto a propósito:
+   son 80 ms, lo justo para que se lean como dos hojas y no como un bloque.
+   Se mueven sólo con transform y opacidad porque su contenedor lleva la
+   sombra recortada, y animar cualquier otra cosa obligaría al navegador a
+   recalcular esa sombra en cada fotograma. */
+.tickets-row .thermal-ticket {
+    animation: papel-sale 260ms var(--ease-panel);
+}
+
+.tickets-row .thermal-ticket:nth-child(2) {
+    animation-delay: 80ms;
+}
+
+@keyframes papel-sale {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* Cambiar de pestaña en el panel. Es un cambio de sitio entero, así que se
+   nota si la pantalla nueva simplemente aparece: parece que se ha recargado.
+   Subiendo un poco se lee como que has ido a otra parte. */
+.tab-content:not(.hide) {
+    animation: vista-entra 240ms var(--ease-out);
+}
+
+@keyframes vista-entra {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
 }
 
 /* Escalonado corto: lo justo para que se lean como dos papeles y no como un
@@ -2240,7 +2453,7 @@ select option {
 }
 
 .comanda-mini-card {
-    background: rgba(18, 22, 35, 0.6);
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(15px);
     -webkit-backdrop-filter: blur(15px);
@@ -2378,7 +2591,7 @@ select option {
     gap: 12px;
     padding: 14px 18px;
     border-radius: 14px;
-    background: rgba(18, 22, 35, 0.92);
+    background: rgba(24, 24, 28, 0.94);
     border: 1px solid var(--card-border);
     border-left: 4px solid var(--info);
     box-shadow: var(--shadow-card);
@@ -2469,6 +2682,21 @@ select option {
     border-color: var(--accent-borde);
     color: var(--accent-color);
     font-size: 0.85rem;
+}
+
+/* El total del carrito, cuando cambia. Muy corto y muy pequeño —un 4,5 %—:
+   es un guiño, no un aviso. Con un salto mayor la cifra se vuelve un cartel
+   que parpadea en cada toque y se deja de mirar a los diez minutos.
+   Se anima sólo la escala, que va en la tarjeta gráfica y no obliga al
+   navegador a recolocar nada de la columna del carrito. */
+.total-late {
+    animation: total-late 260ms var(--ease-out);
+}
+
+@keyframes total-late {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.045); }
+    100% { transform: scale(1); }
 }
 
 /* El cambio a devolver da un salto al recalcularse: es lo último que mira el
@@ -3931,9 +4159,14 @@ select option {
    a entender lo que pasa y no marean. El barrido del esqueleto también se va,
    porque es movimiento constante. */
 @media (prefers-reduced-motion: reduce) {
+    .modal-overlay:not(.hide),
+    .modal-overlay:not(.hide) > *,
+    .tickets-row .thermal-ticket,
+    .tab-content:not(.hide),
     .toast,
     .toast-out,
     .change-pop,
+    .total-late,
     .primary-btn.is-busy,
     .product-card.enter,
     .product-card .cart-badge.bump,

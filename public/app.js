@@ -1502,7 +1502,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // Suma del carrito. Vive aparte porque ahora se recalcula sin repintar nada.
     function recalcularTotal() {
         const total = cart.reduce((s, item) => s + item.precio_venta * item.cantidad, 0);
-        document.getElementById('cart-total-amount').textContent = `${total.toFixed(2)} Bs.`;
+        const casilla = document.getElementById('cart-total-amount');
+        const texto = `${total.toFixed(2)} Bs.`;
+
+        // Un latido cuando la cifra cambia de verdad. El total es lo único de
+        // la pantalla que el cajero dice en voz alta, y con el dedo encima de
+        // la rejilla no siempre mira al carrito: el movimiento se ve de reojo
+        // y confirma que el toque entró. Si no cambia no se mueve, para que no
+        // se vuelva un tic que se deja de mirar.
+        if (casilla.textContent !== texto) {
+            casilla.textContent = texto;
+            casilla.classList.remove('total-late');
+            void casilla.offsetWidth;   // reinicia la animación
+            casilla.classList.add('total-late');
+        }
 
         const contador = document.getElementById('cart-count');
         contador.textContent = cart.length;

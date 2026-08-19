@@ -47,7 +47,7 @@
 
     <!-- 2. WAITER LOCK SECURITY MODAL -->
     <div id="waiter-lock-modal" class="modal-overlay hide">
-        <div class="glass-card modal-card animate-pop" style="position: relative;">
+        <div class="glass-card modal-card" style="position: relative;">
             <!-- Aquí había una ← que devolvía al login. Se quitó: la barra es
                  siempre la misma y el cajero no cambia durante el turno, así
                  que ese botón sólo servía para salirse por error y tener que
@@ -235,13 +235,13 @@
                     </button>
                 </div>
                 <nav class="admin-nav">
-                    <button class="nav-tab-btn active" data-tab="tab-dashboard">📊 Dashboard</button>
-                    <button class="nav-tab-btn" data-tab="tab-comandas">📝 Comandas / Anulaciones</button>
-                    <button class="nav-tab-btn" data-tab="tab-crear-producto">🛍️ Productos & Categorías</button>
-                    <button class="nav-tab-btn" data-tab="tab-crear-personal">👥 Personal</button>
-                    <button class="nav-tab-btn" data-tab="tab-stock">📦 Inventario</button>
-                    <button class="nav-tab-btn" data-tab="tab-inventario">📋 Reporte de Stock</button>
-                    <button class="nav-tab-btn" data-tab="tab-auditoria">🔍 Logs & Auditoría</button>
+                    <button class="nav-tab-btn active" data-tab="tab-dashboard"><span class="nav-icono">📊</span><span class="nav-texto">Dashboard</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-comandas"><span class="nav-icono">📝</span><span class="nav-texto">Comandas / Anulaciones</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-crear-producto"><span class="nav-icono">🛍️</span><span class="nav-texto">Productos &amp; Categorías</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-crear-personal"><span class="nav-icono">👥</span><span class="nav-texto">Personal</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-stock"><span class="nav-icono">📦</span><span class="nav-texto">Inventario</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-inventario"><span class="nav-icono">📋</span><span class="nav-texto">Reporte de Stock</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-auditoria"><span class="nav-icono">🔍</span><span class="nav-texto">Logs &amp; Auditoría</span></button>
                 </nav>
                 <div class="sidebar-footer">
                     <p class="version-sello">versión <span class="version-num">—</span></p>
@@ -800,12 +800,12 @@
 
             <div class="tickets-row">
                 <!-- Copia del Cajero -->
-                <div class="thermal-ticket animate-slide-up">
+                <div class="thermal-ticket">
                     <div class="ticket-body" id="ticket-cajero-body"></div>
                 </div>
 
                 <!-- Copia del Mesero / Preparación -->
-                <div class="thermal-ticket animate-slide-up delay-1">
+                <div class="thermal-ticket">
                     <div class="ticket-body" id="ticket-mesero-body"></div>
                 </div>
             </div>
@@ -885,7 +885,7 @@
         <div class="print-container">
             <h2 class="print-title">📦 Comanda de traspaso</h2>
             <div class="tickets-row">
-                <div class="thermal-ticket animate-slide-up">
+                <div class="thermal-ticket">
                     <div class="ticket-body" id="traspaso-body"></div>
                 </div>
             </div>
@@ -900,7 +900,7 @@
          que corregir: un precio mal tecleado, un nombre a medias. Sin esto
          había que borrar y volver a crear, y si ya se había vendido ni eso. -->
     <div id="editar-modal" class="modal-overlay hide">
-        <div class="glass-card modal-card animate-pop editar-card">
+        <div class="glass-card modal-card editar-card">
             <button type="button" id="editar-cerrar" class="modal-close-btn" title="Cancelar">←</button>
 
             <div class="modal-header">
@@ -942,7 +942,7 @@
          de pie, con la caja en una mano, y un formulario largo se rellena mal.
          Al confirmar sale la comanda para el bartender que entrega. -->
     <div id="mover-modal" class="modal-overlay hide">
-        <div class="glass-card modal-card animate-pop mover-card">
+        <div class="glass-card modal-card mover-card">
             <button type="button" id="mover-cerrar" class="modal-close-btn" title="Cancelar">←</button>
 
             <div class="modal-header">
@@ -1019,7 +1019,7 @@
          ponerla en el carrito, porque preguntarlo al cobrar sería tarde: el
          mesero ya se habría ido con el pedido tomado. -->
     <div id="acomp-modal" class="modal-overlay hide">
-        <div class="glass-card modal-card animate-pop acomp-card">
+        <div class="glass-card modal-card acomp-card">
             <button type="button" id="acomp-cancelar" class="modal-close-btn"
                     title="Cancelar y no añadir">←</button>
 
@@ -1051,7 +1051,7 @@
     </div>
 
     <div id="payment-modal" class="modal-overlay hide">
-        <div class="pay-sheet animate-slide-up">
+        <div class="pay-sheet">
             <button id="pay-close-btn" class="modal-close-btn" title="Volver al carrito">←</button>
 
             <p class="pay-caption">Total a cobrar</p>
@@ -1126,7 +1126,7 @@
 
     <!-- 6. VOID ORDER MODAL CONFIRMATION -->
     <div id="void-confirm-modal" class="modal-overlay hide">
-        <div class="glass-card modal-card animate-pop">
+        <div class="glass-card modal-card">
             <div class="modal-header">
                 <span class="security-icon">⚠️</span>
                 <h2>Confirmar Anulación</h2>

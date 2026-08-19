@@ -563,6 +563,48 @@ const check = (nombre, ok, extra) => {
     resRep.ok && buf.toString('latin1', 0, 5) === '%PDF-',
     (buf.length / 1024).toFixed(1) + ' KB');
 
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Ningún cuadro se queda invisible'));
+  // =======================================================================
+  // Un modal que no se ve es el peor fallo que puede tener una caja: el cajero
+  // toca "Cobrar", no pasa nada visible, vuelve a tocar, y no hay ningún aviso
+  // de que algo falló. Pasó de verdad: la hoja de cobro llevaba una clase de
+  // entrada cuyo estado de reposo es `opacity: 0`, confiando en que la
+  // animación lo deshiciera. En cuanto otra regla le cambió la animación, la
+  // hoja dejó de verse y siguió respondiendo a los toques desde el vacío.
+  //
+  // La regla es: lo que va dentro de un velo se ve por defecto, y la animación
+  // sólo lo adorna.
+  const RIESGO = ['animate-pop', 'animate-slide-up'];
+  const velos = [...window.document.querySelectorAll('.modal-overlay')];
+  check('Hay cuadros que revisar', velos.length > 0, velos.length + ' velos');
+
+  const culpables = [];
+  for (const velo of velos) {
+    for (const hijo of velo.children) {
+      for (const clase of RIESGO) {
+        if (hijo.classList.contains(clase)) {
+          culpables.push((velo.id || '(sin id)') + ' → .' + clase);
+        }
+      }
+    }
+  }
+  check('Ninguna hoja de modal se apoya en una animación para poder verse',
+    culpables.length === 0,
+    culpables.length ? culpables.join(', ') : 'la entrada la pone la hoja de estilos, sin opacidad cero de reposo');
+
+  // Y ninguno nace abierto. Se mira el HTML tal como lo sirve el servidor, no
+  // el de ahora: a estas alturas de la prueba hay una sesión empezada y el
+  // cuadro del PIN está abierto con toda la razón.
+  const htmlCrudo = await (await fetch(URL_BASE + '/index.html')).text();
+  const naceAbierto = [...htmlCrudo.matchAll(/<div([^>]*class="[^"]*modal-overlay[^"]*"[^>]*)>/g)]
+    .map(m => m[1])
+    .filter(attr => !/class="[^"]*\bhide\b/.test(attr))
+    .map(attr => (attr.match(/id="([^"]+)"/) || [, '(sin id)'])[1]);
+  check('Y ninguno nace abierto en el HTML',
+    naceAbierto.length === 0,
+    naceAbierto.length ? naceAbierto.join(', ') : 'todos con .hide puesta');
+
   console.log('');
   console.log(fallos === 0
     ? '  ' + C.ok('Todo correcto en la interfaz.') + '\n'

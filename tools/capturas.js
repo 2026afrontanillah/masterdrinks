@@ -260,7 +260,11 @@ function crearPaginaPiloto() {
       '--user-data-dir=' + path.join(require('os').tmpdir(), 'md-capturas'),
       // 9 s se quedaban cortos con el catálogo entero: la captura salía a
       // medias de la cascada de entrada y parecía que sólo había un producto.
-      '--virtual-time-budget=' + arg('tiempo', '20000'),
+      // Y 40 s tampoco bastan desde que los cuadros entran animados: el reloj
+      // virtual corre mucho más rápido que la ida y vuelta de verdad al
+      // servidor, así que el modal se abría cuando ya casi no quedaba tiempo y
+      // la foto lo pillaba a medio aparecer.
+      '--virtual-time-budget=' + arg('tiempo', '60000'),
       '--window-size=' + ANCHO + ',' + ALTO,
       '--screenshot=' + destino,
       URL + '/_shot.html?paso=' + paso
