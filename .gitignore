@@ -61,3 +61,4 @@ respaldos/
 
 # Copia desechable de la herramienta de medición
 pos_evento.medir.db*
+pos_evento.dom.db*
