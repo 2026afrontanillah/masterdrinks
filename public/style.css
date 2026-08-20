@@ -3042,6 +3042,15 @@ select option {
     overflow-wrap: anywhere;
 }
 
+/* Renglón entero para un texto largo. Salta de línea en vez de truncarse:
+   truncado se pierde justo el final, que es lo que se estaba comprobando. */
+.lista-nota {
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
 .lista-detalle {
     font-size: 0.8rem;
     color: var(--text-muted);
@@ -4180,6 +4189,217 @@ select option {
     .quick-cash-btn:active,
     .pay-tab:active {
         transform: none;
+    }
+}
+
+/* ==========================================================================
+   PROMOCIONES
+   ==========================================================================
+   Un paquete de productos a precio cerrado. En la rejilla tiene que
+   distinguirse de un producto a la primera —si no, el cajero toca un combo
+   creyendo que es una cerveza— pero sin gritar: sigue siendo una tarjeta más
+   entre veinte y compite por el mismo dedo. */
+
+.promo-card {
+    border-color: var(--accent-borde);
+    /* Un fondo ámbar apenas insinuado, al 4 %. Con más, la fila de combos se
+       convierte en una barra de color que se lleva la vista cada vez que el
+       cajero busca una cerveza. */
+    background:
+        linear-gradient(180deg, rgba(224, 163, 62, 0.05), rgba(224, 163, 62, 0.02)),
+        var(--bg-elev-1);
+}
+
+.promo-sello {
+    align-self: flex-start;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    background: var(--accent-color);
+    border-radius: 5px;
+    padding: 2px 7px;
+}
+
+/* Lo que lleva dentro, en pequeño. El cajero necesita poder comprobarlo sin
+   abrir nada: la mitad de las veces el cliente pregunta "¿y qué trae?". */
+.promo-dentro {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.76rem;
+    line-height: 1.25;
+    color: var(--text-secondary);
+    /* Tres renglones como mucho: un balde de seis cosas no puede estirar su
+       tarjeta al doble que las de al lado y descuadrar la rejilla. */
+    max-height: 3.9em;
+    overflow: hidden;
+}
+
+/* El precio de antes, tachado. Es lo que convierte un número en una oferta. */
+.promo-ahorro {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-decoration: line-through;
+    white-space: nowrap;
+}
+
+/* El pie de la tarjeta de combo salta de línea si no caben las dos cifras: el
+   precio de antes se quedaba en "antes 71.C", que no es un número. */
+.promo-card .card-foot {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+}
+
+/* La misma marca en el carrito, para que la línea se lea como paquete y no
+   como un producto con un nombre raro. */
+.cart-promo-sello {
+    display: inline-block;
+    font-size: 0.58rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    background: var(--accent-color);
+    border-radius: 4px;
+    padding: 1px 5px;
+    vertical-align: middle;
+}
+
+/* ---- El formulario del panel ------------------------------------------- */
+.promo-anadir {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    margin-bottom: 10px;
+}
+
+.promo-anadir select {
+    flex: 1;
+    min-width: 0;
+}
+
+.promo-anadir input {
+    width: 72px;
+    flex-shrink: 0;
+    text-align: center;
+}
+
+.promo-anadir button {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.promo-contenido {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    border: 1px dashed var(--card-border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.015);
+    min-height: 60px;
+}
+
+/* El nombre arriba con todo el ancho, y debajo el importe y los botones. En
+   una sola fila, dentro de una columna estrecha, "Chivas Regal 12 años" se
+   partía en tres renglones y la fila crecía al triple. */
+.promo-linea {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-height: var(--touch);
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.promo-linea:last-child {
+    border-bottom: none;
+}
+
+.promo-linea-nombre {
+    flex: 1 1 100%;
+    min-width: 0;
+    font-size: 0.88rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.promo-linea-precio {
+    flex: 1;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.promo-linea-control {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.promo-linea-cant {
+    min-width: 24px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.promo-vacio {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 12px 4px;
+}
+
+/* La cuenta mientras se teclea el precio. Va en verde cuando hay ahorro y en
+   rojo cuando el "combo" sale más caro que comprarlo suelto, que es el error
+   que de verdad se comete: se suman mal tres precios de cabeza y el paquete
+   acaba regalando dinero al revés. */
+.promo-cuentas {
+    margin: 8px 0 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    min-height: 1.2em;
+}
+
+.promo-cuentas.bien {
+    color: var(--success);
+}
+
+.promo-cuentas.mal {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.promo-acciones {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.form-pista {
+    margin: -6px 0 18px;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+
+@media (max-width: 700px) {
+    .promo-anadir {
+        flex-wrap: wrap;
+    }
+
+    .promo-anadir select {
+        flex: 1 1 100%;
     }
 }
 

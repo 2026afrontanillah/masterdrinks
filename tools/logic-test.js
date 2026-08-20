@@ -51,6 +51,9 @@ async function post(ruta, cuerpo, metodo) {
   return { status: res.status, json };
 }
 const get = async ruta => (await fetch(URL + ruta)).json();
+// El mismo redondeo que usa el servidor, para comparar importes sin arrastrar
+// los céntimos que inventa el coma flotante.
+const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 // --------------------------------------------------------------------------
 function prepararBase() {
@@ -1112,6 +1115,200 @@ const leer = sql => {
     stockDe(refresco.id_producto) === stockMixto - 2,
     stockMixto + ' -> ' + stockDe(refresco.id_producto));
 
+
+// =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Promociones (paquetes a precio cerrado)'));
+  // =======================================================================
+  // Una promoción es un conjunto de productos a un precio cerrado: "1 whisky y
+  // 2 cervezas por 60". No es un producto: no tiene stock propio. Al venderla
+  // salen de la nevera los que lleva dentro, y el precio del paquete se reparte
+  // entre ellos para que el reporte de cierre siga sabiendo cuánto se vendió de
+  // cada cosa sin enterarse de que existen los combos.
+  const caro = leer(`SELECT id_producto, nombre, precio_venta FROM producto
+                     WHERE activo = 1 AND stock_actual > 40
+                     ORDER BY precio_venta DESC LIMIT 1`)[0];
+  const barato = leer(`SELECT id_producto, nombre, precio_venta FROM producto
+                       WHERE activo = 1 AND stock_actual > 40 AND id_producto <> ${caro.id_producto}
+                       ORDER BY precio_venta ASC LIMIT 1`)[0];
+
+  const sueltoPaquete = round2(Number(caro.precio_venta) + Number(barato.precio_venta) * 2);
+  const precioPaquete = round2(sueltoPaquete - 11);
+
+  let r2 = await post('/api/admin/promociones', {
+    nombre: 'Combo de prueba', descripcion: 'uno caro y dos baratos',
+    precio: precioPaquete, id_admin: 1,
+    contenido: [
+      { id_producto: caro.id_producto, cantidad: 1 },
+      { id_producto: barato.id_producto, cantidad: 2 }
+    ]
+  });
+  check('Se puede crear una promoción con varios productos',
+    r2.status === 200 && r2.json.success, r2.json.message);
+  const idPromo = r2.json.id_promocion;
+
+  const listado = await get('/api/admin/promociones');
+  const laPromo = (listado.promociones || []).find(p => p.id_promocion === idPromo);
+  check('El panel la lista con lo que lleva dentro',
+    laPromo && laPromo.contenido.length === 2,
+    laPromo ? laPromo.contenido.map(c => c.cantidad + ' x ' + c.nombre).join(' + ') : 'no está');
+  check('Y calcula sola cuánto se ahorra el cliente',
+    laPromo && Math.abs(laPromo.precio_suelto - sueltoPaquete) < 0.005 &&
+    Math.abs(laPromo.ahorro - 11) < 0.005,
+    laPromo ? 'sueltos ' + laPromo.precio_suelto + ', paquete ' + laPromo.precio + ', ahorro ' + laPromo.ahorro : '');
+
+  // -- rechazos al crearla --------------------------------------------------
+  for (const [malo, motivo] of [
+    [{ nombre: '', precio: 50, contenido: [{ id_producto: caro.id_producto, cantidad: 1 }] }, 'sin nombre'],
+    [{ nombre: 'X', precio: 0, contenido: [{ id_producto: caro.id_producto, cantidad: 1 }] }, 'precio cero'],
+    [{ nombre: 'X', precio: -5, contenido: [{ id_producto: caro.id_producto, cantidad: 1 }] }, 'precio negativo'],
+    [{ nombre: 'X', precio: 50, contenido: [] }, 'sin productos'],
+    [{ nombre: 'X', precio: 50, contenido: [{ id_producto: caro.id_producto, cantidad: 0 }] }, 'cantidad cero'],
+    [{ nombre: 'X', precio: 50, contenido: [{ id_producto: 999999, cantidad: 1 }] }, 'producto inexistente']
+  ]) {
+    r2 = await post('/api/admin/promociones', Object.assign({ id_admin: 1 }, malo));
+    check('Una promoción ' + motivo + ' se rechaza',
+      r2.status === 400 && !r2.json.success, r2.json.message);
+  }
+  check('Y ninguna de esas se creó',
+    leer("SELECT id_promocion FROM promocion WHERE nombre = 'X'").length === 0);
+
+  // -- la venta -------------------------------------------------------------
+  const stockCaroAntes = stockDe(caro.id_producto);
+  const stockBaratoAntes = stockDe(barato.id_producto);
+
+  const ventaPromo = await post('/api/comanda', Object.assign({}, base, {
+    items: [],
+    promociones: [{ id_promocion: idPromo, cantidad: 2 }],
+    total: round2(precioPaquete * 2),
+    metodos_pago: [{ id_metodo_pago: 1, monto: round2(precioPaquete * 2) }],
+    clave_idempotencia: 'promo-' + Date.now()
+  }));
+  check('Se puede cobrar una comanda que sólo lleva promociones',
+    ventaPromo.status === 200 && ventaPromo.json.success, ventaPromo.json.message);
+  check('Y el total es el del paquete, no el de los productos sueltos',
+    Math.abs(ventaPromo.json.total - round2(precioPaquete * 2)) < 0.005,
+    'cobró ' + ventaPromo.json.total + ', sueltos habrían sido ' + round2(sueltoPaquete * 2));
+
+  check('Sale de la nevera lo que el paquete lleva dentro, no un "combo"',
+    stockDe(caro.id_producto) === stockCaroAntes - 2 &&
+    stockDe(barato.id_producto) === stockBaratoAntes - 4,
+    caro.nombre + ': ' + stockCaroAntes + '->' + stockDe(caro.id_producto) + ' · ' +
+    barato.nombre + ': ' + stockBaratoAntes + '->' + stockDe(barato.id_producto));
+
+  const idComPromo = ventaPromo.json.id_comanda;
+  const lineasPromo = leer(`SELECT id_producto, cantidad, precio_unitario, subtotal, id_promocion
+                            FROM detalle_comanda WHERE id_comanda = ${idComPromo}`);
+  check('Las líneas guardadas son productos de verdad, no un paquete abstracto',
+    lineasPromo.length === 2 && lineasPromo.every(l => l.id_producto > 0),
+    lineasPromo.length + ' líneas');
+  check('Y cada una sabe de qué promoción salió',
+    lineasPromo.every(l => l.id_promocion === idPromo));
+  check('La suma de las líneas es exactamente el total de la comanda',
+    Math.abs(round2(lineasPromo.reduce((s, l) => s + l.subtotal, 0)) - ventaPromo.json.total) < 0.005,
+    'suma ' + round2(lineasPromo.reduce((s, l) => s + l.subtotal, 0)) + ' vs total ' + ventaPromo.json.total);
+  check('Hay un movimiento de stock por cada producto del paquete',
+    leer(`SELECT id_movimiento FROM movimiento_stock
+          WHERE motivo = 'Venta comanda #${idComPromo}'`).length === 2);
+
+  check('El ticket recibe el paquete entero, para imprimirlo como tal',
+    (ventaPromo.json.promociones || []).length === 1 &&
+    ventaPromo.json.promociones[0].cantidad === 2 &&
+    ventaPromo.json.promociones[0].contenido.length === 2,
+    JSON.stringify(ventaPromo.json.promociones || []));
+
+  // -- mezclada con venta suelta -------------------------------------------
+  const stockCaro2 = stockDe(caro.id_producto);
+  const mezcla = await post('/api/comanda', Object.assign({}, base, {
+    items: [{ id_producto: caro.id_producto, cantidad: 1, precio_unitario: 1, subtotal: 1 }],
+    promociones: [{ id_promocion: idPromo, cantidad: 1 }],
+    total: 1,
+    metodos_pago: [{ id_metodo_pago: 1, monto: round2(precioPaquete + Number(caro.precio_venta)) }],
+    clave_idempotencia: 'mezcla-' + Date.now()
+  }));
+  check('Se puede mezclar promoción y venta suelta en la misma comanda',
+    mezcla.status === 200 && mezcla.json.success, mezcla.json.message);
+  check('Y el total suma el paquete más el producto suelto a su precio normal',
+    Math.abs(mezcla.json.total - round2(precioPaquete + Number(caro.precio_venta))) < 0.005,
+    'cobró ' + mezcla.json.total);
+  check('El mismo producto, dentro y fuera del paquete, sale dos veces de la nevera',
+    stockDe(caro.id_producto) === stockCaro2 - 2,
+    stockCaro2 + ' -> ' + stockDe(caro.id_producto));
+
+  // -- rechazos al venderla -------------------------------------------------
+  const rechazos = [
+    [{ id_promocion: 999999, cantidad: 1 }, 'que no existe'],
+    [{ id_promocion: idPromo, cantidad: 0 }, 'con cantidad cero'],
+    [{ id_promocion: idPromo, cantidad: -3 }, 'con cantidad negativa'],
+    [{ id_promocion: idPromo, cantidad: 1.5 }, 'con media unidad']
+  ];
+  for (const [promo, motivo] of rechazos) {
+    const antesRech = stockDe(caro.id_producto);
+    r2 = await post('/api/comanda', Object.assign({}, base, {
+      items: [], promociones: [promo], total: 10,
+      metodos_pago: [{ id_metodo_pago: 1, monto: 500 }],
+      clave_idempotencia: 'rech-' + Date.now() + Math.random()
+    }));
+    check('Una promoción ' + motivo + ' se rechaza',
+      r2.status >= 400 && !r2.json.success, r2.json.message);
+    check('  y no toca el stock', stockDe(caro.id_producto) === antesRech);
+  }
+
+  // -- apagarla la saca de la caja -----------------------------------------
+  r2 = await post('/api/admin/promociones/' + idPromo, {
+    nombre: 'Combo de prueba', precio: precioPaquete, activa: false, id_admin: 1
+  }, 'PUT');
+  check('Se puede apagar una promoción sin borrarla',
+    r2.status === 200 && r2.json.success, r2.json.message);
+
+  const catSinPromo = await get('/api/productos');
+  check('Apagada, ya no le llega a la caja',
+    !(catSinPromo.promociones || []).some(p => p.id_promocion === idPromo),
+    (catSinPromo.promociones || []).length + ' promociones activas');
+
+  r2 = await post('/api/comanda', Object.assign({}, base, {
+    items: [], promociones: [{ id_promocion: idPromo, cantidad: 1 }], total: 10,
+    metodos_pago: [{ id_metodo_pago: 1, monto: 500 }],
+    clave_idempotencia: 'apagada-' + Date.now()
+  }));
+  check('Y si alguien la pide igualmente, se rechaza',
+    r2.status >= 400 && !r2.json.success, r2.json.message);
+
+  // -- borrar una que ya se vendió ------------------------------------------
+  r2 = await del('/api/admin/promociones/' + idPromo);
+  check('Una promoción ya vendida se apaga, no se borra',
+    r2.status === 200 && r2.json.success && r2.json.retirada === true, r2.json.message);
+  check('Y sigue en la base, para que el historial cuadre',
+    leer(`SELECT id_promocion FROM promocion WHERE id_promocion = ${idPromo}`).length === 1);
+
+  // -- borrar una que no se vendió nunca ------------------------------------
+  const sinVender = await post('/api/admin/promociones', {
+    nombre: 'Combo que nadie compró', precio: 50, id_admin: 1,
+    contenido: [{ id_producto: barato.id_producto, cantidad: 3 }]
+  });
+  r2 = await del('/api/admin/promociones/' + sinVender.json.id_promocion);
+  check('Una que nunca se vendió sí se borra del todo',
+    r2.status === 200 && r2.json.success && !r2.json.retirada,
+    r2.json.message);
+  check('Y se lleva su contenido con ella',
+    leer(`SELECT id_detalle_promocion FROM promocion_detalle
+          WHERE id_promocion = ${sinVender.json.id_promocion}`).length === 0);
+
+  // -- el cierre ------------------------------------------------------------
+  const cierrePromo = await get('/api/admin/reporte');
+  const filaCaro = (cierrePromo.productos || []).find(p => p.producto === caro.nombre);
+  check('El reporte de cierre cuenta las unidades vendidas dentro de paquetes',
+    filaCaro && filaCaro.unidades >= 3,
+    filaCaro ? filaCaro.unidades + ' unidades de ' + caro.nombre : 'no aparece');
+  check('Y les atribuye su parte del importe, sin dejarlo fuera del reporte',
+    filaCaro && filaCaro.importe > 0,
+    filaCaro ? filaCaro.importe + ' Bs.' : '');
+
+  const auditPromo = leer(`SELECT accion FROM auditoria_admin
+                           WHERE entidad = 'promocion'`);
+  check('Crear, editar y apagar promociones queda en auditoría',
+    ['CREAR_PROMOCION', 'EDITAR_PROMOCION', 'APAGAR_PROMOCION']
+      .every(a => auditPromo.some(x => x.accion === a)),
+    auditPromo.map(a => a.accion).join(', '));
 
   // =======================================================================
   console.log(C.tit(String.fromCharCode(10) + '  Mover stock e ingresar mercancía'));

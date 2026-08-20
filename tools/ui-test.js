@@ -70,6 +70,19 @@ const check = (nombre, ok, extra) => {
     try { arriba = (await fetch(URL_BASE + '/api/productos')).ok; } catch (e) { /* aún no */ }
     if (!arriba) await esperar(250);
   }
+
+  // Una promoción conocida, para poder comprobar la caja con cifras fijas.
+  // Se siembra DESPUÉS de arrancar el servidor: es él quien crea las tablas.
+  if (arriba) {
+    const sem = new DatabaseSync(BASE);
+    sem.exec('DELETE FROM promocion_detalle');
+    sem.exec('DELETE FROM promocion');
+    sem.exec(`INSERT INTO promocion (id_promocion, nombre, descripcion, precio, activa)
+              VALUES (1, 'Combo Amigos', 'Un whisky y dos cervezas', 60, 1)`);
+    sem.exec(`INSERT INTO promocion_detalle (id_promocion, id_producto, cantidad)
+              VALUES (1, 8, 1), (1, 1, 2)`);
+    sem.close();
+  }
   if (!arriba) {
     console.error(C.mal('  El servidor no arrancó:\n') + registro.join(''));
     servidor.kill();
@@ -155,12 +168,17 @@ const check = (nombre, ok, extra) => {
   // =======================================================================
   console.log(C.tit('\n  Rejilla de productos'));
   // =======================================================================
-  const tarjetas = window.document.querySelectorAll('.product-card:not(.out-of-stock)');
+  // [data-id] y no `.product-card` a secas: los combos comparten esa clase
+  // —son otra tarjeta más de la misma rejilla y se pintan igual— pero no son
+  // productos. No tienen id de producto ni existencias propias, así que
+  // mezclarlos aquí hacía que la primera tarjeta fuera un combo y la prueba se
+  // rompiera al buscarle un stock que no tiene.
+  const tarjetas = window.document.querySelectorAll('.product-card[data-id]:not(.out-of-stock)');
   // Todas las tarjetas, agotadas incluidas. Se guarda aparte porque más abajo
   // hay que comparar catálogo completo con catálogo completo: si la base tiene
   // algún producto agotado, mezclar ambas cuentas hace fallar la prueba sin
   // que nada esté roto.
-  const totalTarjetas = window.document.querySelectorAll('.product-card').length;
+  const totalTarjetas = window.document.querySelectorAll('.product-card[data-id]').length;
   check('Se pintó el catálogo', tarjetas.length > 0,
     tarjetas.length + ' con stock de ' + totalTarjetas + ' en total');
   check('Cada tarjeta lleva su id, para refrescarla sola',
@@ -248,6 +266,102 @@ const check = (nombre, ok, extra) => {
     id('cart-total-amount').textContent === totalAntes,
     'si latiera en cada repintado sería un tic y se dejaría de mirar');
 
+// =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  Promociones en la caja'));
+  // =======================================================================
+  // Un paquete se toca como cualquier tarjeta, pero por dentro no es un
+  // producto: no tiene id_producto ni stock propio. Eso rompió una cosa que no
+  // daba ningún error y no se veía hasta doce segundos después, así que aquí
+  // se comprueba entera.
+  // El carrito se vacía primero: las pruebas de arriba lo dejan cargado, y lo
+  // que se mide aquí son las cifras del paquete, no la suma de todo.
+  click(id('clear-cart'));
+  await esperar(200);
+
+  const promoCard = $('.promo-card');
+  check('El combo sale en la rejilla, con su sello', !!promoCard &&
+    !!promoCard.querySelector('.promo-sello'),
+    promoCard ? promoCard.querySelector('h3').textContent : 'no está');
+  check('Y enseña lo que lleva dentro, sin tener que abrirlo',
+    promoCard && promoCard.querySelectorAll('.promo-dentro li').length >= 2,
+    promoCard ? [...promoCard.querySelectorAll('.promo-dentro li')]
+      .map(li => li.textContent).join(' + ') : '');
+
+  const stockAntesPromo = {};
+  [...window.document.querySelectorAll('.product-card[data-id]')].forEach(c => {
+    stockAntesPromo[c.dataset.id] = c.querySelector('.stock').textContent;
+  });
+
+  click(promoCard);
+  await esperar(300);
+
+  const lineaPromo = $('#cart-items .cart-item[data-clave^="promo:"]');
+  check('Al tocarlo entra en el carrito como una línea',
+    !!lineaPromo && !!lineaPromo.querySelector('.cart-promo-sello'),
+    lineaPromo ? lineaPromo.querySelector('h4').textContent.trim() : 'el carrito sigue vacío');
+  check('Con su precio cerrado, no con el de los productos sueltos',
+    id('cart-total-amount').textContent.startsWith('60.00'),
+    id('cart-total-amount').textContent);
+  check('Y debajo, lo que hay que servir',
+    lineaPromo && lineaPromo.querySelectorAll('.cart-acomp').length >= 2,
+    lineaPromo ? [...lineaPromo.querySelectorAll('.cart-acomp-nombre')]
+      .map(n => n.textContent).join(' + ') : '');
+
+  // Lo que de verdad se rompió: el paquete reserva el stock de su contenido.
+  const cardWhisky = $('.product-card[data-id="8"]');
+  check('El combo baja las existencias de lo que lleva dentro',
+    cardWhisky && cardWhisky.querySelector('.stock').textContent !== stockAntesPromo['8'],
+    'Johnnie Walker: ' + stockAntesPromo['8'] + ' -> ' +
+    (cardWhisky ? cardWhisky.querySelector('.stock').textContent : '?'));
+
+  // ---- el sondeo de stock no puede vaciar el carrito ---------------------
+  // Esto es el centinela del fallo de verdad: refrescarStock llama a
+  // avisarSiFaltaStock, que buscaba el id_producto de cada línea. Un paquete no
+  // tiene, así que salía "quedan 0" y BORRABA el combo del carrito. Sin error,
+  // sin aviso, cada doce segundos. El cajero armaba el pedido, se giraba a
+  // servir, y al volver el carrito estaba vacío.
+  const antesDelSondeo = window.document.querySelectorAll('#cart-items .cart-item').length;
+  const totalAntesSondeo = id('cart-total-amount').textContent;
+
+  window.document.dispatchEvent(new window.Event('visibilitychange'));
+  await esperar(700);
+
+  check('El sondeo de stock NO se lleva el combo por delante',
+    window.document.querySelectorAll('#cart-items .cart-item').length === antesDelSondeo,
+    antesDelSondeo + ' líneas antes, ' +
+    window.document.querySelectorAll('#cart-items .cart-item').length + ' después');
+  check('Y el total sigue siendo el mismo',
+    id('cart-total-amount').textContent === totalAntesSondeo,
+    totalAntesSondeo + ' -> ' + id('cart-total-amount').textContent);
+
+  // ---- sumar y restar ----------------------------------------------------
+  const filaPromo = () => $('#cart-items .cart-item[data-clave^="promo:"]');
+
+  click(filaPromo().querySelector('.increase-btn'));
+  await esperar(250);
+  check('El "+" añade otro paquete entero',
+    id('cart-total-amount').textContent.startsWith('120.00'),
+    id('cart-total-amount').textContent);
+
+  click(filaPromo().querySelector('.decrease-btn'));
+  await esperar(250);
+  check('Y el "−" quita uno',
+    id('cart-total-amount').textContent.startsWith('60.00'),
+    id('cart-total-amount').textContent);
+
+  click(filaPromo().querySelector('.remove-item-btn'));
+  await esperar(250);
+  check('Quitarlo deja el carrito vacío y devuelve el stock',
+    window.document.querySelectorAll('#cart-items .cart-item').length === 0 &&
+    $('.product-card[data-id="8"]').querySelector('.stock').textContent === stockAntesPromo['8'],
+    'quedan ' + window.document.querySelectorAll('#cart-items .cart-item').length + ' líneas');
+
+  // Se deja el pedido como estaba, que las pruebas de abajo cuentan con él.
+  click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
+  click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
+  click(window.document.querySelector(`.product-card[data-id="${idSeg}"]`));
+  await esperar(150);
+
   // Salir sin cobrar tiene que dejar la caja en blanco. Si no, el siguiente
   // mesero entra con su PIN y se encuentra el pedido a medias del anterior.
   const antesDeSalir = id('cart-count').textContent;
@@ -300,8 +414,8 @@ const check = (nombre, ok, extra) => {
   await esperar(60);
   check('La ✕ limpia y devuelve el catálogo entero',
     id('product-search').value === '' &&
-    window.document.querySelectorAll('.product-card').length === totalTarjetas,
-    window.document.querySelectorAll('.product-card').length + ' de ' + totalTarjetas);
+    window.document.querySelectorAll('.product-card[data-id]').length === totalTarjetas,
+    window.document.querySelectorAll('.product-card[data-id]').length + ' de ' + totalTarjetas);
   check('El carrito sobrevive al filtrado', id('cart-count').textContent === '2');
 
   const total = parseFloat(id('cart-total-amount').textContent);

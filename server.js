@@ -223,6 +223,55 @@ function registrarAuditoria(id_admin, accion, entidad, id_registro, detalle) {
 // out of the totals that end up printed on the ticket.
 const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
+/**
+ * Reparte el precio de un paquete entre los productos que lleva dentro.
+ *
+ * Un combo "1 whisky y 2 cervezas por 60" no se guarda como una línea suelta
+ * de 60 sin producto: se guarda como las tres bebidas que de verdad salieron,
+ * cada una con su parte del precio. Así el reporte de cierre, que agrupa por
+ * producto y suma subtotales, sigue diciendo la verdad sobre cuánto se vendió
+ * de cada cosa, y el stock cuadra sin ningún caso especial.
+ *
+ * El reparto es proporcional al precio de catálogo: la bebida cara absorbe más
+ * rebaja que la barata, que es lo que espera cualquiera que mire el ticket.
+ *
+ * Los céntimos que sobran al redondear van a la línea más cara, y van al
+ * SUBTOTAL, no al precio unitario. Es deliberado: la suma de los subtotales
+ * tiene que dar el precio del paquete EXACTO —hay una prueba que lo comprueba
+ * en cada venta—, y forzar el cuadre repartiendo céntimos entre precios
+ * unitarios de dos decimales no siempre tiene solución. En el ticket no se ve:
+ * el paquete se imprime con su nombre y su precio, no con la aritmética.
+ *
+ * @param {Array<{idProd:number, qty:number, precioCatalogo:number}>} partes
+ * @param {number} precioPaquete
+ * @returns {Array<{idProd:number, qty:number, precio:number, subtotal:number}>}
+ */
+function repartirPrecioPaquete(partes, precioPaquete) {
+  const suelto = partes.reduce((s, p) => s + p.precioCatalogo * p.qty, 0);
+  if (!(suelto > 0)) {
+    throw new BusinessError('La promoción no tiene productos con precio.');
+  }
+  const factor = precioPaquete / suelto;
+
+  const lineas = partes.map(p => {
+    const precio = round2(p.precioCatalogo * factor);
+    return { idProd: p.idProd, qty: p.qty, precio, subtotal: round2(precio * p.qty) };
+  });
+
+  // El descuadre no pasa de unos céntimos, pero tiene que desaparecer: si no,
+  // el total de la comanda no sería la suma de sus líneas.
+  const sumado = round2(lineas.reduce((s, l) => s + l.subtotal, 0));
+  const sobra = round2(precioPaquete - sumado);
+  if (sobra !== 0) {
+    let masCara = 0;
+    for (let i = 1; i < lineas.length; i++) {
+      if (lineas[i].subtotal > lineas[masCara].subtotal) masCara = i;
+    }
+    lineas[masCara].subtotal = round2(lineas[masCara].subtotal + sobra);
+  }
+  return lineas;
+}
+
 // Meseros authenticate with a short PIN only. 'servidor' (default) accepts any active
 // waiter in this database: every cashier and every tablet hanging off this server is
 // the same bar, so splitting them by till only locks out waiters who happen to be
@@ -804,6 +853,34 @@ function initializeDatabase() {
       FOREIGN KEY(id_producto) REFERENCES producto(id_producto)
     )`);
 
+    // ---- Promociones ----------------------------------------------------
+    //
+    // Una promoción es un PAQUETE: un conjunto de productos con sus cantidades
+    // a un precio cerrado. "1 whisky y 2 cervezas por 60" o "balde de 6
+    // Paceñas por 90" son la misma cosa con distinto contenido.
+    //
+    // No es un producto. No tiene stock propio ni se le hace inventario: al
+    // venderla salen de la nevera los productos que lleva dentro, uno por uno.
+    // Es sólo una regla de precio con nombre.
+    db.run(`CREATE TABLE IF NOT EXISTS promocion (
+      id_promocion INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT,
+      descripcion TEXT,
+      precio REAL,
+      activa INTEGER DEFAULT 1,
+      creada_por_admin INTEGER,
+      fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS promocion_detalle (
+      id_detalle_promocion INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_promocion INTEGER,
+      id_producto INTEGER,
+      cantidad INTEGER,
+      FOREIGN KEY(id_promocion) REFERENCES promocion(id_promocion) ON DELETE CASCADE,
+      FOREIGN KEY(id_producto) REFERENCES producto(id_producto)
+    )`);
+
     db.run(`CREATE TABLE IF NOT EXISTS auditoria_admin (
       id_auditoria INTEGER PRIMARY KEY AUTOINCREMENT,
       id_admin INTEGER,
@@ -861,6 +938,13 @@ function initializeDatabase() {
     // ticket y en el cierre saldrían como dos productos sueltos y no se sabría
     // cuál iba con cuál ni por qué uno vale cero.
     ensureColumn('detalle_comanda', 'id_detalle_padre', 'INTEGER');
+
+    // De qué promoción salió esta línea. La línea sigue siendo un producto de
+    // verdad con su precio de verdad —el del paquete, repartido—, así que el
+    // stock, el reporte por producto y el cierre siguen cuadrando solos. Esto
+    // sólo sirve para volver a juntarlas en el ticket y poder imprimir "Combo
+    // Amigos 60.00" en vez de tres líneas con precios raros.
+    ensureColumn('detalle_comanda', 'id_promocion', 'INTEGER');
 
     // Identificador único del intento de cobro, para no guardar dos veces la
     // misma venta. La tablet lo genera al abrir el modal de cobro y lo repite
@@ -1350,11 +1434,43 @@ app.get('/api/productos', (req, res) => {
                                CASE WHEN foto IS NULL OR foto = '' THEN 0 ELSE 1 END AS tiene_foto,
                                LENGTH(COALESCE(foto, '')) AS foto_v
                           FROM producto WHERE activo = 1`;
+    // Las promociones viajan con el catálogo, con su contenido dentro. Son
+    // pocas y pesan poco, y la caja las necesita a la vez que los productos:
+    // pedirlas aparte haría que las tarjetas de combo aparecieran un instante
+    // después que las demás, saltando la rejilla justo cuando el cajero ya
+    // está apuntando con el dedo.
+    const queryPromos = `SELECT id_promocion, nombre, descripcion, precio
+                           FROM promocion WHERE activa = 1 ORDER BY nombre`;
+    const queryPromoDet = `SELECT pd.id_promocion, pd.id_producto, pd.cantidad
+                             FROM promocion_detalle pd
+                             JOIN producto p ON p.id_producto = pd.id_producto
+                            WHERE p.activo = 1
+                            ORDER BY pd.id_detalle_promocion`;
+
     pool.query(queryCats, (err, cats) => {
       if (err) return res.status(500).json({ error: err.message });
       pool.query(queryProds, (err2, prods) => {
         if (err2) return res.status(500).json({ error: err2.message });
-        return res.json({ categorias: cats, productos: prods });
+        pool.query(queryPromos, (err3, promos) => {
+          if (err3) return res.status(500).json({ error: err3.message });
+          pool.query(queryPromoDet, (err4, detalles) => {
+            if (err4) return res.status(500).json({ error: err4.message });
+
+            const porPromo = new Map();
+            for (const d of detalles) {
+              if (!porPromo.has(d.id_promocion)) porPromo.set(d.id_promocion, []);
+              porPromo.get(d.id_promocion).push({ id_producto: d.id_producto, cantidad: d.cantidad });
+            }
+
+            // Una promoción cuyo contenido se quedó sin productos activos no
+            // se manda: la tarjeta saldría vacía y al tocarla no pasaría nada.
+            const listas = promos
+              .map(pr => Object.assign({}, pr, { contenido: porPromo.get(pr.id_promocion) || [] }))
+              .filter(pr => pr.contenido.length > 0);
+
+            return res.json({ categorias: cats, productos: prods, promociones: listas });
+          });
+        });
       });
     });
   }
@@ -1422,7 +1538,7 @@ app.post('/api/comanda', (req, res) => {
     });
 
     // 2. Detail comanda & Stock decrease
-    items.forEach((item, idx) => {
+    (Array.isArray(items) ? items : []).forEach((item, idx) => {
       const dbProd = mockDb.producto.find(p => p.id_producto === item.id_producto);
       if (dbProd) {
         dbProd.stock_actual = Math.max(0, dbProd.stock_actual - item.cantidad);
@@ -1515,7 +1631,23 @@ app.post('/api/comanda', (req, res) => {
         }
       }
 
-      if (!Array.isArray(items) || items.length === 0) {
+      // Las promociones que pide la tablet: sólo el identificador y cuántas.
+      // El contenido y el precio los pone la base, igual que con los productos:
+      // si vinieran de la tablet, cualquiera podría inventarse un combo de un
+      // whisky por un boliviano.
+      const promosPedidas = new Map();
+      for (const p of (Array.isArray(req.body.promociones) ? req.body.promociones : [])) {
+        const idPromo = parseInt(p && p.id_promocion, 10);
+        const qty = Number(p && p.cantidad);
+        if (!Number.isInteger(idPromo) || idPromo <= 0 ||
+            !Number.isInteger(qty) || qty <= 0) {
+          throw new BusinessError('Promoción inválida en la comanda.');
+        }
+        promosPedidas.set(idPromo, (promosPedidas.get(idPromo) || 0) + qty);
+      }
+
+      const hayItems = Array.isArray(items) && items.length > 0;
+      if (!hayItems && promosPedidas.size === 0) {
         throw new BusinessError('La comanda no tiene productos.');
       }
       if (!Array.isArray(metodos_pago) || metodos_pago.length === 0) {
@@ -1580,6 +1712,40 @@ app.post('/api/comanda', (req, res) => {
         g.acomps.forEach(a => {
           wanted.set(a.idProd, (wanted.get(a.idProd) || 0) + a.qty * g.qty);
         });
+      }
+
+      // Las promociones, leídas de la base. Un paquete no tiene stock propio:
+      // lo que sale del almacén son los productos que lleva dentro, y por eso
+      // se suman aquí, al mismo saco que todo lo demás. Así el combo compite
+      // por las mismas existencias que las ventas sueltas y no hay forma de
+      // vender la misma cerveza dos veces.
+      const paquetes = [];
+      for (const [idPromo, veces] of promosPedidas) {
+        const promo = await dbGet(
+          'SELECT id_promocion, nombre, precio, activa FROM promocion WHERE id_promocion = ?',
+          [idPromo]
+        );
+        if (!promo) throw new BusinessError(`La promoción #${idPromo} ya no existe.`);
+        if (!promo.activa) {
+          throw new BusinessError(`La promoción "${promo.nombre}" está apagada.`);
+        }
+
+        const contenido = await dbAll(
+          `SELECT pd.id_producto, pd.cantidad
+             FROM promocion_detalle pd
+             JOIN producto p ON p.id_producto = pd.id_producto
+            WHERE pd.id_promocion = ? AND p.activo = 1
+            ORDER BY pd.id_detalle_promocion`,
+          [idPromo]
+        );
+        if (contenido.length === 0) {
+          throw new BusinessError(`La promoción "${promo.nombre}" se quedó sin productos.`);
+        }
+
+        for (const c of contenido) {
+          wanted.set(c.id_producto, (wanted.get(c.id_producto) || 0) + c.cantidad * veces);
+        }
+        paquetes.push({ promo, contenido, veces });
       }
 
       // Cada pago se valida por separado ANTES de sumarlos. Sumar a ciegas dejaba
@@ -1655,6 +1821,49 @@ app.post('/api/comanda', (req, res) => {
         });
       }
 
+      // Las promociones se convierten en líneas normales de producto, con el
+      // precio del paquete repartido entre ellas. No se guarda "un combo de
+      // 60": se guardan las tres bebidas que salieron, cada una con su parte.
+      // Por eso el reporte de cierre sigue sabiendo cuánto se vendió de cada
+      // producto sin enterarse de que existen los combos.
+      const paquetesVendidos = [];
+      for (const paq of paquetes) {
+        const partes = paq.contenido.map(c => {
+          const prod = byId.get(c.id_producto);
+          if (!prod) {
+            throw new BusinessError(`Un producto de "${paq.promo.nombre}" ya no está disponible.`);
+          }
+          return {
+            idProd: c.id_producto,
+            nombre: prod.nombre,
+            // Las veces que se lleva el paquete multiplican todo su contenido.
+            qty: c.cantidad * paq.veces,
+            precioCatalogo: Number(prod.precio_venta)
+          };
+        });
+
+        const precioTotal = round2(Number(paq.promo.precio) * paq.veces);
+        const repartidas = repartirPrecioPaquete(partes, precioTotal);
+        total = round2(total + precioTotal);
+
+        repartidas.forEach((r, i) => {
+          lines.push({
+            idProd: r.idProd, qty: r.qty, precio: r.precio, subtotal: r.subtotal,
+            nombre: partes[i].nombre, acomps: [],
+            idPromo: paq.promo.id_promocion
+          });
+        });
+
+        paquetesVendidos.push({
+          id_promocion: paq.promo.id_promocion,
+          nombre: paq.promo.nombre,
+          cantidad: paq.veces,
+          precio_unitario: round2(Number(paq.promo.precio)),
+          subtotal: precioTotal,
+          contenido: partes.map(p => ({ nombre: p.nombre, cantidad: p.qty }))
+        });
+      }
+
       const pagado = round2(pagosLimpios.reduce((sum, p) => sum + p.monto, 0));
       if (pagado + 0.001 < total) {
         throw new BusinessError(
@@ -1705,8 +1914,8 @@ app.post('/api/comanda', (req, res) => {
       // como lo lee después el reporte de cierre.
       for (const line of lines) {
         const det = await dbRun(
-          'INSERT INTO detalle_comanda (id_comanda, id_producto, cantidad, precio_unitario, subtotal, id_detalle_padre) VALUES (?, ?, ?, ?, ?, NULL)',
-          [comId, line.idProd, line.qty, line.precio, line.subtotal]
+          'INSERT INTO detalle_comanda (id_comanda, id_producto, cantidad, precio_unitario, subtotal, id_detalle_padre, id_promocion) VALUES (?, ?, ?, ?, ?, NULL, ?)',
+          [comId, line.idProd, line.qty, line.precio, line.subtotal, line.idPromo || null]
         );
 
         for (const a of line.acomps) {
@@ -1734,7 +1943,7 @@ app.post('/api/comanda', (req, res) => {
         [comId, nowSql()]
       );
 
-      return { id_comanda: comId, total, lines };
+      return { id_comanda: comId, total, lines, paquetes: paquetesVendidos };
     })
       .then(result => {
         // The ticket is printed from these values, so it always matches what was stored.
@@ -1756,8 +1965,13 @@ app.post('/api/comanda', (req, res) => {
             subtotal: l.subtotal,
             // Va dentro de su botella y no como línea aparte: el ticket lo
             // imprime sangrado debajo y sin importe.
-            acompanantes: (l.acomps || []).map(a => ({ nombre: a.nombre, cantidad: a.qty }))
-          }))
+            acompanantes: (l.acomps || []).map(a => ({ nombre: a.nombre, cantidad: a.qty })),
+            // De qué paquete salió, si salió de alguno. El ticket las junta
+            // por esto para imprimir "Combo Amigos 60.00" en vez de tres
+            // líneas con precios repartidos que nadie sabría explicar.
+            id_promocion: l.idPromo || null
+          })),
+          promociones: result.paquetes || []
         });
       })
       .catch(err => {
@@ -2064,6 +2278,253 @@ app.delete('/api/admin/productos/:id', (req, res) => {
     .catch(err => {
       console.error('Error al eliminar producto:', err);
       res.status(500).json({ success: false, message: 'No se pudo eliminar el producto.' });
+    });
+});
+
+// ---- Promociones -----------------------------------------------------------
+//
+// Un paquete de productos a precio cerrado. Las tres operaciones comparten la
+// misma validación, así que vive aparte.
+
+/**
+ * Comprueba y limpia el contenido de una promoción.
+ * Devuelve las líneas listas, o lanza BusinessError con algo que el admin
+ * pueda arreglar.
+ */
+async function validarContenidoPromocion(contenido) {
+  if (!Array.isArray(contenido) || contenido.length === 0) {
+    throw new BusinessError('La promoción tiene que llevar al menos un producto.');
+  }
+  if (contenido.length > 20) {
+    throw new BusinessError('Una promoción no puede llevar más de 20 productos distintos.');
+  }
+
+  // Se agrupan por producto: si el admin añade dos veces la misma cerveza,
+  // son cuatro cervezas en una línea y no dos líneas iguales que después
+  // descontarían el stock por separado.
+  const porProducto = new Map();
+  for (const linea of contenido) {
+    const idProd = parseInt(linea && linea.id_producto, 10);
+    const qty = parseInt(linea && linea.cantidad, 10);
+    if (!Number.isInteger(idProd) || idProd <= 0) {
+      throw new BusinessError('Hay un producto no válido en la promoción.');
+    }
+    if (!Number.isInteger(qty) || qty <= 0 || qty > 99) {
+      throw new BusinessError('Las cantidades tienen que ser de 1 a 99.');
+    }
+    porProducto.set(idProd, (porProducto.get(idProd) || 0) + qty);
+  }
+
+  const lineas = [];
+  for (const [idProd, qty] of porProducto) {
+    const prod = await dbGet(
+      'SELECT id_producto, nombre, precio_venta, activo FROM producto WHERE id_producto = ?',
+      [idProd]
+    );
+    if (!prod) throw new BusinessError('Uno de los productos de la promoción ya no existe.');
+    if (!prod.activo) {
+      throw new BusinessError(`"${prod.nombre}" está retirado del catálogo y no puede ir en una promoción.`);
+    }
+    if (!(Number(prod.precio_venta) > 0)) {
+      throw new BusinessError(`"${prod.nombre}" no tiene precio, así que no se puede repartir el del paquete.`);
+    }
+    lineas.push({ idProd, qty, nombre: prod.nombre, precioCatalogo: Number(prod.precio_venta) });
+  }
+  return lineas;
+}
+
+function validarDatosPromocion(body) {
+  const nombre = String(body.nombre == null ? '' : body.nombre).trim().slice(0, 120);
+  const descripcion = String(body.descripcion == null ? '' : body.descripcion).trim().slice(0, 250);
+  const precio = Number(body.precio);
+
+  if (!nombre) throw new BusinessError('La promoción necesita un nombre.');
+  if (!Number.isFinite(precio) || precio <= 0) {
+    throw new BusinessError('El precio del paquete debe ser un número mayor que cero.');
+  }
+  return { nombre, descripcion, precio: round2(precio) };
+}
+
+// Listado para el panel: cada promoción con lo que lleva dentro.
+app.get('/api/admin/promociones', (req, res) => {
+  if (useMockDb) return res.json({ promociones: [] });
+
+  dbAll(`SELECT id_promocion, nombre, descripcion, precio, activa FROM promocion
+         ORDER BY activa DESC, nombre`)
+    .then(async promos => {
+      const detalles = await dbAll(`
+        SELECT pd.id_promocion, pd.id_producto, pd.cantidad,
+               p.nombre, p.precio_venta, p.stock_actual, p.activo
+        FROM promocion_detalle pd
+        JOIN producto p ON p.id_producto = pd.id_producto
+        ORDER BY pd.id_detalle_promocion`);
+
+      const porPromo = new Map();
+      for (const d of detalles) {
+        if (!porPromo.has(d.id_promocion)) porPromo.set(d.id_promocion, []);
+        porPromo.get(d.id_promocion).push(d);
+      }
+
+      res.json({
+        promociones: promos.map(pr => {
+          const contenido = porPromo.get(pr.id_promocion) || [];
+          const suelto = round2(contenido.reduce(
+            (s, c) => s + Number(c.precio_venta) * c.cantidad, 0));
+          return Object.assign({}, pr, {
+            contenido,
+            precio_suelto: suelto,
+            ahorro: round2(suelto - Number(pr.precio))
+          });
+        })
+      });
+    })
+    .catch(err => res.status(500).json({ error: err.message }));
+});
+
+app.post('/api/admin/promociones', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  Promise.resolve()
+    .then(async () => {
+      const datos = validarDatosPromocion(req.body || {});
+      const lineas = await validarContenidoPromocion((req.body || {}).contenido);
+
+      const id = await withTransaction(async () => {
+        const r = await dbRun(
+          `INSERT INTO promocion (nombre, descripcion, precio, activa, creada_por_admin)
+           VALUES (?, ?, ?, 1, ?)`,
+          [datos.nombre, datos.descripcion, datos.precio, req.body.id_admin || null]
+        );
+        for (const l of lineas) {
+          await dbRun(
+            'INSERT INTO promocion_detalle (id_promocion, id_producto, cantidad) VALUES (?, ?, ?)',
+            [r.insertId, l.idProd, l.qty]
+          );
+        }
+        return r.insertId;
+      });
+
+      const suelto = round2(lineas.reduce((s, l) => s + l.precioCatalogo * l.qty, 0));
+      await registrarAuditoria(req.body.id_admin, 'CREAR_PROMOCION', 'promocion', id,
+        `"${datos.nombre}" a ${datos.precio.toFixed(2)} (sueltos ${suelto.toFixed(2)}): ` +
+        lineas.map(l => `${l.qty} x ${l.nombre}`).join(' + '));
+
+      res.json({
+        success: true, id_promocion: id,
+        message: `"${datos.nombre}" creada. Ahorra ${round2(suelto - datos.precio).toFixed(2)} Bs.`
+      });
+    })
+    .catch(err => {
+      if (err instanceof BusinessError) {
+        return res.status(err.status || 400).json({ success: false, message: err.message });
+      }
+      console.error('Error al crear la promoción:', err);
+      res.status(500).json({ success: false, message: friendlyDbError(err, 'promoción') });
+    });
+});
+
+app.put('/api/admin/promociones/:id', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Promoción no válida.' });
+  }
+
+  Promise.resolve()
+    .then(async () => {
+      const antes = await dbGet('SELECT nombre, precio FROM promocion WHERE id_promocion = ?', [id]);
+      if (!antes) {
+        return res.status(404).json({ success: false, message: 'Esa promoción ya no existe.' });
+      }
+
+      const datos = validarDatosPromocion(req.body || {});
+      // El contenido sólo se toca si viene: así el interruptor de activar y
+      // apagar puede mandar el nombre y el precio sin reenviar la lista.
+      const cambiaContenido = Array.isArray((req.body || {}).contenido);
+      const lineas = cambiaContenido
+        ? await validarContenidoPromocion(req.body.contenido)
+        : null;
+      const activa = req.body.activa === undefined ? 1 : (req.body.activa ? 1 : 0);
+
+      await withTransaction(async () => {
+        await dbRun(
+          'UPDATE promocion SET nombre = ?, descripcion = ?, precio = ?, activa = ? WHERE id_promocion = ?',
+          [datos.nombre, datos.descripcion, datos.precio, activa, id]
+        );
+        if (lineas) {
+          // Se reemplaza entero. Las ventas ya hechas no dependen de esto:
+          // guardan sus propias líneas con su propio precio, así que cambiar
+          // el paquete hoy no reescribe lo que se cobró ayer.
+          await dbRun('DELETE FROM promocion_detalle WHERE id_promocion = ?', [id]);
+          for (const l of lineas) {
+            await dbRun(
+              'INSERT INTO promocion_detalle (id_promocion, id_producto, cantidad) VALUES (?, ?, ?)',
+              [id, l.idProd, l.qty]
+            );
+          }
+        }
+      });
+
+      const cambioPrecio = Number(antes.precio) !== datos.precio
+        ? ` · precio ${Number(antes.precio).toFixed(2)} -> ${datos.precio.toFixed(2)}`
+        : '';
+      await registrarAuditoria(req.body.id_admin, 'EDITAR_PROMOCION', 'promocion', id,
+        `"${antes.nombre}" -> "${datos.nombre}"` + cambioPrecio +
+        (activa ? '' : ' · apagada') + (cambiaContenido ? ' · contenido cambiado' : ''));
+
+      res.json({ success: true, message: `"${datos.nombre}" actualizada.` });
+    })
+    .catch(err => {
+      if (err instanceof BusinessError) {
+        return res.status(err.status || 400).json({ success: false, message: err.message });
+      }
+      console.error('Error al editar la promoción:', err);
+      res.status(500).json({ success: false, message: friendlyDbError(err, 'promoción') });
+    });
+});
+
+app.delete('/api/admin/promociones/:id', (req, res) => {
+  if (useMockDb) return res.status(503).json({ success: false, message: 'Necesita la base de datos real.' });
+
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Promoción no válida.' });
+  }
+
+  Promise.resolve()
+    .then(async () => {
+      const promo = await dbGet('SELECT nombre FROM promocion WHERE id_promocion = ?', [id]);
+      if (!promo) {
+        return res.status(404).json({ success: false, message: 'Esa promoción ya no existe.' });
+      }
+
+      // Si ya se vendió, no se borra: se apaga. Borrarla dejaría las líneas de
+      // las comandas apuntando a una promoción que no existe, y el ticket
+      // reimpreso de una venta de ayer no sabría cómo agruparlas.
+      const vendida = await dbGet(
+        'SELECT COUNT(*) AS n FROM detalle_comanda WHERE id_promocion = ?', [id]);
+      if (vendida && vendida.n > 0) {
+        await dbRun('UPDATE promocion SET activa = 0 WHERE id_promocion = ?', [id]);
+        await registrarAuditoria(req.body && req.body.id_admin, 'APAGAR_PROMOCION',
+          'promocion', id, `"${promo.nombre}" se apagó (ya se había vendido ${vendida.n} veces)`);
+        return res.json({
+          success: true, retirada: true,
+          message: `"${promo.nombre}" se apagó. Como ya se vendió, se conserva para que el historial cuadre.`
+        });
+      }
+
+      await withTransaction(async () => {
+        await dbRun('DELETE FROM promocion_detalle WHERE id_promocion = ?', [id]);
+        await dbRun('DELETE FROM promocion WHERE id_promocion = ?', [id]);
+      });
+      await registrarAuditoria(req.body && req.body.id_admin, 'ELIMINAR_PROMOCION',
+        'promocion', id, `"${promo.nombre}"`);
+      res.json({ success: true, message: `"${promo.nombre}" eliminada.` });
+    })
+    .catch(err => {
+      console.error('Error al eliminar la promoción:', err);
+      res.status(500).json({ success: false, message: friendlyDbError(err, 'promoción') });
     });
 });
 

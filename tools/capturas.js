@@ -63,6 +63,15 @@ function crearPaginaPiloto() {
 <script>
 (function () {
   var paso = new URLSearchParams(location.search).get('paso') || 'pos';
+  // Los errores del navegador se escriben en el propio documento: con
+  // --dump-dom se leen desde fuera, que es la única forma de enterarse de un
+  // fallo de JavaScript en una captura sin consola.
+  window.addEventListener('error', function (e) {
+    var caja = document.getElementById('_fallo') || document.createElement('div');
+    caja.id = '_fallo';
+    caja.textContent += ' || ' + e.message + ' @ ' + (e.filename || '').split('/').pop() + ':' + e.lineno;
+    document.documentElement.appendChild(caja);
+  });
   var q = function (s) { return document.querySelector(s); };
   var id = function (x) { return document.getElementById(x); };
   var click = function (el) { if (el) el.dispatchEvent(new MouseEvent('click', { bubbles: true })); };
@@ -71,7 +80,8 @@ function crearPaginaPiloto() {
     if (paso === 'login') return;
     setTimeout(function () {
       var esAdmin = paso === 'admin' || paso === 'personal' || paso === 'catalogo' ||
-        paso === 'productos' || paso === 'editar' || paso === 'stock';
+        paso === 'productos' || paso === 'editar' || paso === 'stock' ||
+        paso === 'promo-admin';
       id('login-username').value = esAdmin ? 'admin_evento' : 'cajero_norte_1';
       id('login-password').value = 'demo123';
       q('#login-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -129,6 +139,51 @@ function crearPaginaPiloto() {
           click(q('[data-tab="tab-crear-producto"]'));
           setTimeout(function () { click(q('#lista-productos .lista-editar')); }, 800);
         }, 600);
+        return;
+      }
+      if (paso === 'promo-caja') {
+        // El combo en la rejilla, y metido en el carrito.
+        setTimeout(function () {
+          '1009'.split('').forEach(function (d) { click(q('.pin-btn[data-key="' + d + '"]')); });
+          setTimeout(function () {
+            click(q('.promo-card'));
+            setTimeout(function () { click(q('.promo-card')); }, 350);
+          }, 900);
+        }, 800);
+        return;
+      }
+      if (paso === 'promo-admin') {
+        setTimeout(function () {
+          click(q('[data-tab="tab-promociones"]'));
+          setTimeout(function () {
+            // Se arma una para retratar el formulario a medio llenar.
+            id('promo-nombre').value = 'Combo Fiesta';
+            id('promo-desc').value = 'Un whisky y cuatro cervezas';
+            var sel = id('promo-producto');
+            sel.value = '10';
+            click(id('promo-anadir'));
+            setTimeout(function () {
+              sel.value = '3';
+              id('promo-cantidad').value = 4;
+              click(id('promo-anadir'));
+              id('promo-precio').value = 95;
+              id('promo-precio').dispatchEvent(new Event('input', { bubbles: true }));
+            }, 300);
+          }, 800);
+        }, 600);
+        return;
+      }
+      if (paso === 'promo-ticket') {
+        setTimeout(function () {
+          '1009'.split('').forEach(function (d) { click(q('.pin-btn[data-key="' + d + '"]')); });
+          setTimeout(function () {
+            click(q('.promo-card'));
+            setTimeout(function () {
+              click(id('finalize-order-btn'));
+              setTimeout(function () { click(id('pay-confirm-btn')); }, 600);
+            }, 500);
+          }, 900);
+        }, 800);
         return;
       }
       if (paso === 'productos') {
@@ -244,6 +299,16 @@ function crearPaginaPiloto() {
     // la captura del punto de venta sale tapada por el cuadro de acompañante.
     muestra.exec('UPDATE producto SET requiere_acompanante = 0, es_acompanante = 0');
     muestra.exec('UPDATE producto SET requiere_acompanante = 1 WHERE id_producto = 9');
+
+    // Un combo de muestra: un whisky y dos cervezas, que es el caso que pidió
+    // el bar. Se borra y se rehace en cada tanda para que la captura salga
+    // igual aunque la base del evento ya tenga promociones propias.
+    muestra.exec('DELETE FROM promocion_detalle');
+    muestra.exec('DELETE FROM promocion');
+    muestra.exec(`INSERT INTO promocion (id_promocion, nombre, descripcion, precio, activa)
+                  VALUES (1, 'Combo Amigos', 'Para compartir entre tres', 60, 1)`);
+    muestra.exec(`INSERT INTO promocion_detalle (id_promocion, id_producto, cantidad)
+                  VALUES (1, 8, 1), (1, 1, 2)`);
     muestra.exec('UPDATE producto SET es_acompanante = 1 WHERE id_producto IN (15,16,17)');
     // Uno agotado a propósito: tiene que salir en la lista marcado, no
     // esconderse. Es justo el caso que hay que poder retratar.
@@ -253,7 +318,7 @@ function crearPaginaPiloto() {
     console.warn('  (sin fotos de muestra:', e.message + ')');
   }
   console.log('\n  Capturando a ' + ANCHO + '×' + ALTO + '...\n');
-  for (const paso of ['login', 'pin', 'pos', 'cobro', 'qr', 'mixto', 'admin', 'personal', 'catalogo', 'productos', 'editar', 'ticket', 'acompanante', 'carrito-acomp', 'mover', 'mover-producto', 'agregar', 'stock']) {
+  for (const paso of ['login', 'pin', 'pos', 'cobro', 'qr', 'mixto', 'admin', 'personal', 'catalogo', 'productos', 'editar', 'promo-admin', 'promo-caja', 'promo-ticket', 'ticket', 'acompanante', 'carrito-acomp', 'mover', 'mover-producto', 'agregar', 'stock']) {
     const destino = path.join(SALIDA, paso + SUFIJO + '.png');
     spawnSync(navegador, [
       '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-sandbox',

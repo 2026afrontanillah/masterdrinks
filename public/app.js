@@ -6,6 +6,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentWaiter = null;  // { id_mesero, nombre }
     let categories = [];       // List of product categories
     let products = [];         // List of products
+    // Paquetes de productos a precio cerrado. No son productos: no tienen
+    // stock propio, y lo que sale de la nevera al venderlos es su contenido.
+    let promociones = [];
     let cart = [];             // Cart items: { id_producto, nombre, precio_venta, cantidad, stock_max }
     let payments = [];         // Payment pills: { id_metodo_pago, nombre_metodo, monto, referencia }
     let activeCategory = 'all';// Filter categories
@@ -416,6 +419,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             categories = data.categorias;
             products = data.productos;
+            promociones = data.promociones || [];
 
             renderCategories();
             animarRejilla = true;   // única vez que la rejilla entra en cascada
@@ -519,7 +523,26 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cart.length === 0) return;
 
         const problemas = [];
-        cart.forEach(item => {
+        let habiaPaquete = false;
+
+        // Copia de la lista: dentro se quitan líneas, y recorrer la misma que
+        // se está modificando salta elementos.
+        [...cart].forEach(item => {
+            // Un paquete no tiene stock propio, así que la pregunta no es
+            // "¿quedan?" sino "¿siguen quedando todos los que lleva dentro?".
+            // Sin esto se le buscaba un id_producto que no tiene, salía cero, y
+            // el sondeo borraba el combo del carrito cada doce segundos sin que
+            // nadie tocara nada.
+            if (item.tipo === 'promo') {
+                habiaPaquete = true;
+                const caben = paquetesQueCaben(item, item);
+                if (item.cantidad <= caben) return;
+                problemas.push({ item, disponible: caben });
+                if (caben <= 0) cart = cart.filter(c => c !== item);
+                else item.cantidad = caben;
+                return;
+            }
+
             const enCatalogo = products.find(p => p.id_producto === item.id_producto);
             const disponible = enCatalogo ? enCatalogo.stock_actual : 0;
             if (item.cantidad <= disponible) return;
@@ -538,7 +561,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         renderCart();
         recalcularTotal();
+        // Si se tocó un paquete hay que repintar la rejilla entera: sus
+        // productos están repartidos por toda la lista y no hay una sola
+        // tarjeta que actualizar.
+        if (habiaPaquete) renderProducts();
         problemas.forEach(p => {
+            if (p.item.tipo === 'promo') {
+                // El paquete tiene su propio mensaje: decir "solo quedan 2"
+                // de un combo confundiría, porque lo que se acabó no es el
+                // combo sino alguna de las bebidas que lleva dentro.
+                notify(p.disponible <= 0
+                    ? `Otra caja vendió lo que llevaba "${p.item.nombre}": se quitó del carrito.`
+                    : `Ya solo quedan existencias para ${p.disponible} de "${p.item.nombre}": se ajustó el carrito.`,
+                    'warn', 7000);
+                return;
+            }
             actualizarTarjeta(p.item.id_producto);
             notify(p.disponible <= 0
                 ? `Otra caja vendió el último ${p.item.nombre}: se quitó del carrito.`
@@ -670,15 +707,65 @@ document.addEventListener('DOMContentLoaded', () => {
             return matchesCat && matchesSearch;
         });
 
-        if (filtered.length === 0) {
+        // Los paquetes van PRIMERO y sólo con "Todos" o buscando por su
+        // nombre. Delante porque es lo que el bar quiere colocar y lo que el
+        // cliente pregunta ("¿tienen combos?"); dentro de una categoría no,
+        // porque un paquete de whisky y cervezas no pertenece a ninguna.
+        const promosVisibles = (activeCategory === 'all' || search)
+            ? promociones.filter(pr =>
+                !search ||
+                pr.nombre.toLowerCase().includes(search) ||
+                (pr.descripcion && pr.descripcion.toLowerCase().includes(search)))
+            : [];
+
+        if (filtered.length === 0 && promosVisibles.length === 0) {
             grid.innerHTML = `<div class="empty-cart-msg">No se encontraron productos</div>`;
             return;
         }
 
+        promosVisibles.forEach((pr, i) => {
+            const caben = paquetesQueCaben(pr);
+            const puestos = (cart.find(c => c.tipo === 'promo' && c.id_promocion === pr.id_promocion) || {}).cantidad || 0;
+            const suelto = precioSuelto(pr);
+            const ahorro = Math.round((suelto - Number(pr.precio)) * 100) / 100;
+
+            const card = document.createElement('div');
+            card.className = `product-card promo-card ${animar ? 'enter' : ''} ${caben <= 0 ? 'out-of-stock' : ''}`;
+            card.dataset.promo = pr.id_promocion;
+            if (animar) card.style.animationDelay = Math.min(i, 11) * 25 + 'ms';
+
+            const dentro = (pr.contenido || []).map(c => {
+                const prod = products.find(p => p.id_producto === c.id_producto);
+                return `<li>${c.cantidad} × ${escapeHtml(prod ? prod.nombre : 'producto')}</li>`;
+            }).join('');
+
+            card.innerHTML = `
+                <span class="promo-sello">Combo</span>
+                <h3>${escapeHtml(pr.nombre)}</h3>
+                <ul class="promo-dentro">${dentro}</ul>
+                <div class="card-foot">
+                    <div class="price">${Number(pr.precio).toFixed(2)} Bs.</div>
+                    ${ahorro > 0 ? `<div class="promo-ahorro">antes ${suelto.toFixed(2)}</div>` : ''}
+                </div>
+                ${puestos > 0 ? `<span class="cart-badge">${puestos}</span>` : ''}
+                ${caben <= 0 ? '<div class="out-of-stock-overlay"><span>Sin stock</span></div>' : ''}
+            `;
+            card.addEventListener('click', () => agregarPromocion(pr));
+            grid.appendChild(card);
+        });
+
         filtered.forEach((p, i) => {
-            // Count already in cart to display stock correctly
-            const inCart = cart.find(item => item.id_producto === p.id_producto);
-            const unidades = inCart ? inCart.cantidad : 0;
+            // Todas las unidades comprometidas, no sólo la línea suelta: las
+            // que van de acompañante dentro de otra botella y las que van
+            // dentro de un combo salen del mismo almacén.
+            //
+            // Aquí se contaba a mano (cart.find(...).cantidad) mientras que
+            // actualizarTarjeta —el refresco de una sola tarjeta— usaba
+            // unidadesEnCarrito. Las dos vías decían cosas distintas: al tocar
+            // un producto el número bajaba bien, pero en cuanto algo obligaba a
+            // repintar la rejilla entera volvía a subir, y la tarjeta ofrecía
+            // existencias que ya estaban comprometidas.
+            const unidades = unidadesEnCarrito(p.id_producto);
             const displayStock = p.stock_actual - unidades;
 
             const card = document.createElement('div');
@@ -783,11 +870,15 @@ document.addEventListener('DOMContentLoaded', () => {
     //
     // Se mueve con animación y no de golpe para que se vea el recorrido: así
     // se entiende que la lista se desplazó, en vez de parecer que cambió sola.
-    function mostrarLinea(id_producto) {
+    function mostrarLinea(id_producto, clave) {
         const lista = document.getElementById('cart-items');
         if (!lista) return;
 
-        const fila = lista.querySelector(`.cart-item[data-id="${id_producto}"]`);
+        // Por clave cuando la hay: un paquete no tiene id de producto, y dos
+        // líneas del mismo producto con distinto acompañante comparten el id.
+        const fila = clave
+            ? lista.querySelector(`.cart-item[data-clave="${clave}"]`)
+            : lista.querySelector(`.cart-item[data-id="${id_producto}"]`);
         // requestAnimationFrame: si se llama antes de que el navegador haya
         // pintado la línea nueva, la altura todavía es la de antes y el scroll
         // se queda a media línea del final.
@@ -832,7 +923,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // sumando las que van sueltas y las que van de acompañante. Un refresco
     // sale de la misma nevera vaya cobrado o de regalo.
     function unidadesEnCarrito(id_producto) {
+        return unidadesEnCarritoSalvo(id_producto, null);
+    }
+
+    /**
+     * Lo mismo, pero sin contar una línea concreta.
+     *
+     * Hace falta para preguntar "¿cuánto cabría aquí si esta línea no
+     * existiera?", que es lo que hay que saber al reajustar el carrito cuando
+     * otra tablet ha vendido: si se contara la propia línea, siempre parecería
+     * que no cabe y se borraría sola.
+     */
+    function unidadesEnCarritoSalvo(id_producto, excluir) {
         return cart.reduce((n, item) => {
+            if (excluir && item === excluir) return n;
+            // Un paquete no es un producto: lo que reserva de la nevera es lo
+            // que lleva dentro. Sin esto, meter dos combos en el carrito no
+            // bajaría las existencias que se ven en las tarjetas y se podría
+            // vender la misma cerveza dos veces.
+            if (item.tipo === 'promo') {
+                let dentro = 0;
+                (item.contenido || []).forEach(c => {
+                    if (c.id_producto === id_producto) dentro += c.cantidad * item.cantidad;
+                });
+                return n + dentro;
+            }
+
             let suma = item.id_producto === id_producto ? item.cantidad : 0;
             // Los acompañantes llevan cantidad POR BOTELLA: dos colas pequeñas
             // en una línea de tres whiskys son seis colas fuera de la nevera.
@@ -840,6 +956,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (a.id_producto === id_producto) suma += a.cantidad * item.cantidad;
             });
             return n + suma;
+        }, 0);
+    }
+
+    // Cuántas veces cabe todavía este paquete, mirando el producto que antes se
+    // agote. Devuelve 0 si ya no cabe ninguno más.
+    function paquetesQueCaben(promo, excluir) {
+        const contenido = promo.contenido || [];
+        if (contenido.length === 0) return 0;
+        let caben = Infinity;
+        for (const c of contenido) {
+            const prod = products.find(p => p.id_producto === c.id_producto);
+            if (!prod) return 0;
+            const libres = prod.stock_actual - unidadesEnCarritoSalvo(c.id_producto, excluir);
+            caben = Math.min(caben, Math.floor(libres / c.cantidad));
+        }
+        return caben === Infinity ? 0 : Math.max(0, caben);
+    }
+
+    // Lo que costaría suelto, para poder enseñar el ahorro.
+    function precioSuelto(promo) {
+        return (promo.contenido || []).reduce((s, c) => {
+            const prod = products.find(p => p.id_producto === c.id_producto);
+            return s + (prod ? Number(prod.precio_venta) * c.cantidad : 0);
         }, 0);
     }
 
@@ -861,6 +1000,49 @@ document.addEventListener('DOMContentLoaded', () => {
         firmaAcomp(item.acompanantes) === firmaAcomp(acomps);
 
     // Cart Lógica
+    // Un paquete al carrito. Va aparte de addToCart porque no comparte casi
+    // nada: no tiene stock propio que mirar sino el de su contenido, no admite
+    // acompañantes —lo que lleva dentro ya está decidido al crearlo— y su
+    // precio es el del paquete, no el de ningún producto.
+    function agregarPromocion(promo) {
+        if (paquetesQueCaben(promo) <= 0) {
+            vibrar([25, 40, 25]);
+            notify('No queda stock para armar "' + promo.nombre + '".', 'warn');
+            return;
+        }
+
+        vibrar(28);
+        const clave = 'promo:' + promo.id_promocion;
+        const ya = cart.find(item => claveLinea(item) === clave);
+        if (ya) {
+            ya.cantidad++;
+        } else {
+            cart.push({
+                tipo: 'promo',
+                id_promocion: promo.id_promocion,
+                nombre: promo.nombre,
+                precio_venta: Number(promo.precio),
+                cantidad: 1,
+                // Se guarda una copia del contenido: si el admin cambia el
+                // paquete mientras hay uno en el carrito, el que ya está puesto
+                // no cambia debajo del dedo del cajero. El servidor validará el
+                // suyo de todas formas al cobrar.
+                contenido: (promo.contenido || []).map(c => {
+                    const prod = products.find(p => p.id_producto === c.id_producto);
+                    return {
+                        id_producto: c.id_producto,
+                        cantidad: c.cantidad,
+                        nombre: prod ? prod.nombre : 'producto #' + c.id_producto
+                    };
+                })
+            });
+        }
+
+        renderCart();
+        renderProducts();
+        mostrarLinea(null, clave);
+    }
+
     function addToCart(product, acompanantes) {
         if (unidadesEnCarrito(product.id_producto) >= product.stock_actual) {
             // Dos pulsos, distintos del toque normal: se nota en la mano que
@@ -1527,7 +1709,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Una fila se identifica por el par producto+acompañante, no sólo por el
     // producto: puede haber dos whiskys en el carrito con refrescos distintos.
-    const claveLinea = item => item.id_producto + '|' + firmaAcomp(item.acompanantes);
+    const claveLinea = item => item.tipo === 'promo'
+        ? 'promo:' + item.id_promocion
+        : item.id_producto + '|' + firmaAcomp(item.acompanantes);
 
     function filaDe(item) {
         return document.querySelector(
@@ -1552,6 +1736,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function quitarDelCarrito(item) {
+        // Un paquete se quita entero y devuelve a la rejilla el stock de todo
+        // lo que llevaba dentro, así que se repintan todas sus tarjetas.
+        if (item.tipo === 'promo') {
+            cart = cart.filter(c => claveLinea(c) !== claveLinea(item));
+            renderCart();
+            recalcularTotal();
+            renderProducts();
+            return;
+        }
+
         const acomps = item.acompanantes || [];
         cart = cart.filter(c => !mismaLinea(c, item.id_producto, acomps));
         renderCart();
@@ -1587,6 +1781,19 @@ document.addEventListener('DOMContentLoaded', () => {
             // vistazo que va dentro de la botella y no que se cobra aparte.
             // Todos los acompañantes, cada uno con su cantidad ya multiplicada
             // por las botellas de la línea: es lo que hay que servir.
+            // Un paquete se lee como una unidad: su nombre, su precio cerrado
+            // y debajo lo que hay que servir. Nunca los precios repartidos: el
+            // servidor los reparte para que cuadre el cierre, pero al cajero y
+            // al cliente lo que les importa es "Combo Amigos, 60".
+            const dentroHtml = item.tipo === 'promo'
+                ? (item.contenido || []).map(c => `
+                   <div class="cart-acomp">
+                       <span class="cart-acomp-flecha" aria-hidden="true">↳</span>
+                       <span class="cart-acomp-nombre">${escapeHtml(c.nombre)}</span>
+                       <span class="cart-acomp-cant">${c.cantidad * item.cantidad}</span>
+                   </div>`).join('')
+                : '';
+
             const acompHtml = (item.acompanantes || []).map(a => `
                    <div class="cart-acomp">
                        <span class="cart-acomp-flecha" aria-hidden="true">↳</span>
@@ -1597,8 +1804,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             div.innerHTML = `
                 <div class="cart-item-info">
-                    <h4>${escapeHtml(item.nombre)}</h4>
+                    <h4>${item.tipo === 'promo' ? '<span class="cart-promo-sello">Combo</span> ' : ''}${escapeHtml(item.nombre)}</h4>
                     <div class="price">${item.precio_venta.toFixed(2)} x ${item.cantidad} = ${sub.toFixed(2)} Bs.</div>
+                    ${dentroHtml}
                     ${acompHtml}
                 </div>
                 <div class="cart-item-controls">
@@ -1616,6 +1824,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Qty listeners
             div.querySelector('.decrease-btn').addEventListener('click', () => {
+                if (item.tipo === 'promo') {
+                    if (item.cantidad > 1) item.cantidad--;
+                    else cart = cart.filter(c => claveLinea(c) !== claveLinea(item));
+                    vibrar([18, 30, 18]);
+                    renderCart();
+                    renderProducts();
+                    return;
+                }
                 if (item.cantidad > 1) {
                     item.cantidad--;
                     actualizarLinea(item);
@@ -1628,6 +1844,22 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             div.querySelector('.increase-btn').addEventListener('click', () => {
+                // Un paquete más sólo cabe si caben TODOS sus productos. Se
+                // pregunta al catálogo vivo, igual que con lo demás.
+                if (item.tipo === 'promo') {
+                    const promo = promociones.find(p => p.id_promocion === item.id_promocion);
+                    if (!promo || paquetesQueCaben(promo) <= 0) {
+                        vibrar([25, 40, 25]);
+                        notify('No queda stock para otro "' + item.nombre + '".', 'warn');
+                        return;
+                    }
+                    item.cantidad++;
+                    renderCart();
+                    renderProducts();
+                    vibrar(28);
+                    return;
+                }
+
                 // Se consulta el stock vivo, no el que había al añadirlo: otra
                 // tablet puede haber vendido unidades desde entonces.
                 const enCatalogo = products.find(p => p.id_producto === item.id_producto);
@@ -1944,7 +2176,15 @@ document.addEventListener('DOMContentLoaded', () => {
             id_mesero: currentWaiter.id_mesero,
             total: orderTotal,
             observaciones,
-            items: cart.map(c => ({
+            // Los paquetes viajan aparte y sólo con su id: el contenido y el
+            // precio los pone el servidor leyéndolos de la base. Si viajaran
+            // desde aquí, bastaría con retocar la petición para inventarse un
+            // combo de un whisky por un boliviano.
+            promociones: cart.filter(c => c.tipo === 'promo').map(c => ({
+                id_promocion: c.id_promocion,
+                cantidad: c.cantidad
+            })),
+            items: cart.filter(c => c.tipo !== 'promo').map(c => ({
                 id_producto: c.id_producto,
                 cantidad: c.cantidad,
                 precio_unitario: c.precio_venta,
@@ -1980,6 +2220,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 triggerThermalPrint(result.id_comanda, Object.assign({}, bodyData, {
                     total: typeof result.total === 'number' ? result.total : bodyData.total,
                     items: (result.items && result.items.length) ? result.items : bodyData.items,
+                    // Los paquetes ya montados por el servidor, con su precio
+                    // cerrado y su contenido: el ticket los imprime como una
+                    // unidad en vez de sacar los precios repartidos, que en el
+                    // papel no significarían nada para nadie.
+                    promociones: result.promociones || [],
                     recibido: metodoActivo === EFECTIVO ? efectivoRecibido : 0
                 }));
                 // La venta se cerró: la próxima empieza con clave nueva.
@@ -2057,7 +2302,24 @@ document.addEventListener('DOMContentLoaded', () => {
             // cambio: en la base se guarda lo cobrado, no el billete.
             recibido: Number(data.recibido) || 0,
             observaciones: data.observaciones || 'Sin observaciones',
-            items: (data.items || []).map(item => {
+            // Los paquetes, cada uno con su precio cerrado y lo que hay que
+            // servir. Van aparte de items a propósito.
+            promociones: (data.promociones || []).map(pr => ({
+                nombre: pr.nombre,
+                cantidad: Number(pr.cantidad) || 1,
+                precio_unitario: Number(pr.precio_unitario) || 0,
+                subtotal: Number(pr.subtotal) || 0,
+                contenido: (pr.contenido || []).map(c => ({
+                    nombre: c.nombre, cantidad: Number(c.cantidad) || 0
+                }))
+            })),
+            // Las líneas que salieron de un paquete NO se imprimen sueltas: ya
+            // van dentro de su paquete, arriba. Si se imprimieran las dos
+            // cosas, el ticket cobraría el combo dos veces a la vista del
+            // cliente —el importe sería correcto, pero nadie lo creería— y
+            // además saldrían con los precios repartidos (29.58, 15.21), que
+            // en el papel no significan nada.
+            items: (data.items || []).filter(item => !item.id_promocion).map(item => {
                 const known = products.find(p => p.id_producto === item.id_producto);
                 return {
                     cantidad: item.cantidad,
@@ -2274,6 +2536,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (targetTab === 'tab-dashboard') loadDashboardData();
             else if (targetTab === 'tab-comandas') loadComandasData();
             else if (targetTab === 'tab-crear-producto') { loadCatalogSetup(); cargarCatalogoAdmin(); }
+            else if (targetTab === 'tab-promociones') { cargarCatalogoAdmin().then(pintarSelectorProductos); cargarPromociones(); }
             else if (targetTab === 'tab-crear-personal') { loadPersonalSetup(); cargarPersonalAdmin(); }
             else if (targetTab === 'tab-stock') loadStockSetup();
             else if (targetTab === 'tab-inventario') loadInventoryData();
@@ -3034,7 +3297,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // leían igual. El nombre es lo que se busca en esta lista, así que es lo
     // único que tiene garantizada la línea entera.
     function filaLista({ titulo, detalle, insignia, inactivo, onBorrar,
-                         foto, onFoto, onQuitarFoto, marcas, onEditar }) {
+                         foto, onFoto, onQuitarFoto, marcas, onEditar, nota }) {
         const fila = document.createElement('div');
         fila.className = 'lista-fila' + (inactivo ? ' inactiva' : '');
 
@@ -3113,6 +3376,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (meta.childNodes.length) cuerpo.appendChild(meta);
+
+        // Renglón 3, opcional: un texto largo que necesita el ancho entero y
+        // puede saltar de línea. Lo que lleva dentro una promoción no cabe en
+        // una insignia —"1 × Johnnie Walker Red Label + 2 × Cerveza Paceña 350
+        // ml" son sesenta caracteres— y truncado no sirve de nada, porque lo
+        // que se quiere comprobar de un vistazo es justo el final.
+        if (nota) {
+            const linea = document.createElement('div');
+            linea.className = 'lista-nota';
+            linea.textContent = nota;
+            cuerpo.appendChild(linea);
+        }
+
         fila.appendChild(cuerpo);
 
         // Acciones, siempre a la derecha y siempre en el mismo sitio.
@@ -4035,6 +4311,344 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
     }
+
+// ==========================================
+    // PROMOCIONES (panel de administración)
+    // ==========================================
+    // Un paquete de productos a precio cerrado. Se arma aquí eligiendo qué
+    // lleva y cuánto cuesta; el resto lo hace el servidor.
+
+    let promosAdmin = [];
+    // Lo que se está armando ahora: id_producto -> cantidad. Un Map y no una
+    // lista para que añadir dos veces la misma cerveza sume, en vez de dejar
+    // dos renglones iguales.
+    let promoArmando = new Map();
+    // Si se está editando una que ya existe, su id. null si es nueva.
+    let promoEditando = null;
+
+    function precioSueltoArmado() {
+        let suma = 0;
+        promoArmando.forEach((cant, id) => {
+            const p = (catalogoAdmin.productos || []).find(x => x.id_producto === id);
+            if (p) suma += Number(p.precio_venta) * cant;
+        });
+        return Math.round(suma * 100) / 100;
+    }
+
+    function pintarSelectorProductos() {
+        const sel = document.getElementById('promo-producto');
+        if (!sel) return;
+        const elegido = sel.value;
+        sel.innerHTML = '';
+
+        const vacio = document.createElement('option');
+        vacio.value = '';
+        vacio.textContent = 'Elige un producto…';
+        sel.appendChild(vacio);
+
+        // Agrupados por categoría, igual que la lista del catálogo: con veinte
+        // productos, una lista plana obliga a leerla entera.
+        const porCat = new Map();
+        (catalogoAdmin.productos || []).filter(p => p.activo).forEach(p => {
+            const cat = (catalogoAdmin.categorias || [])
+                .find(c => c.id_categoria === p.id_categoria);
+            const nombre = cat ? cat.nombre : 'Sin categoría';
+            if (!porCat.has(nombre)) porCat.set(nombre, []);
+            porCat.get(nombre).push(p);
+        });
+
+        [...porCat.keys()].sort().forEach(nombreCat => {
+            const grupo = document.createElement('optgroup');
+            grupo.label = nombreCat;
+            porCat.get(nombreCat).forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id_producto;
+                opt.textContent = p.nombre + '  ·  ' + Number(p.precio_venta).toFixed(2) + ' Bs.';
+                grupo.appendChild(opt);
+            });
+            sel.appendChild(grupo);
+        });
+
+        if (elegido) sel.value = elegido;
+    }
+
+    function pintarContenidoArmado() {
+        const caja = document.getElementById('promo-contenido');
+        const cuentas = document.getElementById('promo-cuentas');
+        if (!caja) return;
+        caja.innerHTML = '';
+
+        if (promoArmando.size === 0) {
+            const vacio = document.createElement('p');
+            vacio.className = 'promo-vacio';
+            vacio.textContent = 'Todavía no lleva nada. Elige un producto y añádelo.';
+            caja.appendChild(vacio);
+        }
+
+        promoArmando.forEach((cant, id) => {
+            const p = (catalogoAdmin.productos || []).find(x => x.id_producto === id);
+            const fila = document.createElement('div');
+            fila.className = 'promo-linea';
+
+            const texto = document.createElement('span');
+            texto.className = 'promo-linea-nombre';
+            texto.textContent = p ? p.nombre : 'producto #' + id;
+            fila.appendChild(texto);
+
+            const precio = document.createElement('span');
+            precio.className = 'promo-linea-precio';
+            precio.textContent = p
+                ? (Number(p.precio_venta) * cant).toFixed(2) + ' Bs.'
+                : '';
+            fila.appendChild(precio);
+
+            const control = document.createElement('div');
+            control.className = 'promo-linea-control';
+
+            const menos = document.createElement('button');
+            menos.type = 'button';
+            menos.className = 'cart-qty-btn';
+            menos.textContent = '−';
+            menos.setAttribute('aria-label', 'Una menos de ' + (p ? p.nombre : ''));
+            menos.addEventListener('click', () => {
+                const ahora = promoArmando.get(id) || 0;
+                if (ahora <= 1) promoArmando.delete(id);
+                else promoArmando.set(id, ahora - 1);
+                pintarContenidoArmado();
+            });
+            control.appendChild(menos);
+
+            const num = document.createElement('span');
+            num.className = 'promo-linea-cant';
+            num.textContent = cant;
+            control.appendChild(num);
+
+            const mas = document.createElement('button');
+            mas.type = 'button';
+            mas.className = 'cart-qty-btn';
+            mas.textContent = '+';
+            mas.setAttribute('aria-label', 'Uno más de ' + (p ? p.nombre : ''));
+            mas.addEventListener('click', () => {
+                promoArmando.set(id, Math.min(99, (promoArmando.get(id) || 0) + 1));
+                pintarContenidoArmado();
+            });
+            control.appendChild(mas);
+
+            const quitar = document.createElement('button');
+            quitar.type = 'button';
+            quitar.className = 'lista-borrar';
+            quitar.textContent = '✕';
+            quitar.title = 'Quitar de la promoción';
+            quitar.setAttribute('aria-label', 'Quitar ' + (p ? p.nombre : '') + ' de la promoción');
+            quitar.addEventListener('click', () => {
+                promoArmando.delete(id);
+                pintarContenidoArmado();
+            });
+            control.appendChild(quitar);
+
+            fila.appendChild(control);
+            caja.appendChild(fila);
+        });
+
+        // La cuenta a la vista mientras se teclea el precio: es lo que evita
+        // dar de alta un "combo" que sale más caro que comprarlo suelto.
+        if (cuentas) {
+            const suelto = precioSueltoArmado();
+            const pedido = Number(document.getElementById('promo-precio').value);
+            if (!suelto) {
+                cuentas.textContent = '';
+                cuentas.className = 'promo-cuentas';
+            } else if (!Number.isFinite(pedido) || pedido <= 0) {
+                cuentas.textContent = 'Suelto costaría ' + suelto.toFixed(2) + ' Bs.';
+                cuentas.className = 'promo-cuentas';
+            } else {
+                const ahorro = Math.round((suelto - pedido) * 100) / 100;
+                cuentas.textContent = ahorro > 0
+                    ? 'Suelto costaría ' + suelto.toFixed(2) + '. El cliente ahorra ' + ahorro.toFixed(2) + ' Bs.'
+                    : ahorro === 0
+                        ? 'Cuesta lo mismo que suelto. No es una promoción.'
+                        : 'Cuidado: sale ' + Math.abs(ahorro).toFixed(2) + ' Bs. MÁS CARO que comprarlo suelto.';
+                cuentas.className = 'promo-cuentas' + (ahorro > 0 ? ' bien' : ' mal');
+            }
+        }
+    }
+
+    function limpiarFormularioPromo() {
+        promoEditando = null;
+        promoArmando = new Map();
+        document.getElementById('promo-nombre').value = '';
+        document.getElementById('promo-desc').value = '';
+        document.getElementById('promo-precio').value = '';
+        document.getElementById('promo-titulo-form').textContent = 'Nueva promoción';
+        document.getElementById('promo-guardar').textContent = 'Crear promoción';
+        document.getElementById('promo-cancelar').classList.add('hide');
+        pintarContenidoArmado();
+    }
+
+    function editarPromocion(pr) {
+        promoEditando = pr.id_promocion;
+        promoArmando = new Map((pr.contenido || []).map(c => [c.id_producto, c.cantidad]));
+        document.getElementById('promo-nombre').value = pr.nombre || '';
+        document.getElementById('promo-desc').value = pr.descripcion || '';
+        document.getElementById('promo-precio').value = Number(pr.precio).toFixed(2);
+        document.getElementById('promo-titulo-form').textContent = 'Editar promoción';
+        document.getElementById('promo-guardar').textContent = 'Guardar cambios';
+        document.getElementById('promo-cancelar').classList.remove('hide');
+        pintarContenidoArmado();
+        document.getElementById('promo-nombre').scrollIntoView({ block: 'center' });
+    }
+
+    async function cargarPromociones() {
+        try {
+            const res = await fetch('/api/admin/promociones');
+            const data = await res.json();
+            promosAdmin = data.promociones || [];
+            pintarPromociones();
+        } catch (err) {
+            notify('No se pudieron cargar las promociones.', 'error');
+        }
+    }
+
+    function pintarPromociones() {
+        const lista = document.getElementById('lista-promociones');
+        const cuenta = document.getElementById('cont-promociones');
+        if (!lista) return;
+        lista.innerHTML = '';
+        if (cuenta) cuenta.textContent = promosAdmin.length;
+
+        if (promosAdmin.length === 0) {
+            lista.innerHTML = '<p class="promo-vacio">Todavía no hay ninguna promoción.</p>';
+            return;
+        }
+
+        promosAdmin.forEach(pr => {
+            const dentro = (pr.contenido || [])
+                .map(c => c.cantidad + ' × ' + c.nombre).join('  +  ');
+            const fila = filaLista({
+                titulo: pr.nombre,
+                detalle: Number(pr.precio).toFixed(2) + ' Bs.',
+                insignia: pr.ahorro > 0 ? 'ahorra ' + Number(pr.ahorro).toFixed(2) : null,
+                nota: dentro,
+                inactivo: !pr.activa,
+                onEditar: () => editarPromocion(pr),
+                marcas: [{
+                    texto: pr.activa ? 'Encendida' : 'Apagada',
+                    activa: !!pr.activa,
+                    onTocar: () => alternarPromocion(pr)
+                }],
+                onBorrar: () => borrarPromocion(pr)
+            });
+            lista.appendChild(fila);
+        });
+    }
+
+    async function guardarPromocion() {
+        const boton = document.getElementById('promo-guardar');
+        const cuerpo = {
+            nombre: document.getElementById('promo-nombre').value,
+            descripcion: document.getElementById('promo-desc').value,
+            precio: document.getElementById('promo-precio').value,
+            contenido: [...promoArmando.entries()]
+                .map(([id_producto, cantidad]) => ({ id_producto, cantidad })),
+            id_admin: currentUser ? currentUser.id_admin : 1
+        };
+
+        boton.disabled = true;
+        try {
+            const ruta = promoEditando
+                ? '/api/admin/promociones/' + promoEditando
+                : '/api/admin/promociones';
+            const res = await fetch(ruta, {
+                method: promoEditando ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(cuerpo)
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo guardar.', 'error', 6000);
+                return;
+            }
+            notify(data.message, 'ok');
+            limpiarFormularioPromo();
+            cargarPromociones();
+            // La caja tiene que ver el combo nuevo sin recargar.
+            fetchProductsAndMenu();
+        } catch (err) {
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        } finally {
+            boton.disabled = false;
+        }
+    }
+
+    async function alternarPromocion(pr) {
+        try {
+            const res = await fetch('/api/admin/promociones/' + pr.id_promocion, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nombre: pr.nombre,
+                    descripcion: pr.descripcion,
+                    precio: pr.precio,
+                    activa: !pr.activa,
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo cambiar.', 'error');
+                return;
+            }
+            notify(pr.activa ? '"' + pr.nombre + '" apagada.' : '"' + pr.nombre + '" encendida.', 'ok');
+            cargarPromociones();
+            fetchProductsAndMenu();
+        } catch (err) {
+            notify('Sin conexión con el servidor.', 'error');
+        }
+    }
+
+    async function borrarPromocion(pr) {
+        if (!confirm('¿Eliminar la promoción "' + pr.nombre + '"?\n\nLos productos que lleva dentro no se tocan.')) return;
+        try {
+            const res = await fetch('/api/admin/promociones/' + pr.id_promocion, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_admin: currentUser ? currentUser.id_admin : 1 })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo eliminar.', 'error');
+                return;
+            }
+            notify(data.message, data.retirada ? 'warn' : 'ok', data.retirada ? 7000 : 4000);
+            if (promoEditando === pr.id_promocion) limpiarFormularioPromo();
+            cargarPromociones();
+            fetchProductsAndMenu();
+        } catch (err) {
+            notify('Sin conexión con el servidor.', 'error');
+        }
+    }
+
+    document.getElementById('promo-anadir').addEventListener('click', () => {
+        const sel = document.getElementById('promo-producto');
+        const id = parseInt(sel.value, 10);
+        const cant = parseInt(document.getElementById('promo-cantidad').value, 10);
+        if (!id) {
+            notify('Elige primero un producto.', 'warn');
+            return;
+        }
+        if (!Number.isInteger(cant) || cant <= 0) {
+            notify('La cantidad tiene que ser 1 o más.', 'warn');
+            return;
+        }
+        promoArmando.set(id, Math.min(99, (promoArmando.get(id) || 0) + cant));
+        sel.value = '';
+        document.getElementById('promo-cantidad').value = 1;
+        pintarContenidoArmado();
+    });
+
+    document.getElementById('promo-precio').addEventListener('input', pintarContenidoArmado);
+    document.getElementById('promo-guardar').addEventListener('click', guardarPromocion);
+    document.getElementById('promo-cancelar').addEventListener('click', limpiarFormularioPromo);
 
     // Utility: helper to show errors inside containers
     function showError(element, text) {

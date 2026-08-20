@@ -307,6 +307,26 @@ window.ThermalPrinter = (function () {
   }
 
   /** Ticket de cobro (copia del cajero). */
+  /**
+   * Cuántas líneas y cuántas unidades lleva el pedido.
+   *
+   * Cuenta también lo que va dentro de los paquetes: el pie del ticket dice
+   * cuántas cosas hay que servir, y las bebidas de un combo se sirven igual
+   * que las sueltas. Dejarlas fuera haría que un ticket de dos combos dijera
+   * "0 productos".
+   */
+  function contarPedido(model) {
+    let lineas = (model.items || []).length;
+    let unidades = (model.items || []).reduce((n, i) => n + Number(i.cantidad || 0), 0);
+    (model.promociones || []).forEach(pr => {
+      (pr.contenido || []).forEach(c => {
+        lineas += 1;
+        unidades += Number(c.cantidad || 0);
+      });
+    });
+    return { lineas, unidades };
+  }
+
   function buildCajeroOps(model, settings) {
     const w = settings.width;
     const ops = buildHeaderOps(model, settings, 'COPIA CAJERO');
@@ -323,6 +343,23 @@ window.ThermalPrinter = (function () {
 
     ops.push(op(''));
     ops.push(op(sectionTitle('DETALLE', w), { bold: true }));
+
+    // Los paquetes primero y como una sola cosa: su nombre, su precio cerrado
+    // y debajo lo que lleva dentro, sin importes. El precio del paquete se
+    // reparte entre sus productos para que cuadre el cierre, pero eso es
+    // contabilidad interna: en el papel, un combo de 60 vale 60.
+    (model.promociones || []).forEach(pr => {
+      wrap(pr.nombre, w).forEach(l => ops.push(op(l, { bold: true })));
+      ops.push(op(padPair(
+        '   ' + pr.cantidad + ' x ' + money(pr.precio_unitario),
+        money(pr.subtotal), w)));
+
+      (pr.contenido || []).forEach(c => {
+        const cabeza = '   └ ' + c.cantidad + ' ';
+        wrap(c.nombre, w - cabeza.length).forEach((l, i) => ops.push(op(
+          i === 0 ? cabeza + l : ' '.repeat(cabeza.length) + l)));
+      });
+    });
 
     // Dos líneas por producto: el nombre entero arriba y debajo, sangrado,
     // "cantidad x precio ....... importe". Así el nombre nunca compite por el
@@ -361,10 +398,10 @@ window.ThermalPrinter = (function () {
 
     ops.push(op(divider(w)));
 
-    const unidades = model.items.reduce((n, i) => n + Number(i.cantidad || 0), 0);
+    const cuenta = contarPedido(model);
     ops.push(op(padPair(
-      model.items.length + (model.items.length === 1 ? ' producto' : ' productos'),
-      unidades + (unidades === 1 ? ' unidad' : ' unidades'), w)));
+      cuenta.lineas + (cuenta.lineas === 1 ? ' producto' : ' productos'),
+      cuenta.unidades + (cuenta.unidades === 1 ? ' unidad' : ' unidades'), w)));
 
     // El total, centrado y a doble tamaño en su propio bloque. Es la cifra que
     // el cliente comprueba antes de pagar y la que se discute si algo no
@@ -425,11 +462,28 @@ window.ThermalPrinter = (function () {
     ops.push(op(sectionTitle('PREPARAR', w), { bold: true }));
     ops.push(op(''));
 
+    // Los paquetes, con su nombre encima y sus bebidas debajo, cada una con su
+    // casilla. El bartender no sirve "un combo": sirve un whisky y dos
+    // cervezas, y necesita poder tacharlas de una en una. El nombre va arriba
+    // para que sepa por qué van juntas y no las reparta en dos bandejas.
+    (model.promociones || []).forEach((pr, i) => {
+      if (i > 0) ops.push(op(''));
+      wrapIndent(pr.cantidad + ' x ' + pr.nombre, w, 4)
+        .forEach(l => ops.push(op(l, { bold: true, tall: true })));
+      (pr.contenido || []).forEach(c => {
+        const cabeza = '    [ ] ' + c.cantidad + ' ';
+        wrap(c.nombre, w - cabeza.length)
+          .forEach((l, j) => ops.push(op(
+            j === 0 ? cabeza + l : ' '.repeat(cabeza.length) + l, { bold: true })));
+      });
+    });
+
     // Cada producto, grande y con su casilla, separado del siguiente por una
     // línea en blanco. El hueco no es decorativo: es lo que permite tachar con
     // bolígrafo sin comerse el renglón de abajo, y lo que evita leer dos
     // productos como uno solo cuando la barra está a media luz.
     model.items.forEach((item, i) => {
+      if ((model.promociones || []).length > 0 && i === 0) ops.push(op(''));
       if (i > 0) ops.push(op(''));
       wrapIndent('[ ] ' + item.cantidad + ' x ' + item.nombre, w, 4)
         .forEach(l => ops.push(op(l, { bold: true, tall: true })));
@@ -446,10 +500,10 @@ window.ThermalPrinter = (function () {
 
     ops.push(op(''));
     ops.push(op(divider(w)));
-    const unidades = model.items.reduce((n, i) => n + Number(i.cantidad || 0), 0);
+    const cuenta = contarPedido(model);
     ops.push(op(padPair(
-      model.items.length + (model.items.length === 1 ? ' producto' : ' productos'),
-      unidades + (unidades === 1 ? ' unidad' : ' unidades'), w)));
+      cuenta.lineas + (cuenta.lineas === 1 ? ' producto' : ' productos'),
+      cuenta.unidades + (cuenta.unidades === 1 ? ' unidad' : ' unidades'), w)));
 
     // Las observaciones sólo salen si las hay, y entonces en grande: son la
     // causa más común de que un pedido vuelva a la barra.
