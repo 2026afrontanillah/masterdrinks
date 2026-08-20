@@ -1802,6 +1802,18 @@ select option {
     margin-bottom: 24px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     padding-bottom: 16px;
+    /* En fila: el nombre a la izquierda, "Salir" a la derecha. */
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.admin-user-info .user-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .admin-nav {
@@ -3581,20 +3593,6 @@ select option {
 
 /* Cerrar sesión, en la cabecera junto al nombre. Discreto pero siempre a la
    vista: abajo del todo obligaba a desplazar el menú para encontrarlo. */
-.admin-user-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.admin-user-info .user-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .admin-salir {
     flex-shrink: 0;
     min-height: 32px;

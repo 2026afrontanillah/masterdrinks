@@ -230,6 +230,24 @@ const check = (nombre, ok, extra) => {
   await esperar(120);
   check('Y se puede volver a montar el pedido', id('cart-count').textContent === '2');
 
+  // El latido del total. Es un adorno, pero el adorno lo dispara código: si la
+  // clase deja de ponerse por un cambio de nombre en la hoja de estilos, nada
+  // falla y nadie se entera hasta que alguien nota que la cifra ya no se
+  // mueve. Y el latido es lo que confirma de reojo que el toque entró.
+  check('El total late cuando la cifra cambia',
+    id('cart-total-amount').classList.contains('total-late'),
+    id('cart-total-amount').textContent);
+
+  const totalAntes = id('cart-total-amount').textContent;
+  id('cart-total-amount').classList.remove('total-late');
+  // Un repintado que no cambia la cifra: tocar el buscador no toca el carrito.
+  escribir(id('product-search'), '');
+  await esperar(120);
+  check('Pero no late si la cifra no ha cambiado',
+    !id('cart-total-amount').classList.contains('total-late') &&
+    id('cart-total-amount').textContent === totalAntes,
+    'si latiera en cada repintado sería un tic y se dejaría de mirar');
+
   // Salir sin cobrar tiene que dejar la caja en blanco. Si no, el siguiente
   // mesero entra con su PIN y se encuentra el pedido a medias del anterior.
   const antesDeSalir = id('cart-count').textContent;
@@ -514,6 +532,59 @@ const check = (nombre, ok, extra) => {
     [...nombres].every(n => !n.textContent.endsWith('…') && n.textContent.trim().length > 0),
     (nombres[0] || {}).textContent);
 
+  // -- 10. cambiar un producto, pulsando de verdad --------------------------
+  // Esto se prueba desde la interfaz y no sólo contra la API porque lo que
+  // puede romperse aquí es otra cosa: que el botón no tenga escuchador, que la
+  // función que abre el cuadro no vea las variables que usa, o que al guardar
+  // no se refresque la rejilla de la caja y se siga cobrando el precio viejo.
+  const primeraFila = $('#lista-productos .lista-fila');
+  const nombreOriginal = primeraFila.querySelector('.lista-nombre').textContent;
+  const botonEditar = primeraFila.querySelector('.lista-editar');
+  check('Cada producto de la lista tiene su botón de editar', !!botonEditar);
+
+  click(botonEditar);
+  await esperar(400);
+  check('Al pulsarlo se abre el cuadro',
+    !id('editar-modal').classList.contains('hide'));
+  check('Y viene relleno con lo que ya tenía el producto',
+    id('editar-nombre').value === nombreOriginal &&
+    Number(id('editar-precio').value) > 0,
+    id('editar-nombre').value + ' a ' + id('editar-precio').value);
+  check('Con su categoría ya elegida, no la primera de la lista',
+    id('editar-categoria').value !== '' &&
+    id('editar-categoria').options.length > 0,
+    (id('editar-categoria').selectedOptions[0] || {}).textContent);
+
+  const precioViejo = Number(id('editar-precio').value);
+  const precioNuevo = Math.round((precioViejo + 7.5) * 100) / 100;
+  escribir(id('editar-precio'), String(precioNuevo));
+  click(id('editar-guardar'));
+  await esperar(900);
+
+  check('Al guardar se cierra el cuadro',
+    id('editar-modal').classList.contains('hide'));
+
+  const enServidor = await (await fetch(URL_BASE + '/api/productos')).json();
+  const yaCambiado = (enServidor.productos || [])
+    .find(p => p.nombre === nombreOriginal);
+  check('El precio nuevo quedó guardado',
+    yaCambiado && Number(yaCambiado.precio_venta) === precioNuevo,
+    'servidor dice ' + (yaCambiado || {}).precio_venta + ', se pidió ' + precioNuevo);
+
+  const enLista = [...window.document.querySelectorAll('#lista-productos .lista-fila')]
+    .find(f => f.querySelector('.lista-nombre').textContent === nombreOriginal);
+  check('Y la lista del panel se refresca sola, sin recargar',
+    enLista && enLista.querySelector('.lista-detalle').textContent.includes(precioNuevo.toFixed(2)),
+    enLista ? enLista.querySelector('.lista-detalle').textContent : 'no está en la lista');
+
+  // Lo devolvemos a su precio, que esta base la usan las demás pruebas.
+  click(primeraFila.querySelector('.lista-editar') ||
+        enLista.querySelector('.lista-editar'));
+  await esperar(400);
+  escribir(id('editar-precio'), String(precioViejo));
+  click(id('editar-guardar'));
+  await esperar(900);
+
   // -- 8. botones de inventario ---------------------------------------------
   click($('[data-tab="tab-stock"]'));
   await esperar(600);
@@ -562,6 +633,27 @@ const check = (nombre, ok, extra) => {
   check('El panel puede descargar el PDF',
     resRep.ok && buf.toString('latin1', 0, 5) === '%PDF-',
     (buf.length / 1024).toFixed(1) + ' KB');
+
+  // =======================================================================
+  console.log(C.tit(String.fromCharCode(10) + '  La hoja de estilos está bien cerrada'));
+  // =======================================================================
+  // La hoja se ha ido parcheando a trozos, y una llave de más deja sin efecto
+  // TODO lo que viene detrás sin dar un solo error: la página carga, se ve casi
+  // bien, y falta la mitad de los estilos del final. Es de esas cosas que se
+  // descubren en el evento.
+  const hoja = fs.readFileSync(path.join(RAIZ, 'public/style.css'), 'utf8');
+  const sinComentarios = hoja.replace(/\/\*[\s\S]*?\*\//g, '');
+  let nivel = 0, sobrante = 0;
+  for (const c of sinComentarios) {
+    if (c === '{') nivel++;
+    else if (c === '}' && --nivel < 0) { sobrante++; nivel = 0; }
+  }
+  check('Cada regla abre y cierra su llave',
+    nivel === 0 && sobrante === 0,
+    nivel !== 0 ? nivel + ' sin cerrar' : sobrante + ' cierres de más');
+  check('Y no hay ningún comentario abierto sin cerrar',
+    (hoja.match(/\/\*/g) || []).length === (hoja.match(/\*\//g) || []).length,
+    'un /* suelto se come las reglas que vienen detrás');
 
   // =======================================================================
   console.log(C.tit(String.fromCharCode(10) + '  Ningún cuadro se queda invisible'));

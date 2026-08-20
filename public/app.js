@@ -2793,6 +2793,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // una tarjeta que mide 150.
     const FOTO_LADO = 400;
     const FOTO_CALIDAD = 0.82;
+    // El mismo tope que aplica el servidor, con holgura: más vale recortar
+    // aquí, donde todavía se puede cambiar de formato, que recibir un rechazo
+    // cuando ya no queda nada que hacer.
+    const FOTO_MAX_CARACTERES = Math.floor(400 * 1024 * 1.4 * 0.9);
 
     /**
      * ¿La imagen tiene algún píxel transparente?
@@ -2846,8 +2850,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     // transparencia y lo que no se rellena sale negro.
                     try {
                         if (tieneTransparencia(ctx, ancho, alto)) {
-                            resolve(lienzo.toDataURL('image/png'));
-                            return;
+                            const enPng = lienzo.toDataURL('image/png');
+                            // El PNG no comprime como el JPEG. Una foto con
+                            // mucho detalle puede pasarse del tamaño que acepta
+                            // la base, y el aviso que le llegaría a quien la
+                            // sube ("pesa demasiado") no dice qué hacer con
+                            // ella. Si se pasa, se cambia a JPEG y se pierde el
+                            // fondo recortado, que es mucho menos grave que no
+                            // poder poner la foto.
+                            if (enPng.length <= FOTO_MAX_CARACTERES) {
+                                resolve(enPng);
+                                return;
+                            }
                         }
                         ctx.globalCompositeOperation = 'destination-over';
                         ctx.fillStyle = '#ffffff';
