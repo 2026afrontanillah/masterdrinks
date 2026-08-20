@@ -104,11 +104,18 @@ if (!enSerio) {
 }
 
 // ---- Copia de seguridad ---------------------------------------------------
-const respaldo = BASE.replace(/\.db$/, '') + '.antes-de-reiniciar.db';
+// A su carpeta, no junto a la base buena: sueltas en la raíz parecen otra base
+// de datos más y no se sabe cuál es la del evento.
+const carpetaRespaldos = path.join(path.dirname(BASE), 'respaldos');
+const respaldo = path.join(
+  carpetaRespaldos,
+  path.basename(BASE).replace(/\.db$/, '') + '.antes-de-reiniciar.db'
+);
 try {
+  fs.mkdirSync(carpetaRespaldos, { recursive: true });
   if (fs.existsSync(respaldo)) fs.unlinkSync(respaldo);
   db.exec("VACUUM INTO '" + respaldo.replace(/'/g, "''") + "'");
-  console.log(C.gris('\n  Copia previa: ' + path.basename(respaldo)));
+  console.log(C.gris('\n  Copia previa: respaldos/' + path.basename(respaldo)));
 } catch (err) {
   console.error(C.mal('\n  No se pudo crear la copia de seguridad: ') + err.message);
   console.error('  No se borra nada.\n');

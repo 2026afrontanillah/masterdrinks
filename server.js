@@ -360,10 +360,20 @@ function unificarBarras() {
 // Copia del archivo antes de la unificación. VACUUM INTO la hace desde dentro
 // de SQLite, así que incluye lo que aún esté en el -wal; copiar el .db a mano
 // se dejaría fuera las últimas ventas.
-const RESPALDO = dbFile.replace(/\.db$/, '') + '.antes-de-unificar.db';
+//
+// Va a su carpeta y no al lado de la base buena. Sueltas en la raíz del
+// proyecto, las copias parecen tres bases de datos distintas y no queda claro
+// cuál es la del evento; en `respaldos/` se ve de un vistazo qué son y se
+// borran de una vez cuando ya no hacen falta.
+const CARPETA_RESPALDOS = path.join(path.dirname(dbFile), 'respaldos');
+const RESPALDO = path.join(
+  CARPETA_RESPALDOS,
+  path.basename(dbFile).replace(/\.db$/, '') + '.antes-de-unificar.db'
+);
 
 function respaldarBase() {
   if (fs.existsSync(RESPALDO)) return Promise.resolve();   // ya hay una, no se pisa
+  fs.mkdirSync(CARPETA_RESPALDOS, { recursive: true });
   return dbRun(`VACUUM INTO '${RESPALDO.replace(/'/g, "''")}'`).then(() => {});
 }
 

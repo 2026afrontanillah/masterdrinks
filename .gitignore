@@ -53,6 +53,7 @@ diagnostico-npm.txt
 
 # Copias de seguridad automáticas antes de unificar barras. Se crean una sola
 # vez por base, junto a ella, y no deben viajar al repositorio.
+respaldos/
 *.antes-de-unificar.db*
 
 # Copia previa al reinicio de ventas
