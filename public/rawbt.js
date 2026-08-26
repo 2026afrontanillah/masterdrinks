@@ -25,6 +25,80 @@ window.ThermalPrinter = (function () {
   // ---------------------------------------------------------------------
   const SETTINGS_KEY = 'masterdrinks.printer.v1';
 
+  // Preparar el bitmap del logo Euphoria para impresoras térmicas ESC/POS
+  let logoRasterEscPos = null;
+
+  function prepararLogoRaster() {
+    if (typeof Image === 'undefined' || typeof document === 'undefined') return;
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = function () {
+        try {
+          const targetWidth = 240;
+          const targetHeight = Math.round((img.naturalHeight / img.naturalWidth) * targetWidth);
+          const canvas = document.createElement('canvas');
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, targetWidth, targetHeight);
+          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+          const imgData = ctx.getImageData(0, 0, targetWidth, targetHeight);
+          const pixels = imgData.data;
+
+          const bytesWidth = Math.ceil(targetWidth / 8);
+          const rasterData = [];
+
+          const xL = bytesWidth % 256;
+          const xH = Math.floor(bytesWidth / 256);
+          const yL = targetHeight % 256;
+          const yH = Math.floor(targetHeight / 256);
+
+          for (let y = 0; y < targetHeight; y++) {
+            for (let b = 0; b < bytesWidth; b++) {
+              let byteVal = 0;
+              for (let bit = 0; bit < 8; bit++) {
+                const x = b * 8 + bit;
+                if (x < targetWidth) {
+                  const idx = (y * targetWidth + x) * 4;
+                  const r = pixels[idx];
+                  const g = pixels[idx + 1];
+                  const b_val = pixels[idx + 2];
+                  const a = pixels[idx + 3];
+                  const lum = (0.299 * r + 0.587 * g + 0.114 * b_val);
+                  if (lum < 170 && a > 80) {
+                    byteVal |= (1 << (7 - bit));
+                  }
+                }
+              }
+              rasterData.push(byteVal);
+            }
+          }
+
+          logoRasterEscPos = {
+            header: [0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH],
+            data: rasterData
+          };
+        } catch (e) {
+          console.warn('No se pudo procesar el raster del logo Euphoria:', e);
+        }
+      };
+      img.src = 'logo_euphoria.png';
+    } catch (err) {
+      console.warn('Error al cargar imagen del logo Euphoria:', err);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', prepararLogoRaster);
+    } else {
+      prepararLogoRaster();
+    }
+  }
+
   const DEFAULTS = {
     width: 32,          // 32 columnas = papel 58 mm · 48 columnas = papel 80 mm
     encoding: 'cp850',  // 'cp850' (con acentos) | 'ascii' (sin acentos)
@@ -277,7 +351,7 @@ window.ThermalPrinter = (function () {
     const ops = [];
 
     ops.push(op(rule(w)));
-    ops.push(op('MASTERDRINKS', { align: 'center', bold: true, tall: true, wide: true }));
+    ops.push(op('EUPHORIA', { align: 'center', bold: true, tall: true, wide: true, isLogo: true }));
     if (model.barra) ops.push(op(model.barra, { align: 'center', bold: true }));
     // El evento sólo si lo hay: en el montaje de prueba está vacío y una línea
     // en blanco en la cabecera parece un fallo de impresión.
@@ -452,7 +526,7 @@ window.ThermalPrinter = (function () {
   /** Ticket de preparación (copia del mesero, sin precios). */
   function buildMeseroOps(model, settings) {
     const w = settings.width;
-    const ops = buildHeaderOps(model, settings, 'PREPARACION');
+    const ops = buildHeaderOps(model, settings, 'BARRA');
 
     // Aquí no interesa la fecha entera ni quién cobró: sólo a qué hora entró la
     // comanda, para saber cuál lleva más rato esperando.
@@ -534,6 +608,13 @@ window.ThermalPrinter = (function () {
     let align = 'left', bold = false, size = 0x00;
 
     ops.forEach(o => {
+      if (o.isLogo && logoRasterEscPos) {
+        push(ESC, 0x61, 1); // Centrado
+        push(...logoRasterEscPos.header);
+        push(...logoRasterEscPos.data);
+        push(LF);
+        return;
+      }
       if (o.align !== align) {
         push(ESC, 0x61, o.align === 'center' ? 1 : 0); // ESC a n
         align = o.align;
@@ -589,6 +670,9 @@ window.ThermalPrinter = (function () {
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     return ops.map(o => {
+      if (o.isLogo) {
+        return `<div class="thermal-logo-box" style="text-align:center; padding: 4px 0;"><img src="logo_euphoria.png" alt="Euphoria" style="max-width: 140px; max-height: 40px; object-fit: contain; margin: 0 auto; display: block; filter: grayscale(1) contrast(1.3);"></div>`;
+      }
       // Alto y ancho se estiran por separado, nunca con font-size.
       //
       // La impresora dobla SÓLO la dimensión que se le pide: 'tall' es doble

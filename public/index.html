@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,10 +9,13 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <!-- Main Stylesheet -->
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=15">
 </head>
+
 <body>
     <!-- Background Glow Blobs -->
     <div class="blob blob-1"></div>
@@ -30,11 +34,13 @@
             <form id="login-form" class="auth-form">
                 <div class="form-group">
                     <label for="login-username">Usuario</label>
-                    <input type="text" id="login-username" placeholder="Ej. cajero_norte_1" required autocomplete="username">
+                    <input type="text" id="login-username" placeholder="Ej. cajero_norte_1" required
+                        autocomplete="username">
                 </div>
                 <div class="form-group">
                     <label for="login-password">Contraseña</label>
-                    <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+                    <input type="password" id="login-password" placeholder="••••••••" required
+                        autocomplete="current-password">
                 </div>
                 <button type="submit" class="primary-btn full-btn">Iniciar Sesión</button>
             </form>
@@ -45,35 +51,68 @@
         </div>
     </main>
 
-    <!-- 2. WAITER LOCK SECURITY MODAL -->
-    <div id="waiter-lock-modal" class="modal-overlay hide">
-        <div class="glass-card modal-card" style="position: relative;">
-            <!-- Aquí había una ← que devolvía al login. Se quitó: la barra es
-                 siempre la misma y el cajero no cambia durante el turno, así
-                 que ese botón sólo servía para salirse por error y tener que
-                 volver a teclear usuario y contraseña con cola en la barra.
+    <!-- El filtro de enfoque del cartel. Es una máscara de enfoque de toda la
+         vida: cada punto se refuerza restándole un poco a sus cuatro vecinos.
+         La suma del núcleo es 1, así que no aclara ni oscurece la imagen; sólo
+         devuelve el filo que pierde una foto pequeña al estirarse.
 
-                 La salida sigue existiendo para el encargado, escondida:
-                 mantener pulsado el candado tres segundos. -->
-            <div class="modal-header">
-                <span class="security-icon" id="salida-oculta" title="">🔒</span>
-                <h2>Verificación de Mesero</h2>
-                <p>Ingresa tu clave de mesero para iniciar la comanda</p>
-            </div>
-            <div class="cajero-badge">
-                <span class="label">Cajero Activo:</span>
-                <span id="active-cajero-name" class="val">Ana Torres</span>
-            </div>
-            <div class="pin-container-wrapper">
-                <!-- PIN Display Dots -->
+         Va aquí, en el documento, porque CSS sólo sabe hacer desenfoques y
+         esto es lo contrario. Se aplica únicamente cuando el cartel se queda
+         corto para la pantalla (ver .cartel-estirado). -->
+    <svg class="filtros-ocultos" aria-hidden="true" focusable="false">
+        <filter id="afilar-cartel" color-interpolation-filters="sRGB">
+            <feConvolveMatrix order="3" preserveAlpha="true" divisor="1"
+                kernelMatrix="0 -0.25 0  -0.25 2 -0.25  0 -0.25 0" />
+        </filter>
+    </svg>
+
+    <!-- 2. WAITER LOCK SECURITY MODAL -->
+    <!-- Pantalla de clave de mesero. Negra y partida en dos: el cartel del
+         evento ocupa la mitad izquierda de canto a canto y la clave se teclea
+         en la derecha.
+
+         No lleva tarjeta ni marco. El cartel ES el fondo de su mitad: en una
+         pantalla que sale una vez por comanda, lo que se ve desde el otro
+         lado de la barra tiene que ser el evento, no un recuadro con una foto
+         pequeña dentro.
+
+         El color del botón y del toque de las teclas sale del propio cartel
+         (ver pintarTemaDelAfiche en app.js). Todo lo demás es negro y blanco,
+         que es lo que deja que el cartel mande. -->
+    <div id="waiter-lock-modal" class="modal-overlay pantalla-pin hide">
+        <div class="pin-escena">
+
+            <!-- ---------- Izquierda: el cartel ---------- -->
+            <section class="pin-cartel">
+                <img id="ficha-afiche-img" class="hide" alt="Cartel del evento">
+                <!-- Sin cartel no se deja un rectángulo negro mudo. -->
+                <span id="ficha-afiche-vacio" class="pin-cartel-vacio">MasterDrinks</span>
+
+                <div class="pin-cartel-pie">
+                    <strong id="ficha-evento">MasterDrinks</strong>
+                    <span class="pin-cartel-datos">
+                        <span id="ficha-fecha">—</span>
+                        <i aria-hidden="true">·</i>
+                        <span id="ficha-lugar">—</span>
+                    </span>
+                </div>
+            </section>
+
+            <!-- ---------- Derecha: la clave ---------- -->
+            <section class="pin-panel">
+                <p class="pin-quien">
+                    <span id="ficha-barra">—</span>
+                    <i aria-hidden="true">·</i>
+                    <span id="active-cajero-name">—</span>
+                </p>
+
                 <div class="pin-dots-container" id="pin-dots">
                     <span class="dot"></span>
                     <span class="dot"></span>
                     <span class="dot"></span>
                     <span class="dot"></span>
                 </div>
-                
-                <!-- PIN Keyboard Grid -->
+
                 <div class="pin-keyboard">
                     <button class="pin-btn" data-key="1">1</button>
                     <button class="pin-btn" data-key="2">2</button>
@@ -84,57 +123,63 @@
                     <button class="pin-btn" data-key="7">7</button>
                     <button class="pin-btn" data-key="8">8</button>
                     <button class="pin-btn" data-key="9">9</button>
-                    <button class="pin-btn system" id="pin-clear">C</button>
+                    <span class="pin-hueco" aria-hidden="true"></span>
                     <button class="pin-btn" data-key="0">0</button>
-                    <button class="pin-btn system" id="pin-back">⌫</button>
+                    <!-- Un toque borra una cifra; mantener pulsado las borra
+                         todas. La tecla "C" de antes no está: ocupaba un sitio
+                         del teclado para algo que se usa una vez de cada cien,
+                         y con cola en la barra lo que hace falta es que el 0
+                         esté donde el pulgar lo busca. -->
+                    <button class="pin-btn system" id="pin-back" aria-label="Borrar">⌫</button>
                 </div>
-            </div>
-            <div id="waiter-error" class="error-msg hide"></div>
+
+                <button type="button" class="pin-enter" id="pin-enter">
+                    <svg class="pin-enter-icono" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M10 8l4 4-4 4M14 12H3" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round" />
+                    </svg>
+                    Ingresar
+                </button>
+
+                <div id="waiter-error" class="error-msg hide"></div>
+
+                <!-- La salida escondida al login: mantener pulsado el candado
+                     tres segundos cierra la sesión del cajero. Va en la
+                     esquina y apagado; quien no lo sabe, ve un icono y ya. -->
+                <span class="security-icon" id="salida-oculta" title="">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <rect x="4" y="10" width="16" height="10" rx="2.5" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M8 10V7.5a4 4 0 0 1 8 0V10" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </span>
+            </section>
         </div>
     </div>
 
     <!-- 3. MAIN POS SALES PORTAL -->
     <div id="pos-view" class="portal-container hide">
-        <!-- Top Navigation -->
-        <header class="top-nav">
-            <div class="nav-branding">
-                <span class="logo">🍹</span>
-                <div>
-                    <h2>MasterDrinks POS</h2>
-                    <!-- Sólo la insignia de instancia: antes había además una
-                         etiqueta con el nombre de la barra al lado, y como el
-                         servidor es de esa misma barra salían dos etiquetas
-                         diciendo lo mismo ("BARRA NORTE" y "NORTE"). -->
-                    <span class="instancia-badge hide"></span>
-                    <span id="pos-barra-name" class="hide"></span>
-                </div>
-            </div>
-            <div class="session-info">
-                <div class="user-pill">
-                    <span class="role">Cajero</span>
-                    <strong id="pos-cajero-label">Ana Torres</strong>
-                </div>
-                <div class="user-pill">
-                    <span class="role">Mesero</span>
-                    <strong id="pos-mesero-label">Juan Pérez</strong>
-                </div>
-                <button id="printer-test-btn" class="icon-btn" title="Probar y configurar la impresora">🖨️</button>
-                <button id="lock-pos-btn" class="icon-btn" title="Bloquear / Cambiar Mesero">🔒</button>
-            </div>
-        </header>
+        <div id="pos-sidebar-backdrop" class="pos-sidebar-backdrop hide"></div>
 
-        <div class="pos-layout">
-            <!-- Columna izquierda, reservada.
-                 Aquí van las herramientas que no son de venta (traspasos de
-                 stock y demás). Se queda montada aunque esté vacía para que al
-                 llenarla no se mueva de sitio nada de lo que el cajero ya tiene
-                 aprendido dónde está. -->
-            <aside class="pos-sidebar">
-                <!-- Mientras no lleguen los traspasos de stock, la columna
-                     lleva lo que el cajero necesita de un vistazo y hoy tiene
-                     que buscar: cuánto lleva vendido su turno y cuántas
-                     comandas. Un panel con "Espacio reservado" parecía roto. -->
-                <p class="sidebar-title">Este turno</p>
+        <div class="pos-layout" id="pos-layout">
+            <!-- Columna izquierda: Herramientas & Branding -->
+            <aside class="pos-sidebar" id="pos-sidebar">
+                <div class="pos-sidebar-branding">
+                    <div class="nav-branding">
+                        <span class="logo">🍹</span>
+                        <div>
+                            <h2>MasterDrinks POS</h2>
+                            <span class="instancia-badge hide"></span>
+                            <span id="pos-barra-name" class="hide"></span>
+                        </div>
+                    </div>
+                    <button type="button" id="close-sidebar-btn" class="sidebar-close-btn" title="Ocultar menú"
+                        aria-label="Ocultar menú">✕</button>
+                </div>
+
                 <div class="turno-dato">
                     <span class="turno-cifra" id="turno-total">0.00</span>
                     <span class="turno-unidad">Bs. cobrados</span>
@@ -145,10 +190,7 @@
                 </div>
                 <p class="turno-nota">Desde que abriste la caja en esta tablet.</p>
 
-                <!-- Mercancía. Las dos direcciones aquí mismo, en la caja:
-                     cuando llega el proveedor o hay que mandar una caja a otra
-                     barra, quien está delante es el cajero, no el encargado
-                     con el panel abierto. -->
+                <!-- Mercancía -->
                 <div class="sidebar-reservado">
                     <p class="sidebar-title">Mercancía</p>
                     <button type="button" id="agregar-stock-btn" class="secondary-btn full-btn herramienta-btn">
@@ -162,17 +204,19 @@
 
             <!-- Center Panel: Products Grid -->
             <main class="pos-main">
-                <div class="search-header">
-                    <input type="text" id="product-search" placeholder="Buscar producto...">
-                    <button type="button" id="search-clear-btn" class="search-clear-btn hide"
-                            aria-label="Limpiar búsqueda">✕</button>
-                </div>
-                <!-- Las categorías, justo debajo del buscador: son el otro modo
-                     de encontrar un producto, así que van con él y no en una
-                     columna aparte al otro lado de la pantalla. -->
-                <div id="category-list" class="category-menu" role="tablist"
-                     aria-label="Categorías de producto">
-                    <!-- Categories added dynamically -->
+                <div class="pos-main-header">
+                    <button type="button" id="toggle-sidebar-btn" class="icon-btn sidebar-toggle-btn"
+                        title="Mostrar/Ocultar menú lateral" aria-label="Menú lateral">
+                        <svg class="sidebar-toggle-icon" viewBox="0 0 24 24" width="20" height="20" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                    <div id="category-list" class="category-menu" role="tablist" aria-label="Categorías de producto">
+                        <!-- Categories added dynamically -->
+                    </div>
                 </div>
                 <div id="product-grid" class="product-grid">
                     <!-- Products rendered dynamically -->
@@ -181,6 +225,22 @@
 
             <!-- Right Panel: Shopping Cart -->
             <aside class="pos-cart">
+                <div class="cart-session-bar">
+                    <div class="session-info">
+                        <div class="user-pill">
+                            <span class="role">Cajero</span>
+                            <strong id="pos-cajero-label">Ana Torres</strong>
+                        </div>
+                        <div class="user-pill">
+                            <span class="role">Mesero</span>
+                            <strong id="pos-mesero-label">Juan Pérez</strong>
+                        </div>
+                        <button id="printer-test-btn" class="icon-btn"
+                            title="Probar y configurar la impresora">🖨️</button>
+                        <button id="lock-pos-btn" class="icon-btn" title="Bloquear / Cambiar Mesero">🔒</button>
+                    </div>
+                </div>
+
                 <div class="cart-header">
                     <h3>Carrito <span id="cart-count" class="cart-count">0</span></h3>
                     <button id="clear-cart" class="clear-btn">Vaciar</button>
@@ -235,14 +295,22 @@
                     </button>
                 </div>
                 <nav class="admin-nav">
-                    <button class="nav-tab-btn active" data-tab="tab-dashboard"><span class="nav-icono">📊</span><span class="nav-texto">Dashboard</span></button>
-                    <button class="nav-tab-btn" data-tab="tab-comandas"><span class="nav-icono">📝</span><span class="nav-texto">Comandas / Anulaciones</span></button>
-                    <button class="nav-tab-btn" data-tab="tab-crear-producto"><span class="nav-icono">🛍️</span><span class="nav-texto">Productos &amp; Categorías</span></button>
-                    <button class="nav-tab-btn" data-tab="tab-promociones"><span class="nav-icono">🏷️</span><span class="nav-texto">Promociones</span></button>
-                    <button class="nav-tab-btn" data-tab="tab-crear-personal"><span class="nav-icono">👥</span><span class="nav-texto">Personal</span></button>
-                    <button class="nav-tab-btn" data-tab="tab-stock"><span class="nav-icono">📦</span><span class="nav-texto">Inventario</span></button>
-                    <button class="nav-tab-btn" data-tab="tab-inventario"><span class="nav-icono">📋</span><span class="nav-texto">Reporte de Stock</span></button>
-                    <button class="nav-tab-btn" data-tab="tab-auditoria"><span class="nav-icono">🔍</span><span class="nav-texto">Logs &amp; Auditoría</span></button>
+                    <button class="nav-tab-btn active" data-tab="tab-dashboard"><span class="nav-icono">📊</span><span
+                            class="nav-texto">Dashboard</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-comandas"><span class="nav-icono">📝</span><span
+                            class="nav-texto">Comandas / Anulaciones</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-crear-producto"><span class="nav-icono">🛍️</span><span
+                            class="nav-texto">Productos &amp; Categorías</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-promociones"><span class="nav-icono">🏷️</span><span
+                            class="nav-texto">Promociones</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-crear-personal"><span class="nav-icono">👥</span><span
+                            class="nav-texto">Personal</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-stock"><span class="nav-icono">📦</span><span
+                            class="nav-texto">Inventario</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-inventario"><span class="nav-icono">📋</span><span
+                            class="nav-texto">Reporte de Stock</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-auditoria"><span class="nav-icono">🔍</span><span
+                            class="nav-texto">Logs &amp; Auditoría</span></button>
                 </nav>
                 <div class="sidebar-footer">
                     <p class="version-sello">versión <span class="version-num">—</span></p>
@@ -294,7 +362,8 @@
                         <div class="config-grid">
                             <div class="form-group">
                                 <label for="cfg-evento">Evento</label>
-                                <input type="text" id="cfg-evento" maxlength="120" placeholder="Ej. Festival de Verano 2026">
+                                <input type="text" id="cfg-evento" maxlength="120"
+                                    placeholder="Ej. Festival de Verano 2026">
                             </div>
                             <div class="form-group">
                                 <label for="cfg-fecha">Fecha</label>
@@ -314,7 +383,8 @@
                             </div>
                             <div class="form-group">
                                 <label for="cfg-responsable">Responsable</label>
-                                <input type="text" id="cfg-responsable" maxlength="120" placeholder="Ej. Adrián Frontanilla">
+                                <input type="text" id="cfg-responsable" maxlength="120"
+                                    placeholder="Ej. Adrián Frontanilla">
                             </div>
                         </div>
                         <div class="reporte-acciones">
@@ -359,10 +429,11 @@
                 <!-- Tab: Comandas -->
                 <section id="tab-comandas" class="tab-content hide">
                     <h1 class="page-title">Historial de Comandas</h1>
-                    
+
                     <!-- Search Filter for orders -->
                     <div class="search-header" style="max-width: 450px; margin-bottom: 20px;">
-                        <input type="text" id="comanda-search-input" placeholder="🔍 Buscar por Nº comanda (#) o mesero...">
+                        <input type="text" id="comanda-search-input"
+                            placeholder="🔍 Buscar por Nº comanda (#) o mesero...">
                     </div>
 
                     <div id="comandas-cards-container" class="comandas-cards-grid">
@@ -410,7 +481,8 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="prod-name">Nombre del Producto</label>
-                                    <input type="text" id="prod-name" placeholder="Ej. Ron Flor de Caña 7 Años" required>
+                                    <input type="text" id="prod-name" placeholder="Ej. Ron Flor de Caña 7 Años"
+                                        required>
                                 </div>
                                 <div class="form-group">
                                     <label for="prod-desc">Descripción</label>
@@ -428,7 +500,8 @@
                                 <div class="form-row">
                                     <div class="form-group">
                                         <label for="prod-price">Precio de Venta (Bs.)</label>
-                                        <input type="number" id="prod-price" min="0" step="0.5" placeholder="0.00" required>
+                                        <input type="number" id="prod-price" min="0" step="0.5" placeholder="0.00"
+                                            required>
                                     </div>
                                     <div class="form-group">
                                         <label for="prod-stock">Stock Inicial</label>
@@ -445,14 +518,16 @@
                                         <input type="checkbox" id="prod-requiere">
                                         <span class="casilla-texto">
                                             <strong>Se vende con acompañante</strong>
-                                            <small>Al ponerlo en el carrito se pedirá elegir cuál. Va incluido, sin coste.</small>
+                                            <small>Al ponerlo en el carrito se pedirá elegir cuál. Va incluido, sin
+                                                coste.</small>
                                         </span>
                                     </label>
                                     <label class="casilla" for="prod-es-acomp">
                                         <input type="checkbox" id="prod-es-acomp">
                                         <span class="casilla-texto">
                                             <strong>Puede ir de acompañante</strong>
-                                            <small>Aparecerá en la lista al elegir. Se sigue vendiendo suelto y cobrado.</small>
+                                            <small>Aparecerá en la lista al elegir. Se sigue vendiendo suelto y
+                                                cobrado.</small>
                                         </span>
                                     </label>
                                 </div>
@@ -467,11 +542,12 @@
                                             <span class="foto-vacia">Sin foto</span>
                                         </div>
                                         <div class="foto-acciones">
-                                            <label for="prod-foto" class="secondary-btn foto-elegir">Elegir imagen</label>
+                                            <label for="prod-foto" class="secondary-btn foto-elegir">Elegir
+                                                imagen</label>
                                             <input type="file" id="prod-foto" class="foto-input"
-                                                   accept="image/png,image/jpeg,image/webp">
+                                                accept="image/png,image/jpeg,image/webp">
                                             <button type="button" id="prod-foto-quitar"
-                                                    class="text-btn hide">Quitar</button>
+                                                class="text-btn hide">Quitar</button>
                                             <p class="campo-nota">Se guarda reducida, dentro de la base.</p>
                                         </div>
                                     </div>
@@ -485,27 +561,27 @@
                     <!-- El catálogo tal como está, para poder revisarlo y
                          quitar lo que no se vaya a vender esta noche. -->
                     <div class="listas-par">
-                    <div class="glass-card lista-card">
-                        <div class="lista-cabecera">
-                            <h2>Categorías</h2>
-                            <span id="cont-categorias" class="lista-cuenta">0</span>
+                        <div class="glass-card lista-card">
+                            <div class="lista-cabecera">
+                                <h2>Categorías</h2>
+                                <span id="cont-categorias" class="lista-cuenta">0</span>
+                            </div>
+                            <div id="lista-categorias" class="lista"></div>
                         </div>
-                        <div id="lista-categorias" class="lista"></div>
-                    </div>
 
-                    <div class="glass-card lista-card">
-                        <div class="lista-cabecera">
-                            <h2>Productos</h2>
-                            <span id="cont-productos" class="lista-cuenta">0</span>
-                            <input type="search" id="buscar-producto-cat" class="lista-buscador"
-                                   placeholder="Buscar producto">
+                        <div class="glass-card lista-card">
+                            <div class="lista-cabecera">
+                                <h2>Productos</h2>
+                                <span id="cont-productos" class="lista-cuenta">0</span>
+                                <input type="search" id="buscar-producto-cat" class="lista-buscador"
+                                    placeholder="Buscar producto">
+                            </div>
+                            <div id="lista-productos" class="lista"></div>
                         </div>
-                        <div id="lista-productos" class="lista"></div>
-                    </div>
                     </div>
                 </section>
 
-<!-- Tab: Promociones -->
+                <!-- Tab: Promociones -->
                 <section id="tab-promociones" class="tab-content hide">
                     <h1 class="page-title">Promociones</h1>
                     <div class="admin-grid-forms">
@@ -517,8 +593,8 @@
                             </p>
 
                             <div class="form-group">
-                                <label for="promo-nombre">Nombre</label>
-                                <input type="text" id="promo-nombre" placeholder="Ej. Combo Amigos">
+                                <label for="promo-nombre">Nombre de la promoción</label>
+                                <input type="text" id="promo-nombre" placeholder="Ej. Promoción Amigos" required>
                             </div>
                             <div class="form-group">
                                 <label for="promo-desc">Descripción</label>
@@ -530,7 +606,7 @@
                                 <div class="promo-anadir">
                                     <select id="promo-producto"></select>
                                     <input type="number" id="promo-cantidad" min="1" max="99" value="1"
-                                           aria-label="Cuántas unidades">
+                                        aria-label="Cuántas unidades">
                                     <button type="button" id="promo-anadir" class="secondary-btn">Añadir</button>
                                 </div>
                                 <div id="promo-contenido" class="promo-contenido"></div>
@@ -570,8 +646,8 @@
                                      barra, y su nombre sale de Datos del evento. -->
                                 <div class="form-group">
                                     <label for="caj-barra">Barra</label>
-                                    <input type="text" id="caj-barra" class="campo-fijo" readonly
-                                           tabindex="-1" value="—">
+                                    <input type="text" id="caj-barra" class="campo-fijo" readonly tabindex="-1"
+                                        value="—">
                                     <p class="campo-nota">
                                         Se cambia en <strong>Dashboard → Datos del evento</strong>.
                                     </p>
@@ -620,139 +696,132 @@
                     </div>
 
                     <div class="listas-par">
-                    <!-- Quién hay dado de alta.
+                        <!-- Quién hay dado de alta.
                          Antes sólo se podía crear, y a ciegas: se daba de alta
                          dos veces a la misma persona sin saberlo, y un PIN
                          olvidado a mitad de evento no había forma de mirarlo. -->
-                    <div class="glass-card lista-card">
-                        <div class="lista-cabecera">
-                            <h2>Cajeros</h2>
-                            <span id="cont-cajeros" class="lista-cuenta">0</span>
+                        <div class="glass-card lista-card">
+                            <div class="lista-cabecera">
+                                <h2>Cajeros</h2>
+                                <span id="cont-cajeros" class="lista-cuenta">0</span>
+                            </div>
+                            <div id="lista-cajeros" class="lista"></div>
                         </div>
-                        <div id="lista-cajeros" class="lista"></div>
-                    </div>
 
-                    <div class="glass-card lista-card">
-                        <div class="lista-cabecera">
-                            <h2>Meseros</h2>
-                            <span id="cont-meseros" class="lista-cuenta">0</span>
-                            <input type="search" id="buscar-mesero" class="lista-buscador"
-                                   placeholder="Buscar por nombre o PIN">
+                        <div class="glass-card lista-card">
+                            <div class="lista-cabecera">
+                                <h2>Meseros</h2>
+                                <span id="cont-meseros" class="lista-cuenta">0</span>
+                                <input type="search" id="buscar-mesero" class="lista-buscador"
+                                    placeholder="Buscar por nombre o PIN">
+                            </div>
+                            <div id="lista-meseros" class="lista"></div>
                         </div>
-                        <div id="lista-meseros" class="lista"></div>
-                    </div>
                     </div>
                 </section>
 
-                <!-- Tab: Stock Movement -->
+                <!-- Tab: Stock Cards & Inventory Management -->
                 <section id="tab-stock" class="tab-content hide">
-                    <h1 class="page-title">Inventario</h1>
-
-                    <!-- Ingreso de mercancía.
-                         Dos orígenes distintos y hay que distinguirlos: lo que
-                         se compra a un proveedor cuesta dinero y lo que llega
-                         de otra barra ya estaba pagado. En el cierre no se
-                         pueden mezclar. -->
-                    <div class="glass-card form-card">
-                        <h2>📥 Ingreso de mercancía</h2>
-                        <p class="reporte-hint">
-                            Suma stock a esta barra. Queda registrado de dónde vino.
-                        </p>
-
-                        <div class="form-group">
-                            <label>¿De dónde llega?</label>
-                            <div class="ingreso-tipos">
-                                <button type="button" class="ingreso-tipo activa" data-motivo="COMPRA">
-                                    🧾 Compra
-                                    <small>a un proveedor</small>
-                                </button>
-                                <button type="button" class="ingreso-tipo" data-motivo="TRASPASO">
-                                    📦 Traspaso
-                                    <small>de otra barra</small>
-                                </button>
-                            </div>
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;">
+                        <div>
+                            <h1 class="page-title" style="margin-bottom: 4px;">Control de Stock</h1>
+                            <p id="admin-stock-summary-text" class="reporte-hint" style="margin: 0;">
+                                Cargando catálogo de productos...
+                            </p>
                         </div>
-
-                        <div class="form-group">
-                            <label for="ingreso-origen" id="ingreso-origen-label">Proveedor</label>
-                            <input type="text" id="ingreso-origen" maxlength="120"
-                                   placeholder="Ej. Distribuidora Central">
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="ingreso-producto">Producto</label>
-                                <select id="ingreso-producto" required></select>
-                            </div>
-                            <div class="form-group">
-                                <label for="ingreso-unidades">Unidades</label>
-                                <input type="number" id="ingreso-unidades" min="1" placeholder="24" required>
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="ingreso-nota">Nota</label>
-                            <input type="text" id="ingreso-nota" maxlength="250"
-                                   placeholder="Opcional: nº de factura, quién lo trajo...">
-                        </div>
-
-                        <!-- El orden importa: primero la lista de lo que se
-                             lleva metido, luego el botón de añadir, y al final
-                             el de guardar. "Añadir otro" y "Registrar ingreso"
-                             juntos no dejaban claro que se podían meter varios
-                             productos ni que guardar añadía también el de
-                             arriba. -->
-                        <div id="ingreso-lista" class="mover-lista"></div>
-                        <p class="acciones-pista">
-                            Puedes cargar varios productos del mismo albarán:
-                            añádelos uno a uno y guarda al final.
-                        </p>
-                        <div class="acciones-fila">
-                            <button type="button" id="ingreso-otro" class="secondary-btn">
-                                ＋ Añadir a la lista
-                            </button>
-                            <button type="button" id="ingreso-guardar" class="primary-btn">
-                                Guardar ingreso
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button type="button" id="toggle-albaran-btn" class="secondary-btn">
+                                📥 Ingreso por Albarán / Lote
                             </button>
                         </div>
                     </div>
 
-                    <!-- Historial de traspasos e ingresos -->
-                    <div class="glass-card lista-card">
-                        <div class="lista-cabecera">
-                            <h2>Entradas y salidas de mercancía</h2>
-                            <span id="cont-traspasos" class="lista-cuenta">0</span>
+                    <!-- Filter Toolbar -->
+                    <div class="admin-stock-toolbar">
+                        <div class="admin-stock-search-wrap">
+                            <input type="text" id="admin-stock-search" placeholder="🔍 Buscar producto por nombre...">
                         </div>
-                        <div id="lista-traspasos" class="lista"></div>
                     </div>
 
-                    <div class="glass-card form-card max-w-md">
-                        <h2>Corregir inventario</h2>
-                        <form id="form-adjust-stock">
+                    <!-- Category Pills -->
+                    <div id="admin-stock-category-pills" class="category-menu" style="margin-bottom: 18px;">
+                        <!-- Dynamically populated -->
+                    </div>
+
+                    <!-- Cards Grid -->
+                    <div id="admin-stock-cards-grid" class="admin-stock-grid">
+                        <!-- Rendered dynamically -->
+                    </div>
+
+                    <!-- Collapsible Albarán Section -->
+                    <div id="albaran-collapsible-section" class="hide" style="margin-top: 24px;">
+                        <!-- Ingreso de mercancía por lote / albarán -->
+                        <div class="glass-card form-card" style="margin-bottom: 20px;">
+                            <h2>📥 Ingreso múltiple de mercancía (Albarán)</h2>
+                            <p class="reporte-hint">
+                                Suma stock a esta barra cargando varios productos en un solo documento.
+                            </p>
+
                             <div class="form-group">
-                                <label for="stock-product">Seleccionar Producto</label>
-                                <select id="stock-product" required>
-                                    <!-- Populated dynamically -->
-                                </select>
+                                <label>¿De dónde llega?</label>
+                                <div class="ingreso-tipos">
+                                    <button type="button" class="ingreso-tipo activa" data-motivo="COMPRA">
+                                        🧾 Compra
+                                        <small>a un proveedor</small>
+                                    </button>
+                                    <button type="button" class="ingreso-tipo" data-motivo="TRASPASO">
+                                        📦 Traspaso
+                                        <small>de otra barra</small>
+                                    </button>
+                                </div>
                             </div>
+
                             <div class="form-group">
-                                <label for="stock-type">Tipo de Movimiento</label>
-                                <select id="stock-type">
-                                    <option value="ENTRADA">Entrada (Añadir Stock)</option>
-                                    <option value="SALIDA">Salida (Retirar / Merma)</option>
-                                    <option value="AJUSTE">Ajuste (Reemplazar Stock total)</option>
-                                </select>
+                                <label for="ingreso-origen" id="ingreso-origen-label">Proveedor</label>
+                                <input type="text" id="ingreso-origen" maxlength="120"
+                                    placeholder="Ej. Distribuidora Central">
                             </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="ingreso-producto">Producto</label>
+                                    <select id="ingreso-producto"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="ingreso-unidades">Unidades</label>
+                                    <input type="number" id="ingreso-unidades" min="1" placeholder="24">
+                                </div>
+                            </div>
+
                             <div class="form-group">
-                                <label for="stock-qty">Cantidad</label>
-                                <input type="number" id="stock-qty" min="1" placeholder="Ej. 50" required>
+                                <label for="ingreso-nota">Nota</label>
+                                <input type="text" id="ingreso-nota" maxlength="250"
+                                    placeholder="Opcional: nº de factura, quién lo trajo...">
                             </div>
-                            <div class="form-group">
-                                <label for="stock-reason">Motivo del Ajuste</label>
-                                <input type="text" id="stock-reason" placeholder="Ej. Abastecimiento de medianoche" required>
+
+                            <div id="ingreso-lista" class="mover-lista"></div>
+                            <p class="acciones-pista">
+                                Puedes cargar varios productos del mismo albarán: añádelos uno a uno y guarda al final.
+                            </p>
+                            <div class="acciones-fila">
+                                <button type="button" id="ingreso-otro" class="secondary-btn">
+                                    ＋ Añadir a la lista
+                                </button>
+                                <button type="button" id="ingreso-guardar" class="primary-btn">
+                                    Guardar ingreso
+                                </button>
                             </div>
-                            <button type="submit" class="primary-btn">Guardar Movimiento</button>
-                        </form>
+                        </div>
+
+                        <!-- Historial de traspasos e ingresos -->
+                        <div class="glass-card lista-card">
+                            <div class="lista-cabecera">
+                                <h2>Historial de traspasos y compras</h2>
+                                <span id="cont-traspasos" class="lista-cuenta">0</span>
+                            </div>
+                            <div id="lista-traspasos" class="lista"></div>
+                        </div>
                     </div>
                 </section>
 
@@ -771,6 +840,7 @@
                                             <th>Cantidad</th>
                                             <th>Previo</th>
                                             <th>Nuevo</th>
+                                            <th>Mesero / Resp.</th>
                                             <th>Fecha/Hora</th>
                                             <th>Motivo</th>
                                         </tr>
@@ -805,14 +875,15 @@
 
                 <!-- Tab: Inventario General -->
                 <section id="tab-inventario" class="tab-content hide">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                         <h1 class="page-title" style="margin: 0;">Reporte de Stock de Productos</h1>
                         <div style="display: flex; gap: 8px;">
                             <button id="print-inventory-btn" class="primary-btn">🖨️ Imprimir (RawBT)</button>
                             <button id="print-inventory-browser-btn" class="secondary-btn">Por navegador</button>
                         </div>
                     </div>
-                    
+
                     <div class="glass-card table-section">
                         <div class="table-container">
                             <table class="admin-table">
@@ -829,13 +900,17 @@
                                 </tbody>
                             </table>
                         </div>
-                        
+
                         <!-- Pagination controls -->
-                        <div class="pagination-container" style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
-                            <span id="inventory-page-info" style="font-size: 0.9rem; color: var(--text-secondary);">Mostrando página 1 de 1</span>
+                        <div class="pagination-container"
+                            style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
+                            <span id="inventory-page-info"
+                                style="font-size: 0.9rem; color: var(--text-secondary);">Mostrando página 1 de 1</span>
                             <div class="pagination-buttons" style="display: flex; gap: 8px;">
-                                <button id="inventory-prev-btn" class="secondary-btn" style="padding: 6px 12px; font-size: 0.85rem;">Anterior</button>
-                                <button id="inventory-next-btn" class="secondary-btn" style="padding: 6px 12px; font-size: 0.85rem;">Siguiente</button>
+                                <button id="inventory-prev-btn" class="secondary-btn"
+                                    style="padding: 6px 12px; font-size: 0.85rem;">Anterior</button>
+                                <button id="inventory-next-btn" class="secondary-btn"
+                                    style="padding: 6px 12px; font-size: 0.85rem;">Siguiente</button>
                             </div>
                         </div>
                     </div>
@@ -869,7 +944,8 @@
             <div class="print-actions">
                 <button id="print-rawbt-btn" class="primary-btn">🖨️ Imprimir (RawBT)</button>
                 <button id="print-browser-btn" class="secondary-btn">Imprimir por navegador</button>
-                <button id="printer-settings-btn" class="secondary-btn" title="Configuración de impresora">⚙️ Impresora</button>
+                <button id="printer-settings-btn" class="secondary-btn" title="Configuración de impresora">⚙️
+                    Impresora</button>
                 <button id="dismiss-print-btn" class="secondary-btn">Continuar</button>
             </div>
 
@@ -1025,16 +1101,16 @@
                         <small>de otra barra</small>
                     </button>
                 </div>
-                <input type="text" id="mover-destino" class="pay-input" maxlength="120"
-                       placeholder="Ej. Barra VIP" autocomplete="off">
+                <input type="text" id="mover-destino" class="pay-input" maxlength="120" placeholder="Ej. Barra VIP"
+                    autocomplete="off">
                 <div id="mover-destinos-usados" class="mover-sugerencias"></div>
                 <button type="button" id="mover-a-producto" class="primary-btn full-btn">Siguiente</button>
             </div>
 
             <!-- Paso 2: producto -->
             <div id="mover-p2" class="mover-panel hide">
-                <input type="search" id="mover-buscar" class="pay-input"
-                       placeholder="Buscar producto" autocomplete="off">
+                <input type="search" id="mover-buscar" class="pay-input" placeholder="Buscar producto"
+                    autocomplete="off">
                 <div id="mover-productos" class="mover-productos"></div>
             </div>
 
@@ -1044,13 +1120,13 @@
                 <div class="mover-cantidad">
                     <button type="button" id="mover-menos" class="cart-qty-btn" aria-label="Una menos">−</button>
                     <input type="number" id="mover-unidades" class="mover-unidades" min="1" value="1"
-                           inputmode="numeric">
+                        inputmode="numeric">
                     <button type="button" id="mover-mas" class="cart-qty-btn" aria-label="Una más">+</button>
                 </div>
                 <p class="mover-disponible" id="mover-disponible"></p>
                 <div class="mover-rapidos" id="mover-rapidos"></div>
                 <input type="text" id="mover-nota" class="pay-input" maxlength="250"
-                       placeholder="Nota (opcional): quién lo lleva, etc.">
+                    placeholder="Nota (opcional): quién lo lleva, etc.">
                 <div id="mover-lista" class="mover-lista"></div>
                 <p class="acciones-pista">
                     Puedes mover varios productos de una vez: añádelos uno a uno
@@ -1074,8 +1150,7 @@
          mesero ya se habría ido con el pedido tomado. -->
     <div id="acomp-modal" class="modal-overlay hide">
         <div class="glass-card modal-card acomp-card">
-            <button type="button" id="acomp-cancelar" class="modal-close-btn"
-                    title="Cancelar y no añadir">←</button>
+            <button type="button" id="acomp-cancelar" class="modal-close-btn" title="Cancelar y no añadir">←</button>
 
             <div class="modal-header">
                 <p class="acomp-para">Acompañante para</p>
@@ -1129,8 +1204,8 @@
                     <button type="button" class="quick-cash-btn" data-cash="100">100</button>
                     <button type="button" class="quick-cash-btn" data-cash="200">200</button>
                 </div>
-                <input type="number" id="pay-recibido" class="pay-input" min="0" step="0.01"
-                       inputmode="decimal" placeholder="Otro monto recibido">
+                <input type="number" id="pay-recibido" class="pay-input" min="0" step="0.01" inputmode="decimal"
+                    placeholder="Otro monto recibido">
                 <div id="pay-change-box" class="pay-change hide">
                     <span>Cambio a devolver</span>
                     <strong id="pay-change-amount">0.00 Bs.</strong>
@@ -1142,13 +1217,14 @@
                  porque quien confirma el cobro es el cajero, no el sistema. -->
             <div id="pay-panel-qr" class="pay-panel hide">
                 <div class="qr-cobro">
-                    <p class="qr-cobro-monto">El cliente debe transferir <strong id="qr-cobro-monto">0.00 Bs.</strong></p>
+                    <p class="qr-cobro-monto">El cliente debe transferir <strong id="qr-cobro-monto">0.00 Bs.</strong>
+                    </p>
                 </div>
                 <label class="pay-label" for="pay-referencia">
                     Referencia del comprobante <span class="pay-hint">(la que muestra el cliente)</span>
                 </label>
                 <input type="text" id="pay-referencia" class="pay-input" maxlength="40"
-                       placeholder="Ej. últimos dígitos o nº de operación">
+                    placeholder="Ej. últimos dígitos o nº de operación">
             </div>
 
             <!-- MIXTO: se escribe el efectivo y el resto se completa solo -->
@@ -1157,7 +1233,7 @@
                     <div class="pay-split-field">
                         <label for="pay-mixto-efectivo">💵 Efectivo</label>
                         <input type="number" id="pay-mixto-efectivo" class="pay-input" min="0" step="0.01"
-                               inputmode="decimal" placeholder="0.00">
+                            inputmode="decimal" placeholder="0.00">
                     </div>
                     <div class="pay-split-field">
                         <label for="pay-mixto-resto" id="pay-mixto-resto-label">Falta en QR</label>
@@ -1200,13 +1276,101 @@
         </div>
     </div>
 
+    <!-- MODAL: QUICK STOCK ACTION (+ ENTRADA / - SALIDA / AJUSTE) -->
+    <div id="stock-action-modal" class="modal-overlay hide">
+        <div class="glass-card modal-card stock-modal-card">
+            <div class="stock-modal-header">
+                <div id="sam-img-container"
+                    style="width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.25); border-radius: 8px; font-size: 2rem;">
+                </div>
+                <div class="stock-modal-title-box">
+                    <h3 id="sam-title">Nombre del Producto</h3>
+                    <p>Stock actual: <strong id="sam-current-stock" style="color: #34d399;">0 uds</strong></p>
+                </div>
+            </div>
+
+            <div class="stock-type-selector">
+                <button type="button" class="stock-type-btn tipo-entrada active" data-type="ENTRADA">＋ Entrada</button>
+                <button type="button" class="stock-type-btn tipo-salida" data-type="SALIDA">− Salida</button>
+                <button type="button" class="stock-type-btn tipo-ajuste" data-type="AJUSTE">🔄 Ajuste</button>
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label id="sam-qty-label">Cantidad a ingresar</label>
+                <div class="stock-qty-stepper">
+                    <button type="button" id="sam-minus-btn">−</button>
+                    <input type="number" id="sam-qty-input" min="1" value="10">
+                    <button type="button" id="sam-plus-btn">＋</button>
+                </div>
+            </div>
+
+            <div class="stock-preset-chips">
+                <span class="stock-preset-chip" data-val="1">+1</span>
+                <span class="stock-preset-chip" data-val="6">+6</span>
+                <span class="stock-preset-chip" data-val="12">+12</span>
+                <span class="stock-preset-chip" data-val="24">+24</span>
+                <span class="stock-preset-chip" data-val="48">+48</span>
+                <span class="stock-preset-chip" data-val="100">+100</span>
+            </div>
+
+            <div class="stock-calc-preview">
+                <span>Resultado en inventario:</span>
+                <strong id="sam-preview-stock" style="color: #6ee7b7; font-size: 1.05rem;">10 uds</strong>
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label for="sam-reason">Motivo</label>
+                <input type="text" id="sam-reason" placeholder="Ej. Compra / Abastecimiento" required>
+            </div>
+
+            <div class="modal-actions" style="display: flex; gap: 10px; margin-top: 4px;">
+                <button type="button" id="sam-cancel-btn" class="secondary-btn full-btn">Cancelar</button>
+                <button type="button" id="sam-confirm-btn" class="primary-btn full-btn">Guardar Movimiento</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: PRODUCT STOCK HISTORY -->
+    <div id="stock-history-modal" class="modal-overlay hide">
+        <div class="glass-card modal-card" style="max-width: 650px; width: 95%;">
+            <div class="modal-header"
+                style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 12px; margin-bottom: 14px;">
+                <div>
+                    <h2 id="shm-title" style="margin: 0; font-size: 1.15rem;">Historial de Movimientos</h2>
+                    <p id="shm-subtitle" style="margin: 2px 0 0; font-size: 0.85rem; color: var(--text-secondary);">
+                        Cargando registros...</p>
+                </div>
+                <button type="button" id="shm-close-btn" class="icon-btn" style="font-size: 1.2rem;"
+                    aria-label="Cerrar">✕</button>
+            </div>
+            <div class="table-container max-h-96">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Tipo</th>
+                            <th>Cant.</th>
+                            <th>Previo $\to$ Nuevo</th>
+                            <th>Responsable</th>
+                            <th>Fecha</th>
+                            <th>Motivo</th>
+                        </tr>
+                    </thead>
+                    <tbody id="shm-table-body">
+                        <!-- Loaded dynamically -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <!-- Avisos flotantes. Sustituyen a alert(), que en Android abre un diálogo
          del sistema: bloquea la caja y tapa la pantalla en plena venta. -->
     <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
     <!-- Impresión térmica (ESC/POS + RawBT) -->
-    <script src="rawbt.js"></script>
+    <script src="rawbt.js?v=15"></script>
     <!-- Main Client-side logic script -->
-    <script src="app.js"></script>
+    <script src="app.js?v=15"></script>
 </body>
+
 </html>

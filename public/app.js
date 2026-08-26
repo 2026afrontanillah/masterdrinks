@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let promociones = [];
     let cart = [];             // Cart items: { id_producto, nombre, precio_venta, cantidad, stock_max }
     let payments = [];         // Payment pills: { id_metodo_pago, nombre_metodo, monto, referencia }
-    let activeCategory = 'all';// Filter categories
+    let activeCategory = null; // Filter categories (defaults to first sorted category)
 
     // System view elements
     const loginView = document.getElementById('login-view');
@@ -72,7 +72,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     cargarInstancia();
-    cargarConfiguracion();
+    // Los datos del evento y su afiche se piden al arrancar: la pantalla de
+    // clave de mesero los enseña, y esa sale antes de la primera venta.
+    cargarConfiguracion().then(pintarFichaEvento);
+    cargarAfiche();
 
     // ==========================================
     // AVISOS FLOTANTES
@@ -186,6 +189,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 dot.classList.remove('filled');
             }
         });
+
+        // "Ingresar" se enciende sólo con las cuatro cifras puestas. Es la
+        // única señal de que ya no falta nada por teclear, y se ve sin leer.
+        const botonEntrar = document.getElementById('pin-enter');
+        if (botonEntrar) botonEntrar.classList.toggle('completo', waiterPin.length === 4);
     }
 
     function clearPin() {
@@ -197,6 +205,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (waiterPin.length >= 4) return;
         waiterPin += char;
         updatePinDots();
+        // Un golpecito por cifra. En una tablet sin teclado es la única
+        // confirmación de que el toque entró: sin él, el mesero que no ve
+        // bien los puntos vuelve a pulsar y mete la cifra dos veces.
+        vibrar(12);
         
         if (waiterPin.length === 4) {
             await verifyWaiterPin(waiterPin);
@@ -236,6 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Shake visual dots on verification error
                 const dotsContainer = document.getElementById('pin-dots');
                 dotsContainer.classList.add('shake');
+                vibrar([40, 60, 40]);
                 showError(waiterError, data.message || 'PIN incorrecto');
                 
                 setTimeout(() => {
@@ -257,8 +270,60 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    document.getElementById('pin-clear').addEventListener('click', clearPin);
-    document.getElementById('pin-back').addEventListener('click', handlePinBackspace);
+    // El botón "Ingresar" de la propuesta.
+    //
+    // La clave se sigue mandando sola al teclear la cuarta cifra: con cola en
+    // la barra, un toque de más por comanda son minutos por noche. Así que
+    // este botón no es el único camino, es el que busca quien no sabe que no
+    // hace falta; hace lo mismo, y si faltan cifras lo dice en vez de quedarse
+    // quieto, que es lo que hace un botón que parece roto.
+    function intentarEntrar() {
+        if (waiterPin.length < 4) {
+            showError(waiterError, 'La clave tiene cuatro cifras.');
+            return;
+        }
+        verifyWaiterPin(waiterPin);
+    }
+
+    document.getElementById('pin-enter').addEventListener('click', intentarEntrar);
+
+    // Borrar: un toque quita una cifra; mantener pulsado las quita todas. La
+    // tecla "C" que hacía esto último ya no está en el teclado —ocupaba un
+    // sitio para algo que se usa una vez de cada cien—, pero el borrado
+    // entero sigue haciendo falta cuando el mesero pierde la cuenta.
+    const teclaBorrar = document.getElementById('pin-back');
+    const ESPERA_BORRADO = 550;
+    let temporizadorBorrado = null;
+    let borradoEntero = false;
+
+    teclaBorrar.addEventListener('pointerdown', () => {
+        borradoEntero = false;
+        temporizadorBorrado = setTimeout(() => {
+            temporizadorBorrado = null;
+            borradoEntero = true;
+            if (waiterPin) vibrar(25);
+            clearPin();
+        }, ESPERA_BORRADO);
+    });
+
+    // 'pointerleave' y 'pointercancel' además de 'pointerup': en la tablet el
+    // dedo se desliza fuera de la tecla sin llegar a levantarse.
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => {
+        teclaBorrar.addEventListener(ev, () => {
+            if (temporizadorBorrado) clearTimeout(temporizadorBorrado);
+            temporizadorBorrado = null;
+        });
+    });
+
+    teclaBorrar.addEventListener('click', () => {
+        // Al soltar después de una pulsación larga llega también el click. Si
+        // no se descarta, borra una cifra de la clave siguiente.
+        if (borradoEntero) {
+            borradoEntero = false;
+            return;
+        }
+        handlePinBackspace();
+    });
 
     // Keyboard bindings for the PIN screen
     window.addEventListener('keydown', (e) => {
@@ -272,6 +337,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 handlePinBackspace();
             } else if (e.key === 'Escape' || e.key === 'Delete') {
                 clearPin();
+            } else if (e.key === 'Enter') {
+                intentarEntrar();
             }
         }
     });
@@ -380,9 +447,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // Caja bloqueada: nadie está vendiendo, no hace falta vigilar el stock.
         detenerSondeoStock();
         
-        document.getElementById('active-cajero-name').textContent = currentUser.nombre;
+        // El cajero de turno es uno de los cuatro sellos de la ficha, así que
+        // se repinta entera en vez de tocar sólo ese hueco.
+        pintarFichaEvento();
         clearPin();
         waiterModal.classList.remove('hide');
+        // Ahora que la pantalla está a la vista, el hueco del cartel ya mide
+        // algo y se puede decidir si la imagen da la talla.
+        ajustarCalidadDelAfiche();
     }
 
     // ==========================================
@@ -584,37 +656,76 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function ordenarCategorias(lista) {
+        // Orden solicitado: Botellas -> Sodas -> Cervezas -> Aguas -> Comida -> resto
+        const prioridades = [
+            /^botella/i,
+            /^soda/i,
+            /^cerveza/i,
+            /^agua/i,
+            /^comida/i
+        ];
+
+        return [...lista].sort((a, b) => {
+            const nomA = (a.nombre || '').trim();
+            const nomB = (b.nombre || '').trim();
+            const idxA = prioridades.findIndex(rx => rx.test(nomA));
+            const idxB = prioridades.findIndex(rx => rx.test(nomB));
+            const prioA = idxA !== -1 ? idxA : 999;
+            const prioB = idxB !== -1 ? idxB : 999;
+            if (prioA !== prioB) return prioA - prioB;
+            return nomA.localeCompare(nomB);
+        });
+    }
+
+    function iconoCategoria(nombre, tipo) {
+        const n = (nombre || '').toLowerCase().trim();
+        if (n.startsWith('botella')) return '🍾';
+        if (n.startsWith('soda')) return '🥤';
+        if (n.startsWith('cerveza')) return '🍺';
+        if (n.startsWith('agua')) return '💧';
+        if (n.startsWith('comida')) return '🍔';
+        if (tipo === 'COMIDA') return '🍔';
+        if (tipo === 'BEBIDA') return '🍹';
+        return '📦';
+    }
+
     function renderCategories() {
         const catList = document.getElementById('category-list');
         catList.innerHTML = '';
 
-        // Add 'All' category
-        const allBtn = document.createElement('button');
-        allBtn.className = `category-btn ${activeCategory === 'all' ? 'active' : ''}`;
-        allBtn.textContent = '🍹 Todos';
-        allBtn.addEventListener('click', () => {
-            activeCategory = 'all';
-            document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
-            allBtn.classList.add('active');
-            renderProducts();
-        });
-        catList.appendChild(allBtn);
+        const catsOrdenadas = ordenarCategorias(categories);
 
-        // Map icons for types
-        const icons = { 'BEBIDA': '🍺', 'COMIDA': '🍔', 'OTRO': '🏷️' };
+        // Si no hay categoría activa válida, seleccionar la primera por defecto (Botellas)
+        if (activeCategory !== 'promociones' && (!activeCategory || !catsOrdenadas.some(c => c.id_categoria === activeCategory))) {
+            activeCategory = catsOrdenadas.length > 0 ? catsOrdenadas[0].id_categoria : 'promociones';
+        }
 
-        categories.forEach(cat => {
+        // Renderizar las categorías ordenadas: Botellas, Sodas, Cervezas, Aguas, Comida...
+        catsOrdenadas.forEach(cat => {
             const btn = document.createElement('button');
             btn.className = `category-btn ${activeCategory === cat.id_categoria ? 'active' : ''}`;
-            btn.textContent = `${icons[cat.tipo] || '📦'} ${cat.nombre}`;
+            btn.textContent = `${iconoCategoria(cat.nombre, cat.tipo)} ${cat.nombre}`;
             btn.addEventListener('click', () => {
                 activeCategory = cat.id_categoria;
-                document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('#category-list .category-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 renderProducts();
             });
             catList.appendChild(btn);
         });
+
+        // Promociones al final
+        const promoBtn = document.createElement('button');
+        promoBtn.className = `category-btn ${activeCategory === 'promociones' ? 'active' : ''}`;
+        promoBtn.textContent = '🏷️ Promociones';
+        promoBtn.addEventListener('click', () => {
+            activeCategory = 'promociones';
+            document.querySelectorAll('#category-list .category-btn').forEach(b => b.classList.remove('active'));
+            promoBtn.classList.add('active');
+            renderProducts();
+        });
+        catList.appendChild(promoBtn);
     }
 
     // Muestra la rejilla con forma de tarjetas mientras llega el catálogo, para
@@ -635,6 +746,49 @@ document.addEventListener('DOMContentLoaded', () => {
         if (p.tipo_producto === 'COMIDA') return '🍔';
         return '🍹';
     };
+
+    // ------------------------------------------------------------------
+    // LA BARRITA DE EXISTENCIAS
+    // ------------------------------------------------------------------
+    // Cruza la parte de arriba de cada tarjeta y dice de un vistazo cuánto
+    // queda de ese producto, sin leer el número: llena y verde cuando hay de
+    // sobra, ámbar a partir de la mitad y roja cuando está en las últimas.
+    //
+    // Se mide contra stock_tope —el nivel más alto que ese producto llegó a
+    // tener, que calcula el servidor— y no contra un número fijo. Un umbral
+    // igual para todos no dice nada: diez cervezas de doscientas es una barra
+    // vacía y diez botellas de doce está casi llena.
+    const NIVEL_MEDIO = 0.5;    // desde la mitad para abajo, ámbar
+    const NIVEL_BAJO = 0.25;    // desde un cuarto para abajo, rojo
+
+    function nivelDeStock(restante, tope) {
+        // El techo nunca es cero ni menor que lo que queda: si lo fuera, la
+        // división daría infinito o una barra por encima del 100 %.
+        const techo = Math.max(tope || 0, restante, 1);
+        const parte = Math.max(0, Math.min(1, restante / techo));
+
+        return {
+            ancho: (parte * 100).toFixed(1) + '%',
+            clase: parte <= 0 ? 'vacio'
+                 : parte <= NIVEL_BAJO ? 'bajo'
+                 : parte <= NIVEL_MEDIO ? 'medio'
+                 : 'alto'
+        };
+    }
+
+    function pintarBarraStock(card, p, restante) {
+        const barra = card.querySelector('.stock-barra');
+        if (!barra) return;
+
+        // Una reposición a mitad de noche deja el stock por encima del tope que
+        // traía el catálogo. El tope sube con él, en vez de dejar la barra
+        // clavada al 100 % hasta la siguiente recarga.
+        if (p.stock_actual > (p.stock_tope || 0)) p.stock_tope = p.stock_actual;
+
+        const nivel = nivelDeStock(restante, p.stock_tope);
+        barra.className = 'stock-barra ' + nivel.clase;
+        barra.firstElementChild.style.width = nivel.ancho;
+    }
 
     /**
      * Refresca una sola tarjeta: stock restante y unidades ya en el carrito.
@@ -660,6 +814,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stockEl.classList.toggle('low', restante > 0 && restante < 10);
 
         card.classList.toggle('out-of-stock', restante <= 0);
+        pintarBarraStock(card, p, restante);
 
         let badge = card.querySelector('.cart-badge');
         if (unidades > 0) {
@@ -697,21 +852,22 @@ document.addEventListener('DOMContentLoaded', () => {
         animarRejilla = false;
         grid.innerHTML = '';
 
-        const search = document.getElementById('product-search').value.toLowerCase();
-        document.getElementById('search-clear-btn').classList.toggle('hide', search.length === 0);
+        const searchInput = document.getElementById('product-search');
+        const search = searchInput ? searchInput.value.toLowerCase() : '';
+        const searchClearBtn = document.getElementById('search-clear-btn');
+        if (searchClearBtn) searchClearBtn.classList.toggle('hide', search.length === 0);
 
         // Filter products based on search and category
-        const filtered = products.filter(p => {
-            const matchesCat = activeCategory === 'all' || p.id_categoria === activeCategory;
-            const matchesSearch = p.nombre.toLowerCase().includes(search) || (p.descripcion && p.descripcion.toLowerCase().includes(search));
-            return matchesCat && matchesSearch;
-        });
+        const filtered = (activeCategory === 'promociones' && !search)
+            ? []
+            : products.filter(p => {
+                const matchesCat = search ? true : (p.id_categoria === activeCategory);
+                const matchesSearch = !search || p.nombre.toLowerCase().includes(search) || (p.descripcion && p.descripcion.toLowerCase().includes(search));
+                return matchesCat && matchesSearch;
+            });
 
-        // Los paquetes van PRIMERO y sólo con "Todos" o buscando por su
-        // nombre. Delante porque es lo que el bar quiere colocar y lo que el
-        // cliente pregunta ("¿tienen combos?"); dentro de una categoría no,
-        // porque un paquete de whisky y cervezas no pertenece a ninguna.
-        const promosVisibles = (activeCategory === 'all' || search)
+        // Promociones: se muestran al seleccionar la pestaña "Promociones" o al buscar
+        const promosVisibles = (activeCategory === 'promociones' || search)
             ? promociones.filter(pr =>
                 !search ||
                 pr.nombre.toLowerCase().includes(search) ||
@@ -740,7 +896,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }).join('');
 
             card.innerHTML = `
-                <span class="promo-sello">Combo</span>
+                <span class="promo-sello">Promoción</span>
                 <h3>${escapeHtml(pr.nombre)}</h3>
                 <ul class="promo-dentro">${dentro}</ul>
                 <div class="card-foot">
@@ -789,7 +945,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? `<img class="product-foto" src="${foto}" alt="" loading="lazy" decoding="async">`
                 : `<span class="emoji">${emojiDe(p)}</span>`;
 
+            const nivel = nivelDeStock(displayStock, p.stock_tope);
+
             card.innerHTML = `
+                <div class="stock-barra ${nivel.clase}" aria-hidden="true"><span style="width: ${nivel.ancho}"></span></div>
                 ${visual}
                 <h3>${escapeHtml(p.nombre)}</h3>
                 <div class="card-foot">
@@ -808,14 +967,19 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    document.getElementById('product-search').addEventListener('input', renderProducts);
+    const searchInput = document.getElementById('product-search');
+    if (searchInput) searchInput.addEventListener('input', renderProducts);
 
-    document.getElementById('search-clear-btn').addEventListener('click', () => {
-        const campo = document.getElementById('product-search');
-        campo.value = '';
-        campo.focus();
-        renderProducts();
-    });
+    const searchClearBtn = document.getElementById('search-clear-btn');
+    if (searchClearBtn) {
+        searchClearBtn.addEventListener('click', () => {
+            if (searchInput) {
+                searchInput.value = '';
+                searchInput.focus();
+            }
+            renderProducts();
+        });
+    }
 
     // ==========================================
     // CONTADOR DEL TURNO
@@ -1141,6 +1305,7 @@ document.addEventListener('DOMContentLoaded', () => {
         pintarPendientes();
         cargarDestinosUsados();
         moverPaso(1);
+        if (typeof cerrarSidebarMobile === 'function') cerrarSidebarMobile();
         moverModal.classList.remove('hide');
     }
 
@@ -1518,6 +1683,77 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ==========================================
+    // MENÚ LATERAL PLEGABLE (ESTE TURNO / MERCANCÍA)
+    // ==========================================
+    const posLayout = document.getElementById('pos-layout');
+    const posSidebar = document.getElementById('pos-sidebar');
+    const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+    const closeSidebarBtn = document.getElementById('close-sidebar-btn');
+    const sidebarBackdrop = document.getElementById('pos-sidebar-backdrop');
+
+    function inicializarSidebarPlegable() {
+        const guardado = localStorage.getItem('pos_sidebar_collapsed');
+        if (guardado === 'true' && posLayout) {
+            posLayout.classList.add('sidebar-collapsed');
+            if (toggleSidebarBtn) toggleSidebarBtn.classList.add('active');
+        }
+    }
+
+    function togglePosSidebar() {
+        if (!posLayout || !posSidebar) return;
+        const isMobile = window.innerWidth <= 820;
+
+        if (isMobile) {
+            const isOpen = posSidebar.classList.contains('mobile-open');
+            if (isOpen) {
+                cerrarSidebarMobile();
+            } else {
+                abrirSidebarMobile();
+            }
+        } else {
+            const isCollapsed = posLayout.classList.toggle('sidebar-collapsed');
+            localStorage.setItem('pos_sidebar_collapsed', isCollapsed ? 'true' : 'false');
+            if (toggleSidebarBtn) {
+                toggleSidebarBtn.classList.toggle('active', isCollapsed);
+            }
+        }
+    }
+
+    function abrirSidebarMobile() {
+        if (!posSidebar) return;
+        posSidebar.classList.add('mobile-open');
+        if (sidebarBackdrop) sidebarBackdrop.classList.remove('hide');
+        if (toggleSidebarBtn) toggleSidebarBtn.classList.add('active');
+    }
+
+    function cerrarSidebarMobile() {
+        if (!posSidebar) return;
+        posSidebar.classList.remove('mobile-open');
+        if (sidebarBackdrop) sidebarBackdrop.classList.add('hide');
+        if (toggleSidebarBtn) toggleSidebarBtn.classList.remove('active');
+    }
+
+    if (toggleSidebarBtn) {
+        toggleSidebarBtn.addEventListener('click', togglePosSidebar);
+    }
+    if (closeSidebarBtn) {
+        closeSidebarBtn.addEventListener('click', () => {
+            if (window.innerWidth <= 820) {
+                cerrarSidebarMobile();
+            } else {
+                if (posLayout) posLayout.classList.add('sidebar-collapsed');
+                localStorage.setItem('pos_sidebar_collapsed', 'true');
+                if (toggleSidebarBtn) toggleSidebarBtn.classList.add('active');
+            }
+        });
+    }
+    if (sidebarBackdrop) {
+        sidebarBackdrop.addEventListener('click', cerrarSidebarMobile);
+    }
+
+    inicializarSidebarPlegable();
+
+    // ==========================================
     // CUADRO DE ACOMPAÑANTE
     // ==========================================
     const acompModal = document.getElementById('acomp-modal');
@@ -1554,65 +1790,68 @@ document.addEventListener('DOMContentLoaded', () => {
             const puestas = acompElegidos.get(p.id_producto) || 0;
             const agotado = disponible <= 0;
 
-            const fila = document.createElement('div');
-            fila.className = 'acomp-opcion' + (agotado ? ' agotada' : '') +
-                (puestas > 0 ? ' elegida' : '');
+            const card = document.createElement('div');
+            card.className = `product-card acomp-card-item ${agotado ? 'out-of-stock' : ''} ${puestas > 0 ? 'elegida' : ''}`;
+            card.dataset.id = p.id_producto;
 
-            const texto = document.createElement('div');
-            texto.className = 'acomp-opcion-texto';
+            const foto = urlFoto(p);
+            const visual = foto
+                ? `<img class="product-foto" src="${foto}" alt="" loading="lazy" decoding="async">`
+                : `<span class="emoji">${emojiDe(p)}</span>`;
 
-            const nombre = document.createElement('span');
-            nombre.className = 'acomp-opcion-nombre';
-            nombre.textContent = p.nombre;
-            texto.appendChild(nombre);
+            const nivel = nivelDeStock(disponible, p.stock_tope);
 
-            const stock = document.createElement('span');
-            stock.className = 'acomp-opcion-stock' + (agotado ? ' agotado' : '');
-            stock.textContent = agotado ? 'Agotado' : 'quedan ' + disponible;
-            texto.appendChild(stock);
-
-            fila.appendChild(texto);
+            card.innerHTML = `
+                <div class="stock-barra ${nivel.clase}" aria-hidden="true"><span style="width: ${nivel.ancho}"></span></div>
+                ${visual}
+                <h3>${p.nombre}</h3>
+                <div class="card-foot">
+                    <div class="stock ${disponible > 0 && disponible < 10 ? 'low' : ''}">${agotado ? 'Agotado' : disponible + ' u.'}</div>
+                    <div class="acomp-control">
+                        <button type="button" class="cart-qty-btn acomp-btn-menos" aria-label="Menos" ${puestas === 0 ? 'disabled' : ''}>−</button>
+                        <span class="acomp-cantidad">${puestas}</span>
+                        <button type="button" class="cart-qty-btn acomp-btn-mas" aria-label="Más" ${puestas >= disponible || agotado ? 'disabled' : ''}>+</button>
+                    </div>
+                </div>
+                ${puestas > 0 ? `<span class="cart-badge">${puestas}</span>` : ''}
+                ${agotado ? '<div class="out-of-stock-overlay"><span>Agotado</span></div>' : ''}
+            `;
 
             if (agotado) {
-                caja.appendChild(fila);
+                caja.appendChild(card);
                 return;
             }
 
-            // Cantidad por botella: si se acabó la Coca de dos litros, se ponen
-            // dos pequeñas y el cliente se lleva lo mismo.
-            const control = document.createElement('div');
-            control.className = 'acomp-control';
+            // 1. Botones + y -: Cambian cantidad y MANTIENEN abierta la ventana emergente
+            const btnMenos = card.querySelector('.acomp-btn-menos');
+            const btnMas = card.querySelector('.acomp-btn-mas');
 
-            const menos = document.createElement('button');
-            menos.type = 'button';
-            menos.className = 'cart-qty-btn';
-            menos.textContent = '−';
-            menos.setAttribute('aria-label', 'Una menos de ' + p.nombre);
-            menos.disabled = puestas === 0;
-            menos.addEventListener('click', () => cambiarAcomp(p, -1));
-            control.appendChild(menos);
+            btnMenos.addEventListener('click', (e) => {
+                e.stopPropagation();
+                cambiarAcomp(p, -1);
+            });
 
-            const num = document.createElement('span');
-            num.className = 'acomp-cantidad';
-            num.textContent = puestas;
-            control.appendChild(num);
+            btnMas.addEventListener('click', (e) => {
+                e.stopPropagation();
+                cambiarAcomp(p, +1);
+            });
 
-            const mas = document.createElement('button');
-            mas.type = 'button';
-            mas.className = 'cart-qty-btn';
-            mas.textContent = '+';
-            mas.setAttribute('aria-label', 'Uno más de ' + p.nombre);
-            mas.disabled = puestas >= disponible;
-            mas.addEventListener('click', () => cambiarAcomp(p, +1));
-            control.appendChild(mas);
+            // 2. Clic en la tarjeta / imagen: Selecciona directamente 1 unidad y CIERRA la ventana emergente
+            card.addEventListener('click', (e) => {
+                if (disponible <= 0) {
+                    vibrar([25, 40, 25]);
+                    notify('No queda más ' + p.nombre + '.', 'warn');
+                    return;
+                }
+                const botella = productoEsperandoAcompanante;
+                if (!botella) return;
+                const elegidos = [{ id_producto: p.id_producto, nombre: p.nombre, cantidad: 1 }];
+                cerrarCuadroAcompanante();
+                addToCart(botella, elegidos);
+                vibrar(25);
+            });
 
-            fila.appendChild(control);
-
-            // Tocar la fila entera suma uno: con prisa, apuntar al "+" de 44 px
-            // es más difícil que tocar el bloque.
-            texto.addEventListener('click', () => cambiarAcomp(p, +1));
-
-            caja.appendChild(fila);
+            caja.appendChild(card);
         });
 
         pintarResumenAcompanante();
@@ -1802,13 +2041,56 @@ document.addEventListener('DOMContentLoaded', () => {
                        <span class="cart-acomp-gratis">incluido</span>
                    </div>`).join('');
 
+            // Foto o icono del producto (y sus acompañantes en modo pack)
+            let visualHtml = '';
+            const acomps = item.acompanantes || [];
+
+            if (item.tipo === 'promo') {
+                visualHtml = `<span class="cart-item-emoji">🏷️</span>`;
+            } else if (acomps.length > 0) {
+                // Producto con acompañante(s) -> Composición PACK 3D (Botella al frente, Acompañante detrás)
+                const prod = products.find(p => p.id_producto === item.id_producto);
+                const fotoPrincipal = urlFoto(prod);
+
+                // Primer acompañante para la composición
+                const primerAcomp = acomps[0];
+                const prodAcomp = products.find(p => p.id_producto === primerAcomp.id_producto);
+                const fotoAcomp = urlFoto(prodAcomp);
+
+                const htmlAcomp = fotoAcomp
+                    ? `<img class="pack-img pack-acomp" src="${fotoAcomp}" alt="" loading="lazy">`
+                    : `<span class="pack-emoji pack-acomp">${emojiDe(prodAcomp || primerAcomp)}</span>`;
+
+                const htmlPrincipal = fotoPrincipal
+                    ? `<img class="pack-img pack-principal" src="${fotoPrincipal}" alt="" loading="lazy">`
+                    : `<span class="pack-emoji pack-principal">${emojiDe(prod || item)}</span>`;
+
+                visualHtml = `
+                    <div class="cart-pack-container">
+                        ${htmlAcomp}
+                        ${htmlPrincipal}
+                    </div>
+                `;
+            } else {
+                const prod = products.find(p => p.id_producto === item.id_producto);
+                const foto = urlFoto(prod);
+                if (foto) {
+                    visualHtml = `<img class="cart-item-img" src="${foto}" alt="" loading="lazy">`;
+                } else {
+                    visualHtml = `<span class="cart-item-emoji">${emojiDe(prod || item)}</span>`;
+                }
+            }
+
             div.innerHTML = `
-                <div class="cart-item-info">
-                    <h4>${item.tipo === 'promo' ? '<span class="cart-promo-sello">Combo</span> ' : ''}${escapeHtml(item.nombre)}</h4>
-                    <div class="price">${item.precio_venta.toFixed(2)} x ${item.cantidad} = ${sub.toFixed(2)} Bs.</div>
-                    ${dentroHtml}
-                    ${acompHtml}
+                <div class="cart-item-header">
+                    <div class="cart-item-foto">${visualHtml}</div>
+                    <div class="cart-item-info">
+                        <h4>${item.tipo === 'promo' ? '<span class="cart-promo-sello">Promoción</span> ' : ''}${escapeHtml(item.nombre)}</h4>
+                        <div class="price">${item.precio_venta.toFixed(2)} x ${item.cantidad} = ${sub.toFixed(2)} Bs.</div>
+                    </div>
                 </div>
+                ${dentroHtml}
+                ${acompHtml}
                 <div class="cart-item-controls">
                     <button class="cart-qty-btn decrease-btn" aria-label="Quitar uno">−</button>
                     <span class="qty">${item.cantidad}</span>
@@ -2626,6 +2908,207 @@ document.addEventListener('DOMContentLoaded', () => {
         return configEvento;
     }
 
+    // ------------------------------------------------------------------
+    // LA FICHA DE LA PANTALLA DE CLAVE
+    // ------------------------------------------------------------------
+    // Los mismos datos que encabezan los tickets, puestos donde se miran mil
+    // veces por noche. No es adorno: si la tablet quedó rotulada con el evento
+    // de la semana pasada o con la barra de al lado, se ve aquí, antes de la
+    // primera venta, y no al cerrar caja.
+    const MESES_CARTEL = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN',
+                          'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+
+    function fechaDeCartel(valor) {
+        const texto = String(valor || '').trim();
+        // El campo del panel es un <input type="date">, así que lo normal es
+        // recibir 2026-09-12. Lo que no encaje se enseña tal cual: el día que
+        // alguien escriba ahí "viernes y sábado", eso es lo que hay que leer.
+        const iso = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!iso) return texto;
+        return Number(iso[3]) + ' ' + MESES_CARTEL[Number(iso[2]) - 1] + ' ' + iso[1];
+    }
+
+    function pintarFichaEvento() {
+        const poner = (id, texto) => {
+            const el = document.getElementById(id);
+            // La raya no es un adorno: deja el hueco con su alto y se ve que
+            // ese dato falta por rellenar en el panel.
+            if (el) el.textContent = texto || '—';
+        };
+
+        // El nombre de la barra puede venir de la configuración del evento o
+        // de la identidad de la tablet; son el mismo dato por dos caminos.
+        const barra = configEvento.barra || instancia.nombre || '';
+        const lugar = configEvento.lugar || '';
+
+        poner('ficha-fecha', fechaDeCartel(configEvento.fecha));
+        poner('ficha-lugar', lugar);
+        poner('ficha-barra', barra);
+        poner('ficha-evento', configEvento.evento || 'MasterDrinks');
+        poner('active-cajero-name', currentUser ? currentUser.nombre : '');
+
+        // Sin afiche, el hueco del cartel lleva el nombre del evento.
+        const vacio = document.getElementById('ficha-afiche-vacio');
+        if (vacio && configEvento.evento) vacio.textContent = configEvento.evento;
+    }
+
+    // El afiche es un archivo suelto —afiche.jpg junto al servidor— y no un
+    // dato de la base: se cambia una vez por evento, lo deja quien monta las
+    // tablets y así no hay que entrar al panel ni subir nada. Si no está, en
+    // su sitio queda el nombre del evento; nunca un icono de imagen rota.
+    function cargarAfiche() {
+        const img = document.getElementById('ficha-afiche-img');
+        const vacio = document.getElementById('ficha-afiche-vacio');
+        if (!img) return;
+
+        img.addEventListener('load', () => {
+            img.classList.remove('hide');
+            if (vacio) vacio.classList.add('hide');
+            pintarTemaDelAfiche(img);
+        });
+
+        // El hueco cambia de tamaño al girar la tablet, y con él la cuenta de
+        // si el cartel da la talla.
+        window.addEventListener('resize', ajustarCalidadDelAfiche);
+        img.addEventListener('error', () => {
+            img.classList.add('hide');
+            if (vacio) vacio.classList.remove('hide');
+        });
+        img.src = '/afiche';
+    }
+
+    // ------------------------------------------------------------------
+    // EL COLOR DE LA PANTALLA SALE DEL AFICHE
+    // ------------------------------------------------------------------
+    // De la foto del cartel se saca UN DATO: el tono dominante (y un segundo
+    // tono, el del remate, para el sello de la barra). La claridad y la
+    // saturación de cada pieza no salen de la foto: son las de style.css.
+    //
+    // Esa distinción es todo el asunto. Aquí ya hubo un analizador que
+    // copiaba el color dominante tal cual, y con un fondo apagado dejó los
+    // botones blancos sobre blanco, con pinta de desactivados (está contado
+    // en cargarFondo). Fijando la claridad, el número siempre se lee encima
+    // de su tecla y el nombre del evento encima de su papel, venga el cartel
+    // que venga; lo único que cambia es de qué color es la noche.
+    //
+    // Si el cartel no tiene color del que fiarse —un blanco y negro, por
+    // ejemplo— no se toca nada y se queda la paleta escrita en el CSS.
+    const CUBOS_TONO = 24;   // el círculo de color partido en tramos de 15°
+
+    function tonosDelAfiche(img) {
+        const ancho = 64;
+        const alto = Math.max(1, Math.round(ancho * (img.naturalHeight || 1) /
+                                                    (img.naturalWidth || 1)));
+        const lienzo = document.createElement('canvas');
+        lienzo.width = ancho;
+        lienzo.height = alto;
+
+        const pincel = lienzo.getContext('2d', { willReadFrequently: true });
+        pincel.drawImage(img, 0, 0, ancho, alto);
+        const pixeles = pincel.getImageData(0, 0, ancho, alto).data;
+
+        const peso = new Array(CUBOS_TONO).fill(0);
+        const sumaTono = new Array(CUBOS_TONO).fill(0);
+
+        for (let i = 0; i < pixeles.length; i += 4) {
+            const r = pixeles[i] / 255, v = pixeles[i + 1] / 255, a = pixeles[i + 2] / 255;
+            const alto_ = Math.max(r, v, a), bajo = Math.min(r, v, a);
+            if (alto_ === bajo) continue;              // gris puro: no dice nada del tono
+
+            const luz = (alto_ + bajo) / 2;
+            const rango = alto_ - bajo;
+            const sat = luz > 0.5 ? rango / (2 - alto_ - bajo) : rango / (alto_ + bajo);
+            // Ni los negros del fondo ni el blanco de las letras tiñen nada.
+            if (sat < 0.18 || luz < 0.10 || luz > 0.92) continue;
+
+            let tono;
+            if (alto_ === r)      tono = (v - a) / rango + (v < a ? 6 : 0);
+            else if (alto_ === v) tono = (a - r) / rango + 2;
+            else                  tono = (r - v) / rango + 4;
+            tono *= 60;
+
+            // Pesa más el color saturado y de claridad media: es el que se ve
+            // como "el color del cartel", no la sombra ni el reflejo.
+            const cuanto = sat * (1 - Math.abs(luz - 0.5) * 1.2);
+            const cubo = Math.min(CUBOS_TONO - 1, Math.floor(tono / (360 / CUBOS_TONO)));
+            peso[cubo] += cuanto;
+            sumaTono[cubo] += cuanto * tono;
+        }
+
+        let mandan = 0;
+        for (let i = 1; i < CUBOS_TONO; i++) if (peso[i] > peso[mandan]) mandan = i;
+        const total = peso.reduce((x, y) => x + y, 0);
+        // Un cartel casi sin color: mejor no inventarse una paleta.
+        if (!peso[mandan] || total < ancho * alto * 0.02) return null;
+
+        return { principal: sumaTono[mandan] / peso[mandan] };
+    }
+
+    // ¿Da la talla el cartel para el hueco que tiene que llenar?
+    //
+    // El cartel llena su mitad siempre, se estire lo que se estire. Pero si la
+    // imagen se queda corta, se marca el hueco para que el CSS le pase una
+    // máscara de enfoque y recupere el filo que pierde al ampliarse. Con un
+    // cartel grande no se marca nada y no se filtra nada.
+    //
+    // La cuenta es en píxeles DE VERDAD, no de web: una tablet corriente pinta
+    // a 1,75 o a 2 puntos por píxel de web, así que media pantalla de 383 son
+    // 670 u 800 puntos que hay que rellenar.
+    function ajustarCalidadDelAfiche() {
+        const img = document.getElementById('ficha-afiche-img');
+        const hueco = document.querySelector('.pin-cartel');
+        if (!img || !hueco || !img.naturalWidth) return;
+
+        // Con la pantalla oculta el hueco mide cero y la cuenta no vale.
+        const anchoCaja = hueco.clientWidth * (window.devicePixelRatio || 1);
+        if (!anchoCaja) return;
+
+        // El 90 % da margen: estirar un pelo no se nota y no compensa dejar
+        // franjas negras por un 5 % de diferencia.
+        hueco.classList.toggle('cartel-estirado', img.naturalWidth < anchoCaja * 0.9);
+    }
+
+    function pintarTemaDelAfiche(img) {
+        const pantalla = document.getElementById('waiter-lock-modal');
+        if (!pantalla) return;
+
+        let tonos = null;
+        try {
+            tonos = tonosDelAfiche(img);
+        } catch (err) {
+            // Un lienzo "manchado" (la imagen viniendo de otro dominio) o un
+            // navegador sin canvas: la pantalla se queda con su paleta.
+            console.warn('No se pudo leer el color del afiche:', err);
+        }
+        if (!tonos) return;
+
+        const t1 = Math.round(tonos.principal);
+        const color = (tono, sat, luz) => 'hsl(' + tono + ', ' + sat + '%, ' + luz + '%)';
+
+        // Tres variables y nada más. La pantalla es negra y blanca; del cartel
+        // sólo entra el acento, y entra en dos sitios: el botón de Ingresar
+        // encendido y el destello de la tecla al pulsarla.
+        //
+        // La claridad va fija —48 % para el acento— y de la foto sale sólo el
+        // TONO. Es lo que hace que valga cualquier cartel: uno oscuro no deja
+        // el botón negro sobre negro y uno pálido no lo deja ilegible. Aquí ya
+        // hubo un analizador que copiaba el color tal cual y dejó botones
+        // blancos sobre blanco (está contado en cargarFondo).
+        //
+        // El negro del fondo lleva un punto del tono del cartel: no se ve como
+        // color, pero evita que la foto y el panel parezcan dos materiales
+        // distintos pegados uno al lado del otro.
+        const paleta = {
+            '--ev-noche':       color(t1, 22, 4),
+            '--ev-acento':      color(t1, 62, 48),
+            '--ev-acento-vivo': color(t1, 68, 56)
+        };
+
+        Object.keys(paleta).forEach(nombre => {
+            pantalla.style.setProperty(nombre, paleta[nombre]);
+        });
+    }
+
     function pintarConfiguracion() {
         ['evento', 'fecha', 'lugar', 'barra', 'responsable'].forEach(campo => {
             const el = document.getElementById('cfg-' + campo);
@@ -2652,6 +3135,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             configEvento = data.configuracion;
             pintarConfiguracion();
+            // La pantalla de clave enseña estos mismos datos: se repinta aquí
+            // para que el cambio se vea en la comanda siguiente y no haya que
+            // recargar la tablet.
+            pintarFichaEvento();
             // El nombre de la barra ES la identidad: al cambiarlo cambian la
             // etiqueta de la pantalla, el título de la pestaña y lo que se
             // imprime, así que se recargan sin reiniciar nada.
@@ -4038,58 +4525,415 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ==========================================
+    // GESTIÓN DE STOCK POR TARJETAS (ADMIN)
+    // ==========================================
+    let adminStockProducts = [];
+    let adminStockCategories = [];
+    let adminStockActiveCategory = 'all';
+    let adminStockSearchQuery = '';
+    let currentStockModalProduct = null;
+    let currentStockModalType = 'ENTRADA';
+
     async function loadStockSetup() {
         try {
             const response = await fetch('/api/productos');
             const data = await response.json();
 
-            // Los dos desplegables de la pestaña: el de corregir inventario y
-            // el de ingresar mercancía.
-            ['stock-product', 'ingreso-producto'].forEach(id => {
+            adminStockProducts = data.productos || [];
+            adminStockCategories = data.categorias || [];
+
+            // Actualizar selectores de albarán si existen
+            ['ingreso-producto'].forEach(id => {
                 const select = document.getElementById(id);
                 if (!select) return;
                 select.innerHTML = '<option value="" disabled selected>Seleccione producto...</option>';
-                data.productos.forEach(p => {
+                adminStockProducts.forEach(p => {
                     const opt = document.createElement('option');
                     opt.value = p.id_producto;
-                    opt.textContent = `${p.nombre} (Stock actual: ${p.stock_actual})`;
+                    opt.textContent = `${p.nombre} (Stock: ${p.stock_actual})`;
                     select.appendChild(opt);
                 });
             });
 
+            renderAdminStockCategories();
+            renderAdminStockGrid();
             cargarTraspasos();
         } catch (err) {
-            console.error(err);
+            console.error("Error al cargar stock:", err);
+            notify('Error al cargar inventario.', 'error');
         }
     }
 
-    // Form: Adjust Stock
-    document.getElementById('form-adjust-stock').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const id_producto = document.getElementById('stock-product').value;
-        const tipo_movimiento = document.getElementById('stock-type').value;
-        const cantidad = document.getElementById('stock-qty').value;
-        const motivo = document.getElementById('stock-reason').value;
+    function renderAdminStockCategories() {
+        const catContainer = document.getElementById('admin-stock-category-pills');
+        if (!catContainer) return;
+        catContainer.innerHTML = '';
+
+        const allBtn = document.createElement('button');
+        allBtn.type = 'button';
+        allBtn.className = `category-btn ${adminStockActiveCategory === 'all' ? 'active' : ''}`;
+        allBtn.textContent = '🍹 Todos';
+        allBtn.addEventListener('click', () => {
+            adminStockActiveCategory = 'all';
+            document.querySelectorAll('#admin-stock-category-pills .category-btn').forEach(b => b.classList.remove('active'));
+            allBtn.classList.add('active');
+            renderAdminStockGrid();
+        });
+        catContainer.appendChild(allBtn);
+
+        const icons = { 'BEBIDA': '🍺', 'COMIDA': '🍔', 'OTRO': '🏷️' };
+        adminStockCategories.forEach(cat => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `category-btn ${adminStockActiveCategory === cat.id_categoria ? 'active' : ''}`;
+            btn.textContent = `${icons[cat.tipo] || '📦'} ${cat.nombre}`;
+            btn.addEventListener('click', () => {
+                adminStockActiveCategory = cat.id_categoria;
+                document.querySelectorAll('#admin-stock-category-pills .category-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                renderAdminStockGrid();
+            });
+            catContainer.appendChild(btn);
+        });
+    }
+
+    function renderAdminStockGrid() {
+        const grid = document.getElementById('admin-stock-cards-grid');
+        const summaryText = document.getElementById('admin-stock-summary-text');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        const search = (adminStockSearchQuery || '').toLowerCase().trim();
+        const filtered = adminStockProducts.filter(p => {
+            const matchCat = adminStockActiveCategory === 'all' || p.id_categoria === adminStockActiveCategory;
+            const matchSearch = !search || p.nombre.toLowerCase().includes(search) || (p.descripcion && p.descripcion.toLowerCase().includes(search));
+            return matchCat && matchSearch;
+        });
+
+        const totalProds = adminStockProducts.length;
+        const conStock = adminStockProducts.filter(p => p.stock_actual > 0).length;
+        const agotados = adminStockProducts.filter(p => p.stock_actual <= 0).length;
+
+        if (summaryText) {
+            summaryText.innerHTML = `<strong>${totalProds}</strong> productos en total · <span style="color: #34d399; font-weight: 600;">${conStock} con stock</span> · <span style="color: #f87171; font-weight: 600;">${agotados} agotados</span>`;
+        }
+
+        if (filtered.length === 0) {
+            grid.innerHTML = `<div class="empty-cart-msg" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center;">No se encontraron productos que coincidan con la búsqueda.</div>`;
+            return;
+        }
+
+        const catMap = {};
+        adminStockCategories.forEach(c => { catMap[c.id_categoria] = c.nombre; });
+
+        filtered.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'admin-stock-card';
+            card.dataset.id = p.id_producto;
+
+            const catNombre = catMap[p.id_categoria] || 'General';
+            const tieneFoto = Boolean(p.tiene_foto);
+            const fotoSrc = urlFoto(p);
+
+            const stockClase = p.stock_actual > 10 ? 'in-stock' : (p.stock_actual > 0 ? 'low-stock' : 'out-stock');
+            const stockEtiqueta = p.stock_actual > 0 ? `${p.stock_actual} uds` : '0 uds (Agotado)';
+
+            card.innerHTML = `
+                <div class="admin-stock-card-img-wrap">
+                    <span class="admin-stock-cat-tag">${escapeHtml(catNombre)}</span>
+                    ${tieneFoto
+                        ? `<img src="${fotoSrc}" alt="${escapeHtml(p.nombre)}" class="admin-stock-card-img" loading="lazy">`
+                        : `<span class="admin-stock-card-icon-fallback">${emojiDe(p)}</span>`
+                    }
+                </div>
+                <div class="admin-stock-card-body">
+                    <div class="admin-stock-card-info">
+                        <h3 class="admin-stock-card-title">${escapeHtml(p.nombre)}</h3>
+                        <div class="admin-stock-pill-row">
+                            <span class="admin-stock-pill ${stockClase}">
+                                <span>📦</span> <strong>${stockEtiqueta}</strong>
+                            </span>
+                            <span class="admin-stock-price-tag">${Number(p.precio_venta).toFixed(2)} Bs.</span>
+                        </div>
+                    </div>
+                    <div class="admin-stock-actions-grid">
+                        <button type="button" class="stock-action-btn entrada" data-id="${p.id_producto}">
+                            <span>＋</span> Entrada
+                        </button>
+                        <button type="button" class="stock-action-btn salida" data-id="${p.id_producto}">
+                            <span>−</span> Salida
+                        </button>
+                        <button type="button" class="stock-action-btn ajuste" data-id="${p.id_producto}">
+                            <span>🔄</span> Ajuste
+                        </button>
+                        <button type="button" class="stock-action-btn historial" data-id="${p.id_producto}">
+                            <span>🕒</span> Historial
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            // Botones de acción
+            card.querySelector('.stock-action-btn.entrada').addEventListener('click', () => openStockActionModal(p, 'ENTRADA'));
+            card.querySelector('.stock-action-btn.salida').addEventListener('click', () => openStockActionModal(p, 'SALIDA'));
+            card.querySelector('.stock-action-btn.ajuste').addEventListener('click', () => openStockActionModal(p, 'AJUSTE'));
+            card.querySelector('.stock-action-btn.historial').addEventListener('click', () => openStockHistoryModal(p));
+
+            grid.appendChild(card);
+        });
+    }
+
+    // Modal de acción rápida de stock (+ Entrada, - Salida, Ajuste)
+    function openStockActionModal(prod, type = 'ENTRADA') {
+        currentStockModalProduct = prod;
+        currentStockModalType = type;
+
+        const modal = document.getElementById('stock-action-modal');
+        if (!modal) return;
+
+        document.getElementById('sam-title').textContent = prod.nombre;
+        document.getElementById('sam-current-stock').textContent = `${prod.stock_actual} uds`;
+        
+        const imgContainer = document.getElementById('sam-img-container');
+        if (imgContainer) {
+            imgContainer.innerHTML = prod.tiene_foto
+                ? `<img src="${urlFoto(prod)}" style="max-height: 44px; max-width: 100%; object-fit: contain;">`
+                : `<span style="font-size: 1.8rem;">${emojiDe(prod)}</span>`;
+        }
+
+        // Seleccionar tipo
+        setStockModalType(type);
+
+        // Resetear cantidad a valor razonable
+        const qtyInput = document.getElementById('sam-qty-input');
+        qtyInput.value = type === 'AJUSTE' ? prod.stock_actual : 10;
+
+        updateStockModalPreview();
+        modal.classList.remove('hide');
+        qtyInput.focus();
+    }
+
+    function setStockModalType(type) {
+        currentStockModalType = type;
+        document.querySelectorAll('.stock-type-btn').forEach(btn => {
+            const isTarget = btn.dataset.type === type;
+            btn.classList.toggle('active', isTarget);
+        });
+
+        const label = document.getElementById('sam-qty-label');
+        const reasonInput = document.getElementById('sam-reason');
+
+        if (type === 'ENTRADA') {
+            if (label) label.textContent = 'Cantidad a ingresar (sumar)';
+            if (reasonInput && !reasonInput.value) reasonInput.value = 'Compra / Abastecimiento';
+        } else if (type === 'SALIDA') {
+            if (label) label.textContent = 'Cantidad a retirar (restar)';
+            if (reasonInput && !reasonInput.value) reasonInput.value = 'Merma / Botella rota';
+        } else if (type === 'AJUSTE') {
+            if (label) label.textContent = 'Nuevo stock total exacto';
+            if (reasonInput && !reasonInput.value) reasonInput.value = 'Conteo físico de inventario';
+        }
+        updateStockModalPreview();
+    }
+
+    function updateStockModalPreview() {
+        if (!currentStockModalProduct) return;
+        const current = Number(currentStockModalProduct.stock_actual) || 0;
+        const qty = parseInt(document.getElementById('sam-qty-input').value, 10) || 0;
+        let resultado = current;
+
+        if (currentStockModalType === 'ENTRADA') resultado = current + Math.max(0, qty);
+        else if (currentStockModalType === 'SALIDA') resultado = Math.max(0, current - Math.max(0, qty));
+        else if (currentStockModalType === 'AJUSTE') resultado = Math.max(0, qty);
+
+        const previewEl = document.getElementById('sam-preview-stock');
+        if (previewEl) {
+            const diff = resultado - current;
+            const diffText = diff > 0 ? ` (+${diff})` : (diff < 0 ? ` (${diff})` : '');
+            previewEl.textContent = `${resultado} uds${diffText}`;
+            previewEl.style.color = resultado > 0 ? '#34d399' : '#f87171';
+        }
+    }
+
+    async function submitQuickStockAction() {
+        if (!currentStockModalProduct) return;
+
+        const qty = parseInt(document.getElementById('sam-qty-input').value, 10);
+        const reason = (document.getElementById('sam-reason').value || '').trim();
+
+        if (isNaN(qty) || qty < 0) {
+            notify('Introduce una cantidad válida.', 'warn');
+            return;
+        }
+        if (currentStockModalType !== 'AJUSTE' && qty <= 0) {
+            notify('La cantidad debe ser mayor que cero.', 'warn');
+            return;
+        }
+        if (!reason) {
+            notify('Ingresa el motivo del movimiento.', 'warn');
+            document.getElementById('sam-reason').focus();
+            return;
+        }
+
+        const btn = document.getElementById('sam-confirm-btn');
+        btn.disabled = true;
 
         try {
             const response = await fetch('/api/admin/stock/movimiento', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id_producto, tipo_movimiento, cantidad, motivo, id_admin: currentUser.id_admin, id_evento: currentUser.id_evento })
+                body: JSON.stringify({
+                    id_producto: currentStockModalProduct.id_producto,
+                    tipo_movimiento: currentStockModalType,
+                    cantidad: qty,
+                    motivo: reason,
+                    id_admin: currentUser ? currentUser.id_admin : 1,
+                    id_evento: currentUser ? currentUser.id_evento : 1
+                })
             });
-            const data = await response.json();
 
+            const data = await response.json();
             if (data.success) {
-                notify('Stock ajustado. Ahora hay ' + data.stock_nuevo + ' unidades.', 'ok');
-                document.getElementById('form-adjust-stock').reset();
-                loadStockSetup(); // Refresh view
+                notify(`✔ Stock actualizado: ${currentStockModalProduct.nombre} ahora tiene ${data.stock_nuevo} uds.`, 'ok');
+                currentStockModalProduct.stock_actual = data.stock_nuevo;
+                
+                // Actualizar producto en el array local
+                const idx = adminStockProducts.findIndex(p => p.id_producto === currentStockModalProduct.id_producto);
+                if (idx !== -1) adminStockProducts[idx].stock_actual = data.stock_nuevo;
+
+                document.getElementById('stock-action-modal').classList.add('hide');
+                renderAdminStockGrid();
             } else {
-                notify(data.message || 'No se pudo completar la operación.', 'error');
+                notify(data.message || 'No se pudo registrar el movimiento.', 'error');
             }
         } catch (err) {
-            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+            console.error(err);
+            notify('Sin conexión con el servidor.', 'error');
+        } finally {
+            btn.disabled = false;
         }
+    }
+
+    // Modal de Historial de Producto
+    async function openStockHistoryModal(prod) {
+        const modal = document.getElementById('stock-history-modal');
+        if (!modal) return;
+
+        document.getElementById('shm-title').textContent = `Movimientos: ${prod.nombre}`;
+        document.getElementById('shm-subtitle').textContent = `Stock actual: ${prod.stock_actual} uds · Consultando registros...`;
+        const tbody = document.getElementById('shm-table-body');
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px;">Cargando historial...</td></tr>`;
+
+        modal.classList.remove('hide');
+
+        try {
+            const res = await fetch(`/api/admin/productos/${prod.id_producto}/movimientos`);
+            const data = await res.json();
+            const movs = data.movimientos || [];
+
+            document.getElementById('shm-subtitle').textContent = `Stock actual: ${prod.stock_actual} uds · ${movs.length} movimientos registrados`;
+
+            if (movs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 24px; color: var(--text-secondary);">No hay movimientos registrados para este producto.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = '';
+            movs.forEach(m => {
+                const tr = document.createElement('tr');
+                const badgeClase = m.tipo_movimiento === 'ENTRADA' ? 'badge-entregada' : (m.tipo_movimiento === 'SALIDA' ? 'badge-anulado' : 'badge-proceso');
+                const responsable = m.nombre_mesero ? `👤 ${m.nombre_mesero}` : (m.nombre_cajero ? `Cajero: ${m.nombre_cajero}` : (m.nombre_admin || 'Admin'));
+
+                tr.innerHTML = `
+                    <td><span class="badge ${badgeClase}">${escapeHtml(m.tipo_movimiento)}</span></td>
+                    <td style="font-weight: 700;">${m.cantidad}</td>
+                    <td style="font-size: 0.85rem;">${m.stock_anterior} $\to$ <strong style="color: #34d399;">${m.stock_nuevo}</strong></td>
+                    <td style="font-size: 0.8rem; color: #c7d2fe;">${escapeHtml(responsable)}</td>
+                    <td style="font-size: 0.75rem; white-space: nowrap;">${new Date(m.fecha_hora).toLocaleDateString()} ${new Date(m.fecha_hora).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                    <td style="font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(m.motivo || '—')}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch (err) {
+            console.error(err);
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #f87171;">Error al consultar el historial.</td></tr>`;
+        }
+    }
+
+    // Bind listeners para el modal de stock
+    document.querySelectorAll('.stock-type-btn').forEach(btn => {
+        btn.addEventListener('click', () => setStockModalType(btn.dataset.type));
     });
+
+    const qtyInput = document.getElementById('sam-qty-input');
+    if (qtyInput) {
+        qtyInput.addEventListener('input', updateStockModalPreview);
+    }
+    const minusBtn = document.getElementById('sam-minus-btn');
+    if (minusBtn) {
+        minusBtn.addEventListener('click', () => {
+            const v = Math.max(1, (parseInt(qtyInput.value, 10) || 1) - 1);
+            qtyInput.value = v;
+            updateStockModalPreview();
+        });
+    }
+    const plusBtn = document.getElementById('sam-plus-btn');
+    if (plusBtn) {
+        plusBtn.addEventListener('click', () => {
+            const v = (parseInt(qtyInput.value, 10) || 0) + 1;
+            qtyInput.value = v;
+            updateStockModalPreview();
+        });
+    }
+
+    document.querySelectorAll('.stock-preset-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const addVal = parseInt(chip.dataset.val, 10) || 1;
+            if (currentStockModalType === 'AJUSTE') {
+                qtyInput.value = addVal;
+            } else {
+                qtyInput.value = (parseInt(qtyInput.value, 10) || 0) + addVal;
+            }
+            updateStockModalPreview();
+        });
+    });
+
+    const cancelSamBtn = document.getElementById('sam-cancel-btn');
+    if (cancelSamBtn) {
+        cancelSamBtn.addEventListener('click', () => document.getElementById('stock-action-modal').classList.add('hide'));
+    }
+    const confirmSamBtn = document.getElementById('sam-confirm-btn');
+    if (confirmSamBtn) {
+        confirmSamBtn.addEventListener('click', submitQuickStockAction);
+    }
+
+    const closeShmBtn = document.getElementById('shm-close-btn');
+    if (closeShmBtn) {
+        closeShmBtn.addEventListener('click', () => document.getElementById('stock-history-modal').classList.add('hide'));
+    }
+
+    // Buscador de stock
+    const adminStockSearchInput = document.getElementById('admin-stock-search');
+    if (adminStockSearchInput) {
+        adminStockSearchInput.addEventListener('input', (e) => {
+            adminStockSearchQuery = e.target.value;
+            renderAdminStockGrid();
+        });
+    }
+
+    // Toggle albarán collapsible
+    const toggleAlbaranBtn = document.getElementById('toggle-albaran-btn');
+    if (toggleAlbaranBtn) {
+        toggleAlbaranBtn.addEventListener('click', () => {
+            const section = document.getElementById('albaran-collapsible-section');
+            if (section) {
+                const isHidden = section.classList.toggle('hide');
+                toggleAlbaranBtn.textContent = isHidden ? '📥 Ingreso por Albarán / Lote' : '✕ Ocultar formulario de albarán';
+                if (!isHidden) section.scrollIntoView({ behavior: 'smooth' });
+            }
+        });
+    }
 
     // TAB: AUDIT LOGS DATA
     async function loadAuditsData() {
@@ -4102,17 +4946,26 @@ document.addEventListener('DOMContentLoaded', () => {
             tbodyMovs.innerHTML = '';
 
             if (data.movimientos.length === 0) {
-                tbodyMovs.innerHTML = `<tr><td colspan="7" style="text-align: center;">No hay movimientos de stock</td></tr>`;
+                tbodyMovs.innerHTML = `<tr><td colspan="8" style="text-align: center;">No hay movimientos de stock</td></tr>`;
             } else {
                 data.movimientos.forEach(m => {
                     const tr = document.createElement('tr');
+                    const meseroHtml = m.nombre_mesero
+                        ? `<span class="badge" style="background: rgba(99, 102, 241, 0.18); color: #c7d2fe; border: 1px solid rgba(99, 102, 241, 0.35); font-size: 0.75rem; padding: 2px 7px; white-space: nowrap;">👤 ${escapeHtml(m.nombre_mesero)}</span>`
+                        : (m.nombre_cajero
+                            ? `<span style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap;">Cajero: ${escapeHtml(m.nombre_cajero)}</span>`
+                            : (m.nombre_admin
+                                ? `<span style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap;">${escapeHtml(m.nombre_admin)}</span>`
+                                : '<span style="color: var(--text-secondary); font-size: 0.75rem;">—</span>'));
+
                     tr.innerHTML = `
                         <td><strong>${escapeHtml(m.nombre_producto)}</strong></td>
                         <td><span class="badge ${m.tipo_movimiento === 'ENTRADA' ? 'badge-entregada' : m.tipo_movimiento === 'SALIDA' ? 'badge-anulado' : 'badge-pendiente'}">${m.tipo_movimiento}</span></td>
                         <td>${m.cantidad}</td>
                         <td>${m.stock_anterior}</td>
                         <td style="font-weight: bold; color: #34d399;">${m.stock_nuevo}</td>
-                        <td style="font-size: 0.75rem;">${new Date(m.fecha_hora).toLocaleString()}</td>
+                        <td>${meseroHtml}</td>
+                        <td style="font-size: 0.75rem; white-space: nowrap;">${new Date(m.fecha_hora).toLocaleString()}</td>
                         <td style="font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(m.motivo || '-')}</td>
                     `;
                     tbodyMovs.appendChild(tr);
@@ -4234,7 +5087,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const w = settings.width;
         const ops = [];
 
-        ops.push(H.op('*** MASTERDRINKS ***', { align: 'center', bold: true, tall: true }));
+        ops.push(H.op('*** EUPHORIA ***', { align: 'center', bold: true, tall: true, isLogo: true }));
         ops.push(H.op('REPORTE DE INVENTARIO', { align: 'center', bold: true }));
         ops.push(H.op(new Date().toLocaleString(), { align: 'center' }));
         ops.push(H.op(H.divider(w)));

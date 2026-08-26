@@ -74,6 +74,112 @@ app.get('/wallpaper.png', (req, res) => {
   res.redirect('/Wallpaper.jpg');
 });
 
+// El afiche del evento, para la pantalla de clave de mesero. De su color sale
+// toda la paleta de esa pantalla, así que ponerlo es lo primero que hay que
+// hacer al montar un evento nuevo.
+//
+// Se busca de dos maneras, y a propósito las dos son perezosas: nadie va a
+// renombrar un archivo con la barra llena.
+//   1. Un archivo llamado afiche/cartel/evento/poster (jpg, jpeg, png o webp)
+//      aquí mismo o en public/.
+//   2. Cualquier imagen dentro de una carpeta 'afiche'. Si hay varias, la más
+//      reciente: así se cambia de evento arrastrando la nueva dentro, sin
+//      borrar la anterior ni tocar nombres.
+// Si no aparece ninguna se responde 404 y la pantalla enseña el nombre del
+// evento en el hueco del cartel.
+const AFICHE_EXT = /[.](jpe?g|png|webp)$/i;
+const AFICHE_NOMBRES = /^(afiche|cartel|evento|poster)[.](jpe?g|png|webp)$/i;
+
+function buscarAfiche() {
+  for (const carpeta of [__dirname, path.join(__dirname, 'public')]) {
+    let entradas;
+    try { entradas = fs.readdirSync(carpeta); } catch (e) { continue; }
+    const suelto = entradas.find(n => AFICHE_NOMBRES.test(n));
+    if (suelto) return path.join(carpeta, suelto);
+  }
+
+  for (const carpeta of [path.join(__dirname, 'afiche'), path.join(__dirname, 'public', 'afiche')]) {
+    let entradas;
+    try { entradas = fs.readdirSync(carpeta); } catch (e) { continue; }
+    const imagenes = entradas
+      .filter(n => AFICHE_EXT.test(n))
+      .map(n => {
+        const ruta = path.join(carpeta, n);
+        return { ruta: ruta, cuando: fs.statSync(ruta).mtimeMs };
+      })
+      .sort((a, b) => b.cuando - a.cuando);
+    if (imagenes.length) return imagenes[0].ruta;
+  }
+
+  return null;
+}
+
+app.get('/afiche', (req, res) => {
+  const ruta = buscarAfiche();
+  if (!ruta) return res.status(404).end();
+  res.sendFile(ruta);
+});
+
+// Cuánto mide una imagen, leyendo sus cabeceras. No hace falta ninguna
+// librería: el ancho y el alto de un JPEG y de un PNG están en los primeros
+// bytes del archivo, y aquí sólo se quiere eso.
+function medidaImagen(ruta) {
+  let b;
+  try { b = fs.readFileSync(ruta); } catch (e) { return null; }
+
+  // PNG: los cuatro y cuatro bytes que siguen a la cabecera IHDR.
+  if (b.length > 24 && b.readUInt32BE(0) === 0x89504E47) {
+    return { ancho: b.readUInt32BE(16), alto: b.readUInt32BE(20) };
+  }
+
+  // JPEG: se salta de marca en marca hasta el "start of frame", que es donde
+  // están las medidas. Las marcas de longitud fija (C4, C8, CC) no lo son.
+  if (b.length > 4 && b[0] === 0xFF && b[1] === 0xD8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xFF) { i++; continue; }
+      const marca = b[i + 1];
+      if (marca >= 0xC0 && marca <= 0xCF && marca !== 0xC4 && marca !== 0xC8 && marca !== 0xCC) {
+        return { alto: b.readUInt16BE(i + 5), ancho: b.readUInt16BE(i + 7) };
+      }
+      const largo = b.readUInt16BE(i + 2);
+      if (largo < 2) break;
+      i += 2 + largo;
+    }
+  }
+
+  return null;
+}
+
+// El cartel se ve a media pantalla en la tablet, y esa media pantalla son unos
+// 700 píxeles de verdad en cuanto la pantalla es medianamente fina. Por debajo
+// de 1000 de ancho el navegador tiene que estirar la imagen y se nota.
+const AFICHE_ANCHO_MINIMO = 1000;
+
+function informarDelAfiche() {
+  const ruta = buscarAfiche();
+  if (!ruta) {
+    console.log('\n   Cartel del evento: no hay ninguno.');
+    console.log('   Deja la imagen en la carpeta "afiche" (cualquier nombre).');
+    return;
+  }
+
+  const nombre = path.relative(__dirname, ruta);
+  const medida = medidaImagen(ruta);
+  const peso = (fs.statSync(ruta).size / 1024).toFixed(0) + ' KB';
+
+  if (!medida) {
+    console.log(`\n   Cartel del evento: ${nombre}  (${peso})`);
+    return;
+  }
+
+  console.log(`\n   Cartel del evento: ${nombre}  (${medida.ancho}×${medida.alto}, ${peso})`);
+  if (medida.ancho < AFICHE_ANCHO_MINIMO) {
+    console.log(`   ⚠ Se va a ver borroso: ocupa media pantalla y para eso hace`);
+    console.log(`     falta una imagen de ${AFICHE_ANCHO_MINIMO} px de ancho o más.`);
+  }
+}
+
 // DB_FILE permite arrancar contra otra base sin tocar la del evento: es lo que
 // usa la prueba de carga (tools/stress-test.js) para castigar una copia.
 const dbFile = process.env.DB_FILE
@@ -1427,8 +1533,20 @@ app.get('/api/productos', (req, res) => {
     // hasta que llegaba la última. Ahora el catálogo pesa unos 5 KB, las
     // tarjetas aparecen enseguida y cada foto llega por su cuenta a
     // /api/producto/:id/foto, donde el navegador puede guardarla en caché.
+    // stock_tope es el nivel más alto al que llegó cada producto: lo que hubo
+    // cuando estaba lleno. Sale de los movimientos, que guardan el stock antes
+    // y después de cada entrada y de cada venta, así que no hace falta ninguna
+    // columna nueva. Es la referencia de la barrita de las tarjetas: sin ella,
+    // "queda poco" no significa nada —veinte botellas de whisky son muchas y
+    // veinte cervezas no son nada—, y con ella cada producto se mide consigo
+    // mismo. Si un producto nunca tuvo movimientos, su tope es su stock.
     const queryProds = `SELECT id_producto, id_categoria, nombre, descripcion, tipo_producto,
                                precio_venta, stock_actual, activo,
+                               MAX(stock_actual,
+                                   COALESCE((SELECT MAX(MAX(ms.stock_anterior), MAX(ms.stock_nuevo))
+                                               FROM movimiento_stock ms
+                                              WHERE ms.id_producto = producto.id_producto), 0)
+                               ) AS stock_tope,
                                COALESCE(requiere_acompanante, 0) AS requiere_acompanante,
                                COALESCE(es_acompanante, 0) AS es_acompanante,
                                CASE WHEN foto IS NULL OR foto = '' THEN 0 ELSE 1 END AS tiene_foto,
@@ -3465,6 +3583,40 @@ app.post('/api/admin/stock/movimiento', (req, res) => {
   }
 });
 
+// GET MOVIMIENTOS DE UN PRODUCTO ESPECÍFICO
+app.get('/api/admin/productos/:id/movimientos', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'ID de producto no válido.' });
+  }
+
+  const sql = `
+    SELECT ms.*,
+           COALESCE(p.nombre, 'Producto eliminado') AS nombre_producto,
+           m.nombre AS nombre_mesero,
+           COALESCE(cj.nombre, tc.nombre) AS nombre_cajero,
+           COALESCE(a.nombre, ta.nombre, 'Venta POS') AS nombre_admin
+    FROM movimiento_stock ms
+    LEFT JOIN producto p ON ms.id_producto = p.id_producto
+    LEFT JOIN administrador_evento a ON ms.id_admin = a.id_admin
+    LEFT JOIN comanda c ON (ms.motivo LIKE 'Venta comanda #' || c.id_comanda OR ms.motivo LIKE 'Anulación%#' || c.id_comanda)
+    LEFT JOIN mesero m ON c.id_mesero = m.id_mesero
+    LEFT JOIN cajero cj ON c.id_cajero = cj.id_cajero
+    LEFT JOIN traspaso t ON (ms.motivo LIKE 'Traspaso #' || t.id_traspaso || '%' OR ms.motivo LIKE 'Compra #' || t.id_traspaso || '%')
+    LEFT JOIN cajero tc ON t.id_cajero = tc.id_cajero
+    LEFT JOIN administrador_evento ta ON t.id_admin = ta.id_admin
+    WHERE ms.id_producto = ?
+    ORDER BY ms.id_movimiento DESC
+    LIMIT 60
+  `;
+  dbAll(sql, [id])
+    .then(movimientos => res.json({ success: true, movimientos }))
+    .catch(err => {
+      console.error('Error al consultar movimientos del producto:', err);
+      res.status(500).json({ success: false, message: 'No se pudieron consultar los movimientos.' });
+    });
+});
+
 // ==========================================
 // 4b. API: REPORTE DE CIERRE
 // ==========================================
@@ -3675,15 +3827,22 @@ app.get('/api/admin/auditoria', (req, res) => {
     pool.query(qAudit, (err, audits) => {
       if (err) return res.status(500).json({ error: err.message });
       
-      // Sales write stock movements with id_admin NULL, so this must be a LEFT JOIN or
-      // every sale would be invisible in the stock report.
+      // Stock movements with product name, waiter, cashier, and admin details
       const qMovs = `
         SELECT ms.*,
                COALESCE(p.nombre, 'Producto eliminado') AS nombre_producto,
-               COALESCE(a.nombre, 'Venta POS') AS nombre_admin
+               m.nombre AS nombre_mesero,
+               COALESCE(cj.nombre, tc.nombre) AS nombre_cajero,
+               COALESCE(a.nombre, ta.nombre, 'Venta POS') AS nombre_admin
         FROM movimiento_stock ms
         LEFT JOIN producto p ON ms.id_producto = p.id_producto
         LEFT JOIN administrador_evento a ON ms.id_admin = a.id_admin
+        LEFT JOIN comanda c ON (ms.motivo LIKE 'Venta comanda #' || c.id_comanda OR ms.motivo LIKE 'Anulación%#' || c.id_comanda)
+        LEFT JOIN mesero m ON c.id_mesero = m.id_mesero
+        LEFT JOIN cajero cj ON c.id_cajero = cj.id_cajero
+        LEFT JOIN traspaso t ON (ms.motivo LIKE 'Traspaso #' || t.id_traspaso || '%' OR ms.motivo LIKE 'Compra #' || t.id_traspaso || '%')
+        LEFT JOIN cajero tc ON t.id_cajero = tc.id_cajero
+        LEFT JOIN administrador_evento ta ON t.id_admin = ta.id_admin
         ORDER BY ms.id_movimiento DESC
         LIMIT 500
       `;
@@ -3814,6 +3973,7 @@ const servidor = app.listen(PORT, '0.0.0.0', async () => {
   }
   // El nombre encabeza los tickets y el cierre. Se recuerda dónde se cambia,
   // porque el de partida sirve para arrancar pero rara vez es el definitivo.
+  informarDelAfiche();
   console.log(`\n   Nombre de la barra: Dashboard → Datos del evento → Barra.`);
   console.log(`   Versión de la interfaz: ${VERSION_UI}` +
     `   (debe coincidir con la que sale abajo en la tablet)`);
