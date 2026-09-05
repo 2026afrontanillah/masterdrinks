@@ -227,7 +227,7 @@ function normalizeParams(params) {
   return (params || []).map(value => {
     if (value === undefined) return null;
     if (typeof value === 'boolean') return value ? 1 : 0;
-    if (value instanceof Date) return value.toISOString().slice(0, 19).replace('T', ' ');
+    if (value instanceof Date) return nowSql(value);
     return value;
   });
 }
@@ -320,7 +320,22 @@ class BusinessError extends Error {
   }
 }
 
-const nowSql = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
+// La hora del reloj de la barra, no la de Greenwich.
+//
+// Esto guardaba toISOString(), que es UTC. En Bolivia son cuatro horas de más:
+// una venta de las 21:30 quedaba anotada a la 01:30 del día siguiente. Además
+// de que ninguna hora del ticket cuadraba con lo que había pasado, el cierre
+// por rango partía la noche en dos días y las ventas de después de las 20:00
+// se caían del reporte del evento.
+//
+// Un evento va de las 17:00 a las 02:00: la fecha de la venta tiene que ser la
+// que diría cualquiera que estuviera en la barra mirando el reloj.
+function nowSql(fecha) {
+  const d = fecha || new Date();
+  const dos = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + dos(d.getMonth() + 1) + '-' + dos(d.getDate()) + ' ' +
+         dos(d.getHours()) + ':' + dos(d.getMinutes()) + ':' + dos(d.getSeconds());
+}
 
 /**
  * Deja constancia de lo que hace el encargado.
@@ -1126,7 +1141,7 @@ function initializeDatabase() {
            VALUES (1, ?, ?, ?, ?, '')`,
           [
             (ev && ev.nombre_evento) || 'Evento',
-            (ev && ev.fecha_evento) || new Date().toISOString().slice(0, 10),
+            (ev && ev.fecha_evento) || nowSql().slice(0, 10),
             (ev && ev.lugar) || '',
             INSTANCIA.nombre
           ]
@@ -1662,7 +1677,7 @@ app.post('/api/comanda', (req, res) => {
 
   if (useMockDb) {
     const newComandaId = mockDb.comanda.length + 1;
-    const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const nowStr = nowSql();
 
     // 1. Create comanda
     mockDb.comanda.push({
@@ -3128,7 +3143,7 @@ app.get('/api/admin/comandas', (req, res) => {
 // VOID / CANCEL ORDER
 app.post('/api/admin/comandas/anular', (req, res) => {
   const { id_comanda, id_admin, motivo_anulacion } = req.body;
-  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const nowStr = nowSql();
 
   if (useMockDb) {
     const com = mockDb.comanda.find(c => c.id_comanda === parseInt(id_comanda));
@@ -3247,7 +3262,7 @@ app.post('/api/admin/comandas/anular', (req, res) => {
 // CREATE CATEGORY
 app.post('/api/admin/categorias', (req, res) => {
   const { nombre, descripcion, tipo, id_admin, id_evento } = req.body;
-  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const nowStr = nowSql();
 
   if (useMockDb) {
     const newCatId = mockDb.categoria_producto.length + 1;
@@ -3297,7 +3312,7 @@ app.post('/api/admin/productos', (req, res) => {
   if (fotoNueva === false) {
     return res.status(400).json({ success: false, message: 'La foto no es una imagen válida.' });
   }
-  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const nowStr = nowSql();
 
   if (useMockDb) {
     const newProdId = mockDb.producto.length + 1;
@@ -3389,7 +3404,7 @@ app.post('/api/admin/cajeros', (req, res) => {
   // fila y que ese cajero no pudiera cobrar aquí.
   const { nombre, usuario, password, id_admin, id_evento } = req.body;
   const id_barra = INSTANCIA.id_barra || req.body.id_barra;
-  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const nowStr = nowSql();
 
   if (useMockDb) {
     const newCajeroId = mockDb.cajero.length + 1;
@@ -3432,7 +3447,7 @@ app.post('/api/admin/cajeros', (req, res) => {
 // CREATE MESERO
 app.post('/api/admin/meseros', (req, res) => {
   const { id_evento, id_cajero, nombre, usuario, password, id_admin } = req.body;
-  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const nowStr = nowSql();
 
   if (useMockDb) {
     const newMeseroId = mockDb.mesero.length + 1;
@@ -3498,7 +3513,7 @@ app.post('/api/admin/meseros', (req, res) => {
 // REGISTER STOCK MOVEMENT (MANUAL)
 app.post('/api/admin/stock/movimiento', (req, res) => {
   const { id_producto, tipo_movimiento, cantidad, motivo, id_admin, id_evento } = req.body;
-  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const nowStr = nowSql();
 
   if (useMockDb) {
     const prod = mockDb.producto.find(p => p.id_producto === parseInt(id_producto));
@@ -3948,27 +3963,25 @@ function leerReimpresiones(desde, hasta) {
   const rango = desde && hasta ? 'AND i.fecha_hora_impresion BETWEEN ? AND ?' : '';
   const args = desde && hasta ? [desde, hasta] : [];
 
-  // Las dos tablas se leen juntas: al cajero le importa que se reimprimió el
-  // ticket, sea la copia del cobro o la de la cocina.
-  const consulta = tabla => `
-    SELECT '${tabla === 'impresion_comanda_cajero' ? 'Cajero' : 'Mesero'}' AS copia_de,
-           i.id_comanda AS id_comanda, i.numero_copia AS numero_copia,
+  // Se lee UNA sola tabla, la del cajero.
+  //
+  // Cada impresión saca dos papeles -el del cobro y el de la barra- y los dos
+  // quedan registrados, cada uno en la suya. Pero lo que se audita aquí es el
+  // acto de reimprimir, no cuántos papeles salieron: leyendo las dos, una sola
+  // reimpresión aparecía por duplicado y la lista engañaba al contarla.
+  return dbAll(`
+    SELECT i.id_comanda AS id_comanda, i.numero_copia AS numero_copia,
            i.fecha_hora_impresion AS fecha,
            COALESCE(caj.nombre, 'sin registrar') AS cajero,
            COALESCE(mes.nombre, 'sin registrar') AS mesero,
            COALESCE(c.total, 0) AS total
-    FROM ${tabla} i
+    FROM impresion_comanda_cajero i
     LEFT JOIN comanda c ON c.id_comanda = i.id_comanda
     LEFT JOIN cajero  caj ON caj.id_cajero = i.id_cajero
     LEFT JOIN mesero  mes ON mes.id_mesero = i.id_mesero
-    WHERE i.numero_copia > 1 ${rango}`;
-
-  return dbAll(
-    `${consulta('impresion_comanda_cajero')}
-     UNION ALL
-     ${consulta('impresion_comanda_mesero')}
-     ORDER BY fecha DESC, id_comanda DESC`,
-    args.concat(args)
+    WHERE i.numero_copia > 1 ${rango}
+    ORDER BY fecha DESC, id_comanda DESC`,
+    args
   );
 }
 

@@ -18,7 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const posView = document.getElementById('pos-view');
     const adminView = document.getElementById('admin-view');
     const waiterModal = document.getElementById('waiter-lock-modal');
-    const printModal = document.getElementById('print-modal');
     const voidModal = document.getElementById('void-confirm-modal');
 
     // Forms
@@ -356,8 +355,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Keyboard bindings for the PIN screen
     window.addEventListener('keydown', (e) => {
-        const isWaiterModalActive = !waiterModal.classList.contains('hide') && 
-                                    printModal.classList.contains('hide') && 
+        // Ya no hace falta comprobar la vista previa: no existe. El teclado
+        // físico escribe el PIN siempre que esa pantalla sea la que manda.
+        const isWaiterModalActive = !waiterModal.classList.contains('hide') &&
                                     loginView.classList.contains('hide');
         if (isWaiterModalActive) {
             if (e.key >= '0' && e.key <= '9') {
@@ -2849,22 +2849,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Antes esto imprimía una comanda de prueba con productos y un total
     // inventados. Un ticket así, encima de la barra a las dos de la mañana, no
     // se distingue de uno real: se prestaba a cobrarlo.
-    document.getElementById('printer-config-btn').addEventListener('click', () => {
-        setPrintStatus('Se guarda en esta tablet. La prueba real es la primera venta.', 'info');
-        loadPrinterSettingsIntoForm();
-        printerSettingsPanel.classList.remove('hide');
-        printModal.classList.remove('hide');
-    });
-
     loadPrinterSettingsIntoForm();
-
-    // Cerrar los ajustes de impresora. No toca el estado del POS: el paso de
-    // volver al PIN lo hace ahora la propia impresión, sin esperar a nadie.
-    document.getElementById('dismiss-print-btn').addEventListener('click', () => {
-        printModal.classList.add('hide');
-        printerSettingsPanel.classList.add('hide');
-        setPrintStatus('');
-    });
 
     // ==========================================
     // 5. ADMINISTRATOR PANEL CONTROLLER
@@ -2914,7 +2899,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // TAB: REIMPRESIONES
     async function loadReimpresionesData() {
         const cuerpo = document.getElementById('reimpresiones-table-body');
-        cuerpo.innerHTML = '<tr><td colspan="7">Cargando...</td></tr>';
+        cuerpo.innerHTML = '<tr><td colspan="6">Cargando...</td></tr>';
         try {
             const res = await fetch('/api/admin/reimpresiones');
             const data = await res.json();
@@ -2923,7 +2908,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (filas.length === 0) {
                 // Que no haya ninguna es la noticia buena, y conviene decirlo
                 // así: una tabla vacía sin más parece que no cargó.
-                cuerpo.innerHTML = '<tr><td colspan="7">' +
+                cuerpo.innerHTML = '<tr><td colspan="6">' +
                     'Ninguna comanda se ha reimpreso.</td></tr>';
                 return;
             }
@@ -2932,7 +2917,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 <tr>
                     <td>#${r.id_comanda}</td>
                     <td>${r.numero_copia}</td>
-                    <td>${r.copia_de}</td>
                     <td>${r.cajero}</td>
                     <td>${r.mesero}</td>
                     <td>${Number(r.total).toFixed(2)} Bs.</td>
@@ -2940,7 +2924,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </tr>`).join('');
         } catch (err) {
             console.error('Error al cargar las reimpresiones:', err);
-            cuerpo.innerHTML = '<tr><td colspan="7">No se pudieron cargar.</td></tr>';
+            cuerpo.innerHTML = '<tr><td colspan="6">No se pudieron cargar.</td></tr>';
         }
     }
 

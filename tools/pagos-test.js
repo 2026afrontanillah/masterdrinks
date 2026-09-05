@@ -102,7 +102,11 @@ async function abrirTablet() {
   check('Ni el ajuste de "esperar a que pulse Imprimir"',
     !t.id('cfg-auto'), 'la comanda sale sola al cobrar');
   check('Ni el botón de imprimir comanda de prueba',
-    !t.id('printer-test-btn'), 'se cambió por uno de sólo configurar');
+    !t.id('printer-test-btn') && !t.id('printer-config-btn'),
+    'la barra del POS ya no tiene botón de impresora');
+  check('Los ajustes de impresora viven en el panel, no en un modal',
+    !t.id('print-modal') && !!t.id('printer-settings'),
+    'sin ventana intermedia');
 
   // ---- Una venta cualquiera en el carrito ----
   // Un producto que se venda solo: los que piden acompañante abren otro modal
@@ -196,8 +200,7 @@ async function abrirTablet() {
   // más entre dos clientes. Ahora el papel sale y la tablet vuelve sola al
   // PIN, lista para el siguiente mesero.
   check('No se abre ninguna ventana de vista previa',
-    t.id('print-modal').classList.contains('hide'),
-    'el modal de impresora sigue cerrado');
+    !t.id('print-modal'), 'ese modal ya no existe');
   check('La tablet vuelve sola a la pantalla del PIN',
     !t.id('waiter-lock-modal').classList.contains('hide'),
     'sin que nadie pulse Continuar');

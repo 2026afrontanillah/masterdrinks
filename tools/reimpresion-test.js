@@ -127,6 +127,68 @@ const post = (ruta, cuerpo) => fetch(URL + ruta, {
     sinSesion.id_mesero === comanda.id_mesero,
     sinSesion ? 'cajero ' + sinSesion.id_cajero + ', mesero ' + sinSesion.id_mesero : 'no se guardó');
 
+  // ---- La hora que se guarda es la del reloj de la barra ----
+  //
+  // Se guardaba en UTC. En Bolivia son cuatro horas de más: una venta de las
+  // 21:30 quedaba anotada a las 01:30 del día siguiente. Además de que ninguna
+  // hora del ticket cuadraba, el cierre por rango partía la noche en dos días
+  // y las ventas de después de las 20:00 se caían del reporte.
+  const antes = new Date();
+  const marca = await post('/api/impresion', { id_comanda: comanda.id_comanda, tipo: 'cajero' });
+  const d4 = new DatabaseSync(BASE);
+  const guardada = d4.prepare(
+    'SELECT fecha_hora_impresion f FROM impresion_comanda_cajero WHERE id_comanda = ? AND numero_copia = ?'
+  ).get(comanda.id_comanda, marca.numero_copia);
+  d4.close();
+
+  const dos = n => String(n).padStart(2, '0');
+  const horaLocal = dos(antes.getHours()) + ':' + dos(antes.getMinutes());
+  check('La hora que se guarda es la local, no UTC',
+    String(guardada.f).slice(11, 16) === horaLocal,
+    'guardó ' + String(guardada.f).slice(11, 16) + ', el reloj marca ' + horaLocal);
+  check('Y el día también es el local',
+    String(guardada.f).slice(0, 10) ===
+      antes.getFullYear() + '-' + dos(antes.getMonth() + 1) + '-' + dos(antes.getDate()),
+    String(guardada.f).slice(0, 10));
+
+  // ---- Una reimpresión, una línea ----
+  //
+  // Cada impresión saca dos papeles, el del cajero y el de la barra, y los dos
+  // se registran. Pero para auditar lo que importa es el acto de reimprimir,
+  // no cuántos papeles salieron: en el log tiene que aparecer una sola vez.
+  // Se usa otra comanda limpia, y se imita al cliente: en cada impresión
+  // registra los DOS papeles, el del cajero y el de la barra.
+  const d5 = new DatabaseSync(BASE);
+  const otra = d5.prepare(
+    "SELECT id_comanda FROM comanda WHERE estado_pago != 'ANULADO' AND id_comanda <> ? ORDER BY id_comanda LIMIT 1"
+  ).get(comanda.id_comanda);
+  d5.prepare('DELETE FROM impresion_comanda_cajero WHERE id_comanda = ?').run(otra.id_comanda);
+  d5.prepare('DELETE FROM impresion_comanda_mesero WHERE id_comanda = ?').run(otra.id_comanda);
+  d5.close();
+
+  const imprimir = async () => {
+    for (const tipo of ['cajero', 'mesero']) {
+      await post('/api/impresion', { id_comanda: otra.id_comanda, tipo });
+    }
+  };
+  const cuantas = async () => {
+    const r = await (await fetch(URL + '/api/admin/reimpresiones')).json();
+    return (r.reimpresiones || []).filter(x => x.id_comanda === otra.id_comanda).length;
+  };
+
+  await imprimir();                       // la venta: copia 1 de cada papel
+  check('La impresión de la venta no ensucia el log', await cuantas() === 0,
+    await cuantas() + ' líneas');
+
+  await imprimir();                       // una reimpresión: copia 2 de cada papel
+  const trasUna = await cuantas();
+  check('Una reimpresión aparece UNA vez en el log, no dos',
+    trasUna === 1, trasUna + ' líneas para una sola reimpresión');
+
+  await imprimir();                       // otra más
+  const trasDos = await cuantas();
+  check('Y dos reimpresiones son dos líneas', trasDos === 2, trasDos + ' líneas');
+
   // ---- El reporte las saca ----
   const rep = await (await fetch(URL + '/api/admin/reimpresiones')).json();
   check('El reporte de reimpresiones responde', rep.success === true,
