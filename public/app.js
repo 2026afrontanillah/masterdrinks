@@ -2757,12 +2757,38 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         ['cajero', 'mesero'].forEach(tipo => {
-            fetch('/api/impresion', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(Object.assign({ id_comanda, tipo }, responsables))
-            }).catch(err => console.warn('No se pudo registrar la impresión:', err));
+            enviarApunte(Object.assign({ id_comanda, tipo }, responsables));
         });
+    }
+
+    // El apunte tiene que llegar aunque la tablet se vaya a segundo plano.
+    //
+    // Abrir RawBT saca al navegador de primer plano, y Android/Chrome cancelan
+    // los fetch que estén a medias: el registro se perdía justo al reimprimir,
+    // que es cuando más falta hace. Se veía sólo en la tablet, porque en un PC
+    // no hay app externa a la que saltar.
+    //
+    // sendBeacon está pensado exactamente para esto: el navegador se
+    // compromete a entregarlo aunque la página deje de estar activa.
+    function enviarApunte(cuerpo) {
+        const datos = JSON.stringify(cuerpo);
+
+        if (navigator.sendBeacon) {
+            try {
+                const enviado = navigator.sendBeacon('/api/impresion',
+                    new Blob([datos], { type: 'application/json' }));
+                if (enviado) return;
+            } catch (err) { /* se cae al fetch de abajo */ }
+        }
+
+        // keepalive hace lo mismo que sendBeacon para navegadores que no lo
+        // tengan: la petición sigue viva aunque la página se vaya.
+        fetch('/api/impresion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: datos,
+            keepalive: true
+        }).catch(err => console.warn('No se pudo registrar la impresión:', err));
     }
 
     function sendToPrinter() {

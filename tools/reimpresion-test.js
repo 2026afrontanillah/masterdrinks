@@ -221,6 +221,16 @@ const post = (ruta, cuerpo) => fetch(URL + ruta, {
     finCuerpo.indexOf('logPrint(') < finCuerpo.indexOf('try {'),
     'un fallo al imprimir no puede saltárselo');
 
+  // ---- El apunte sobrevive a que la tablet se vaya a segundo plano ----
+  //
+  // Abrir RawBT saca al navegador de primer plano y Android cancela los fetch
+  // a medias, así que el registro se perdía justo al reimprimir. En un PC no
+  // se ve: no hay app externa a la que saltar.
+  check('El apunte se manda con sendBeacon, que sobrevive al cambio de app',
+    /navigator\.sendBeacon\(/.test(appjs), 'no basta un fetch normal');
+  check('Y el respaldo lleva keepalive, por si no hay sendBeacon',
+    /keepalive:\s*true/.test(appjs), 'para navegadores sin beacon');
+
   // ---- El papel lo dice ----
   const rawbt = fs.readFileSync(path.join(RAIZ, 'public/rawbt.js'), 'utf8');
   check('El ticket sabe rotularse como reimpresión',
