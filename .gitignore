@@ -25,6 +25,7 @@ pos_evento.db-shm
 pos_evento.stress.db*
 pos_evento.logic.db*
 pos_evento.ui.db*
+pos_evento.ident.db*
 # Bases de cada barra cuando se prueban varias instancias en el mismo equipo.
 barra_*.db*
 pos_evento.dos.db*

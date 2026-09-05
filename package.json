@@ -6,11 +6,12 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node tools/logic-test.js && node tools/ui-test.js && node tools/sync-test.js && node tools/stress-test.js",
+    "test": "node tools/logic-test.js && node tools/ui-test.js && node tools/sync-test.js && node tools/identidad-test.js && node tools/stress-test.js",
     "test:logica": "node tools/logic-test.js",
     "test:interfaz": "node tools/ui-test.js",
     "test:carga": "node tools/stress-test.js",
     "test:sync": "node tools/sync-test.js",
+    "test:identidad": "node tools/identidad-test.js",
     "reiniciar": "node tools/reiniciar-ventas.js",
     "medir": "node tools/medir.js",
     "capturas": "node tools/capturas.js"

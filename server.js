@@ -29,6 +29,21 @@ app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: res => res.set('Cache-Control', 'no-cache')
 }));
 
+// Las respuestas de la API no se guardan NUNCA en el disco del navegador.
+//
+// A los archivos de public/ les basta con el 'no-cache' de arriba: preguntan
+// antes de usar su copia. Con la API no vale, porque Express les pone un ETag
+// pero ninguna instrucción de frescura, y entonces el navegador es libre de
+// decidir por su cuenta que la copia sigue valiendo y ni preguntar.
+//
+// Lo que hay detrás son las existencias y la identidad de la barra: datos que
+// cambian mientras la tablet está abierta. Una respuesta vieja servida desde el
+// disco de la tablet es un rótulo equivocado en el ticket, o stock que no está.
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Sello de versión de la interfaz que está sirviendo este servidor.
 //
 // Sale de la fecha de los archivos de public/. Sirve para responder de un

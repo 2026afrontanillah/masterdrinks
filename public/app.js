@@ -77,6 +77,35 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarConfiguracion().then(pintarFichaEvento);
     cargarAfiche();
 
+    // El nombre de la barra puede cambiar a mitad de evento, y lo cambia UNA
+    // tablet: la del encargado. Las demás ya llevan horas abiertas y nadie las
+    // va a tocar, están cobrando.
+    //
+    // Antes esto se leía sólo aquí, al abrir la página. Una tablet abierta por
+    // la mañana seguía rotulando la barra vieja el resto de la noche, en la
+    // pantalla y en lo que imprimía, sin que nadie sospechara nada.
+    async function revisarIdentidad() {
+        await cargarInstancia();
+        await cargarConfiguracion();
+        pintarFichaEvento();
+    }
+
+    // Volver a la tablet es justo el momento en que el cajero mira el rótulo,
+    // así que se comprueba en ese gesto y no se espera al turno del reloj.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) revisarIdentidad();
+    });
+
+    // Y por si la tablet se queda encendida toda la noche sin que nadie la
+    // toque. Son dos campos de texto: pesa mucho menos que el sondeo de stock,
+    // que va cada doce segundos.
+    const INTERVALO_IDENTIDAD = 60000;
+    setInterval(() => {
+        // Con la pantalla apagada no hay nadie mirando: ya se mira al volver.
+        if (document.hidden) return;
+        revisarIdentidad();
+    }, INTERVALO_IDENTIDAD);
+
     // ==========================================
     // AVISOS FLOTANTES
     // ==========================================
