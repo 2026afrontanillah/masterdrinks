@@ -2768,9 +2768,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function sendToPrinter() {
         if (!currentTicket) return;
         const esCopia = currentTicket.reimpresion;
+
+        // El registro va ANTES de mandar el papel, y fuera del try.
+        //
+        // Estaba detrás de printToRawBT y dentro del mismo try: si la
+        // impresora fallaba -RawBT sin instalar, sin papel, sin permiso- se
+        // perdía también el apunte. Justo al revés de lo que hace falta: lo
+        // que se audita es que alguien PIDIÓ la copia, salga o no salga.
+        logPrint(currentTicket.id);
+
         try {
             ThermalPrinter.printToRawBT(currentTicket);
-            logPrint(currentTicket.id);
             // Sin vista previa, el aviso tiene que salir por encima de la
             // pantalla: si RawBT no está, el papel no sale y nadie se entera
             // hasta que el cliente reclama.

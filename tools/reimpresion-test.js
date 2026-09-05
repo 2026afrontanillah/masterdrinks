@@ -205,6 +205,22 @@ const post = (ruta, cuerpo) => fetch(URL + ruta, {
       r.id_comanda === comanda.id_comanda && r.numero_copia === 1),
     'solo cuentan de la copia 2 en adelante');
 
+  // ---- Si la impresora falla, el apunte NO se pierde ----
+  //
+  // El registro estaba detrás de printToRawBT y dentro del mismo try: con la
+  // impresora caída -RawBT sin instalar, sin papel, sin permiso- se perdía
+  // también el rastro. Al revés de lo que hace falta: lo que se audita es que
+  // alguien PIDIÓ la copia, salga el papel o no.
+  const appjs = fs.readFileSync(path.join(RAIZ, 'public/app.js'), 'utf8');
+  const cuerpo = appjs.slice(appjs.indexOf('function sendToPrinter'));
+  const finCuerpo = cuerpo.slice(0, cuerpo.indexOf('\n    }'));
+  check('El registro se hace antes de mandar el papel, no después',
+    finCuerpo.indexOf('logPrint(') < finCuerpo.indexOf('printToRawBT('),
+    'así una impresora caída no borra el rastro');
+  check('Y queda fuera del try de la impresora',
+    finCuerpo.indexOf('logPrint(') < finCuerpo.indexOf('try {'),
+    'un fallo al imprimir no puede saltárselo');
+
   // ---- El papel lo dice ----
   const rawbt = fs.readFileSync(path.join(RAIZ, 'public/rawbt.js'), 'utf8');
   check('El ticket sabe rotularse como reimpresión',
