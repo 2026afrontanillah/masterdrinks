@@ -1,21 +1,28 @@
 # Dependencias: se reinstalan con `npm install` en cada equipo
 node_modules/
 
-# Base de datos local: datos de operación, NO de código.
+# Base de datos: SÍ va en el repositorio, a propósito.
 #
-# Se queda fuera del repositorio por una razón concreta: durante el evento este
-# archivo contiene las ventas reales de la tablet. Si estuviera versionado, un
-# `git pull` para traer un arreglo de código intentaría sobreescribirlo. Git no
-# sabe fusionar un binario, solo reemplazarlo.
+# Lleva el montaje real de la barra -catálogo, personal, nombre y precios-, y
+# versionarla es lo que hace que instalar desde el repo en una tablet nueva la
+# deje lista para vender. Sin ella el servidor siembra datos de muestra y hay
+# que rehacer el montaje entero a mano.
 #
-# En el primer arranque el servidor la crea y la siembra solo (barras, cajeros,
-# meseros, categorías, productos y métodos de pago). La semilla vive dentro de
-# server.js, así que ESA sí viaja por git.
+# DOS AVISOS, que no son teóricos:
 #
-# Para respaldarla o llevarla a otro equipo: detén el servidor con Ctrl+C y
-# copia únicamente pos_evento.db. Al cerrarse vuelca el -wal dentro del .db y
-# lo deja completo. Copiarlo con el servidor encendido da una base a medias.
-pos_evento.db
+# 1. Un `git pull` a mitad de evento puede llevarse las ventas de la noche.
+#    Git no sabe fusionar un binario, solo reemplazarlo. Si necesitas traer un
+#    arreglo de código con el evento en marcha, copia primero pos_evento.db
+#    fuera de la carpeta y devuélvela después del pull.
+#
+# 2. Las claves del personal se guardan sin cifrar, así que viajan aquí dentro.
+#    Este repositorio tiene que seguir siendo PRIVADO.
+#
+# Para llevarla a otro equipo a mano: detén el servidor con Ctrl+C y copia
+# únicamente pos_evento.db. Al cerrarse vuelca el -wal dentro del .db y lo deja
+# completo. Copiarlo con el servidor encendido da una base a medias.
+#
+# Los -wal y -shm sí se quedan fuera: son temporales del motor, no datos.
 pos_evento.db-wal
 pos_evento.db-shm
 *.db-journal

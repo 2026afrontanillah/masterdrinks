@@ -60,6 +60,18 @@ prefieras) y déjala en Descargas. Luego, en Termux:
     cd ~/masterdrinks
     npm install --omit=dev
 
+También sirve clonar el repositorio, que lleva la base con el montaje dentro:
+
+    git clone https://github.com/adri5616/masterdrinks.git ~/masterdrinks
+    cd ~/masterdrinks
+    npm install --omit=dev
+
+> **No hagas `git pull` con el evento en marcha.** La base de datos está
+> versionada, y git no sabe fusionar un archivo binario: solo reemplazarlo. Un
+> pull para traer un arreglo de código puede llevarse las ventas de la noche.
+> Si no queda más remedio, copia `pos_evento.db` fuera de la carpeta antes del
+> pull y devuélvela después.
+
 El `--omit=dev` salta las librerías que solo sirven para las pruebas: son 69
 paquetes, unos 4 MB. Con ellas serían muchos más y no aportan nada en la barra.
 
