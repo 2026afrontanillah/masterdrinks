@@ -1076,6 +1076,17 @@ function initializeDatabase() {
     // a pulsar y la venta se guardara dos veces: se cobraba una y el stock
     // bajaba dos.
     ensureColumn('comanda', 'clave_idempotencia', 'TEXT');
+
+    // Quién pidió cada impresión. Reimprimir es la puerta de atrás de la barra:
+    // con el ticket en la mano se puede cobrar dos veces la misma venta.
+    //
+    // Se apuntan los DOS, cajero y mesero, y no sólo quien tocó la pantalla. Si
+    // se ponen de acuerdo para reimprimir y cobrar aparte, con un solo nombre
+    // en el registro el otro queda limpio y no hay forma de reconstruirlo.
+    ['impresion_comanda_cajero', 'impresion_comanda_mesero'].forEach(tabla => {
+      ensureColumn(tabla, 'id_cajero', 'INTEGER');
+      ensureColumn(tabla, 'id_mesero', 'INTEGER');
+    });
     // El índice es la red de seguridad: aunque la comprobación fallara, la base
     // no aceptaría dos comandas con la misma clave.
     db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_comanda_idempotencia
@@ -3757,6 +3768,11 @@ async function construirReporte(query) {
     ORDER BY c.id_comanda
   `, P);
 
+  // Reimpresiones del rango. Van en el cierre porque es donde el encargado
+  // mira las cifras de la noche, y una comanda reimpresa tres veces es la
+  // señal de que alguien pudo cobrarla más de una vez.
+  const reimpresiones = await leerReimpresiones(P[0], P[1]);
+
   const validas = Number(resumen.validas) || 0;
   return {
     evento,
@@ -3774,7 +3790,8 @@ async function construirReporte(query) {
       unidades: Number(unidades.n) || 0,
       ticket_medio: validas > 0 ? round2(Number(resumen.recaudado) / validas) : 0
     },
-    porMetodo, porBarra, porCajero, porMesero, productos, anuladas, stock, cobrosDigitales
+    porMetodo, porBarra, porCajero, porMesero, productos, anuladas, stock, cobrosDigitales,
+    reimpresiones
   };
 }
 
@@ -3887,21 +3904,71 @@ app.get('/api/admin/auditoria', (req, res) => {
 // impresion_comanda_cajero / _mesero existed in the schema but nothing ever wrote a
 // reprint, so numero_copia was meaningless. Every physical print now lands here.
 app.post('/api/impresion', (req, res) => {
-  const { id_comanda, tipo } = req.body;
+  const { id_comanda, tipo, id_cajero, id_mesero } = req.body;
   const table = tipo === 'mesero' ? 'impresion_comanda_mesero' : 'impresion_comanda_cajero';
 
   dbGet(`SELECT COALESCE(MAX(numero_copia), 0) AS ultima FROM ${table} WHERE id_comanda = ?`, [id_comanda])
-    .then(row =>
-      dbRun(`INSERT INTO ${table} (id_comanda, fecha_hora_impresion, numero_copia) VALUES (?, ?, ?)`, [
-        id_comanda,
-        nowSql(),
-        (row ? row.ultima : 0) + 1
-      ]).then(() => res.json({ success: true, numero_copia: (row ? row.ultima : 0) + 1 }))
-    )
+    .then(row => {
+      const copia = (row ? row.ultima : 0) + 1;
+      // De la segunda copia en adelante ya no es la venta: es una reimpresión,
+      // y eso es lo que hay que poder auditar después.
+      const reimpresion = copia > 1;
+      return dbRun(
+        `INSERT INTO ${table} (id_comanda, fecha_hora_impresion, numero_copia, id_cajero, id_mesero)
+         VALUES (?, ?, ?, ?, ?)`,
+        [id_comanda, nowSql(), copia, id_cajero || null, id_mesero || null]
+      ).then(() => res.json({ success: true, numero_copia: copia, reimpresion }));
+    })
     .catch(err => {
       console.error('Error al registrar impresión:', err.message);
       // A failed print log must never block the cashier from printing.
       res.status(200).json({ success: false, message: 'No se pudo registrar la impresión.' });
+    });
+});
+
+// Reimpresiones: de la copia 2 en adelante, con quién las pidió.
+//
+// La copia 1 es la venta y no interesa aquí: lo que se audita es lo que se
+// imprimió DESPUÉS, que es lo que permitiría cobrar dos veces el mismo ticket.
+// Admite el mismo rango de fechas que el reporte de cierre, para poder mirar
+// una noche concreta y no todo el histórico.
+function leerReimpresiones(desde, hasta) {
+  const rango = desde && hasta ? 'AND i.fecha_hora_impresion BETWEEN ? AND ?' : '';
+  const args = desde && hasta ? [desde, hasta] : [];
+
+  // Las dos tablas se leen juntas: al cajero le importa que se reimprimió el
+  // ticket, sea la copia del cobro o la de la cocina.
+  const consulta = tabla => `
+    SELECT '${tabla === 'impresion_comanda_cajero' ? 'Cajero' : 'Mesero'}' AS copia_de,
+           i.id_comanda AS id_comanda, i.numero_copia AS numero_copia,
+           i.fecha_hora_impresion AS fecha,
+           COALESCE(caj.nombre, 'sin registrar') AS cajero,
+           COALESCE(mes.nombre, 'sin registrar') AS mesero,
+           COALESCE(c.total, 0) AS total
+    FROM ${tabla} i
+    LEFT JOIN comanda c ON c.id_comanda = i.id_comanda
+    LEFT JOIN cajero  caj ON caj.id_cajero = i.id_cajero
+    LEFT JOIN mesero  mes ON mes.id_mesero = i.id_mesero
+    WHERE i.numero_copia > 1 ${rango}`;
+
+  return dbAll(
+    `${consulta('impresion_comanda_cajero')}
+     UNION ALL
+     ${consulta('impresion_comanda_mesero')}
+     ORDER BY fecha DESC, id_comanda DESC`,
+    args.concat(args)
+  );
+}
+
+app.get('/api/admin/reimpresiones', (req, res) => {
+  if (useMockDb) {
+    return res.json({ success: true, reimpresiones: [] });
+  }
+  leerReimpresiones(req.query.desde, req.query.hasta)
+    .then(reimpresiones => res.json({ success: true, reimpresiones }))
+    .catch(err => {
+      console.error('Error al leer las reimpresiones:', err.message);
+      res.status(500).json({ success: false, message: 'No se pudieron leer las reimpresiones.' });
     });
 });
 

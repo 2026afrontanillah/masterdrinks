@@ -1493,34 +1493,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Cantidades de caja: mover mercancía va de seis en seis o de doce en doce,
     // no de una en una. Teclear "24" con el dedo es donde se equivoca.
+    // Los atajos de cantidad (6, 12, 24, "Todo") se retiraron junto con los de
+    // efectivo: un botón que rellena una cifra por ti se pulsa sin mirar, y en
+    // stock eso es mercancía que se mueve sola. La cantidad se teclea.
     function pintarRapidos() {
         const caja = document.getElementById('mover-rapidos');
-        caja.innerHTML = '';
-        // Al agregar no hay tope: llega la mercancía que llegue.
-        const tope = !moverProducto ? 0
-            : (saliendo() ? disponibleDe(moverProducto) : Infinity);
-        [6, 12, 24].filter(n => n <= tope).forEach(n => {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'quick-cash-btn';
-            b.textContent = n;
-            b.addEventListener('click', () => {
-                document.getElementById('mover-unidades').value = n;
-                vibrar(20);
-            });
-            caja.appendChild(b);
-        });
-        if (saliendo() && tope > 0) {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'quick-cash-btn';
-            b.textContent = 'Todo (' + tope + ')';
-            b.addEventListener('click', () => {
-                document.getElementById('mover-unidades').value = tope;
-                vibrar(20);
-            });
-            caja.appendChild(b);
-        }
+        if (caja) caja.innerHTML = '';
     }
 
     function pintarPendientes() {
@@ -2245,10 +2223,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const payModal = document.getElementById('payment-modal');
     const payRecibidoInput = document.getElementById('pay-recibido');
-    const payMixtoEfectivo = document.getElementById('pay-mixto-efectivo');
-    const payMixtoResto = document.getElementById('pay-mixto-resto');
-    const payMixtoMetodo = document.getElementById('pay-mixto-metodo');
+    const payLineas = document.getElementById('pay-lineas');
     const payError = document.getElementById('pay-error');
+
+    // Las líneas del pago mixto: [{ metodo, monto }]. Se arranca con dos porque
+    // mixto con una sola línea es un pago normal, y quien abre esta pestaña ya
+    // sabe que va a repartir.
+    let lineasPago = [];
 
     // El carrito ya no lleva resumen de pagos: sólo el total y el botón de
     // cobrar, que se habilita en cuanto hay algo que cobrar.
@@ -2285,7 +2266,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('pay-panel-qr')
             .classList.toggle('hide', metodo !== QR);
 
-        if (metodo === 'mixto') recalcularMixto();
+        if (metodo === 'mixto') reiniciarLineasPago();
         if (metodo === QR) prepararPanelQr();
     }
 
@@ -2302,20 +2283,93 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('pay-referencia').value = '';
     }
 
-    // Se escribe el efectivo y el resto se rellena solo, como en el modal de
-    // Snack Point: el cajero nunca tiene que restar de cabeza.
-    function recalcularMixto() {
-        const efectivo = parseFloat(payMixtoEfectivo.value) || 0;
-        const resto = round2(Math.max(0, orderTotal - efectivo));
-        payMixtoResto.value = resto.toFixed(2);
+    // ---- Pago mixto en líneas libres ----
+    //
+    // Cualquier método se puede mezclar con cualquier otro, y tantas veces como
+    // haga falta: tres personas pagando la misma comanda con tarjeta, QR y
+    // efectivo es un caso normal en una barra, y antes no cabía.
 
-        const etiqueta = METODOS[Number(payMixtoMetodo.value)];
-        document.getElementById('pay-mixto-resto-label').textContent =
-            'Falta en ' + (etiqueta ? etiqueta.nombre : 'otro método');
+    const sumaLineas = () =>
+        round2(lineasPago.reduce((t, l) => t + (parseFloat(l.monto) || 0), 0));
 
-        mostrarErrorPago(efectivo > orderTotal + 0.005
-            ? 'El efectivo no puede superar el total de la comanda.'
-            : '');
+    function pintarLineasPago() {
+        payLineas.innerHTML = '';
+
+        lineasPago.forEach((linea, i) => {
+            const fila = document.createElement('div');
+            fila.className = 'pay-linea';
+
+            const select = document.createElement('select');
+            select.className = 'pay-input';
+            Object.keys(METODOS).forEach(id => {
+                const opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = METODOS[id].nombre;
+                if (Number(id) === Number(linea.metodo)) opt.selected = true;
+                select.appendChild(opt);
+            });
+            select.addEventListener('change', () => {
+                lineasPago[i].metodo = Number(select.value);
+                refrescarMixto();
+            });
+
+            const monto = document.createElement('input');
+            monto.type = 'number';
+            monto.className = 'pay-input';
+            monto.min = '0';
+            monto.step = '0.01';
+            monto.inputMode = 'decimal';
+            monto.placeholder = '0.00';
+            monto.value = linea.monto === '' ? '' : linea.monto;
+            monto.addEventListener('input', () => {
+                lineasPago[i].monto = monto.value;
+                refrescarMixto();
+            });
+
+            fila.appendChild(select);
+            fila.appendChild(monto);
+
+            // La primera línea no se puede quitar: sin ninguna no hay pago.
+            if (lineasPago.length > 1) {
+                const quitar = document.createElement('button');
+                quitar.type = 'button';
+                quitar.className = 'pay-linea-quitar';
+                quitar.textContent = '✕';
+                quitar.title = 'Quitar esta forma de pago';
+                quitar.addEventListener('click', () => {
+                    lineasPago.splice(i, 1);
+                    pintarLineasPago();
+                    refrescarMixto();
+                });
+                fila.appendChild(quitar);
+            }
+
+            payLineas.appendChild(fila);
+        });
+    }
+
+    // El "falta" se calcula en vivo para que el cajero no reste de cabeza.
+    function refrescarMixto() {
+        const falta = round2(orderTotal - sumaLineas());
+        const caja = document.getElementById('pay-falta');
+
+        caja.textContent = Math.abs(falta).toFixed(2) + ' Bs.';
+        caja.classList.toggle('pay-falta-ok', Math.abs(falta) < 0.005);
+        caja.previousElementSibling.textContent =
+            falta < -0.005 ? 'Se pasa por' : 'Falta por cubrir';
+
+        mostrarErrorPago('');
+    }
+
+    function reiniciarLineasPago() {
+        // Dos líneas de salida: la primera con el total entero en efectivo, que
+        // es el reparto más común, y la segunda vacía para el resto.
+        lineasPago = [
+            { metodo: EFECTIVO, monto: '' },
+            { metodo: QR, monto: '' }
+        ];
+        pintarLineasPago();
+        refrescarMixto();
     }
 
     function renderCambio(destacar) {
@@ -2356,7 +2410,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!claveCobro) claveCobro = nuevaClaveCobro();
         efectivoRecibido = 0;
         payRecibidoInput.value = '';
-        payMixtoEfectivo.value = '';
+        lineasPago = [];
         mostrarErrorPago('');
         document.getElementById('pay-total').textContent = `${orderTotal.toFixed(2)} Bs.`;
         seleccionarMetodo(EFECTIVO);
@@ -2390,24 +2444,43 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (metodoActivo !== 'mixto') {
+            // En efectivo, lo que entrega el cliente no puede quedarse corto.
+            // Antes este campo sólo servía para calcular el cambio: se podía
+            // escribir 20 en una venta de 50, cobrar, y quedaba registrada como
+            // pagada entera. El descuadre aparecía al cerrar la caja.
+            if (metodoActivo === EFECTIVO && efectivoRecibido > 0 &&
+                efectivoRecibido + 0.005 < orderTotal) {
+                mostrarErrorPago('Con ' + efectivoRecibido.toFixed(2) + ' Bs. no alcanza: ' +
+                    'faltan ' + round2(orderTotal - efectivoRecibido).toFixed(2) + ' Bs.');
+                return null;
+            }
             return [pago(metodoActivo, orderTotal)];
         }
 
-        const efectivo = round2(parseFloat(payMixtoEfectivo.value) || 0);
-        const idResto = Number(payMixtoMetodo.value);
-        const resto = round2(parseFloat(payMixtoResto.value) || 0);
+        // Mixto: las líneas que el cajero haya escrito, en cualquier
+        // combinación de métodos. Sólo cuentan las que llevan importe.
+        const conImporte = lineasPago
+            .map(l => ({ metodo: Number(l.metodo), monto: round2(parseFloat(l.monto) || 0) }))
+            .filter(l => l.monto > 0);
 
-        if (efectivo <= 0) {
-            mostrarErrorPago('Escribe cuánto paga en efectivo.');
+        if (conImporte.length === 0) {
+            mostrarErrorPago('Escribe cuánto se paga en cada forma de pago.');
             return null;
         }
-        if (Math.abs(efectivo + resto - orderTotal) > 0.01) {
-            mostrarErrorPago('Los montos no cuadran con el total.');
+
+        const suma = round2(conImporte.reduce((t, l) => t + l.monto, 0));
+        if (suma + 0.005 < orderTotal) {
+            mostrarErrorPago('Faltan ' + round2(orderTotal - suma).toFixed(2) +
+                ' Bs. para cubrir el total.');
             return null;
         }
-        // Si el efectivo cubre todo, el pago mixto se queda en uno solo: no
-        // tiene sentido guardar una línea de 0.00 en el otro método.
-        return resto > 0 ? [pago(EFECTIVO, efectivo), pago(idResto, resto)] : [pago(EFECTIVO, efectivo)];
+        if (suma > orderTotal + 0.005) {
+            mostrarErrorPago('Los pagos suman ' + suma.toFixed(2) + ' Bs. y el total es ' +
+                orderTotal.toFixed(2) + ' Bs.');
+            return null;
+        }
+
+        return conImporte.map(l => pago(l.metodo, l.monto));
     }
 
     // ---- Interacciones del modal ----
@@ -2418,26 +2491,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Billetes de uso corriente: el cajero toca el que le dan en vez de teclear
-    // la cifra, que con prisa y a oscuras es donde más se equivoca.
-    document.querySelectorAll('.quick-cash-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            if (orderTotal <= 0) return;
-            efectivoRecibido = btn.dataset.cash === 'exacto'
-                ? orderTotal
-                : Number(btn.dataset.cash);
-            payRecibidoInput.value = efectivoRecibido.toFixed(2);
-            renderCambio(true);
-        });
-    });
-
     payRecibidoInput.addEventListener('input', () => {
         efectivoRecibido = round2(parseFloat(payRecibidoInput.value) || 0);
         renderCambio();
+        mostrarErrorPago('');
     });
 
-    payMixtoEfectivo.addEventListener('input', recalcularMixto);
-    payMixtoMetodo.addEventListener('change', recalcularMixto);
+    document.getElementById('pay-add-linea').addEventListener('click', () => {
+        // La nueva línea nace con lo que falte: es lo que el cajero iba a
+        // teclear de todas formas, y así no resta de cabeza.
+        const falta = round2(orderTotal - sumaLineas());
+        lineasPago.push({ metodo: EFECTIVO, monto: falta > 0 ? falta.toFixed(2) : '' });
+        pintarLineasPago();
+        refrescarMixto();
+    });
 
     document.getElementById('pay-close-btn').addEventListener('click', cerrarModalCobro);
     payModal.addEventListener('click', e => {
@@ -2593,6 +2660,10 @@ document.addEventListener('DOMContentLoaded', () => {
             id: id_comanda,
             ref: data.ref_comanda || refComanda(id_comanda),
             instancia: data.instancia || instancia.nombre,
+            // Se rellenan al enviar a la impresora, no aquí: hasta que el papel
+            // no sale por segunda vez, esto no es una reimpresión.
+            reimpresion: false,
+            numeroCopia: 1,
             fecha: ddmmaaaa + ' ' + hhmm,
             // Separadas además de juntas: el ticket las coloca en las dos
             // puntas de la misma línea, y el de barra sólo usa la hora.
@@ -2664,6 +2735,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderTicketPreview(model) {
         const settings = ThermalPrinter.getSettings();
+
+        // Sin comanda no hay nada que previsualizar: es el caso de entrar sólo
+        // a configurar la impresora, antes de la primera venta.
+        if (!model) {
+            const vacio = '<p class="ticket-vacio">Aquí se verá la comanda cuando cobres.</p>';
+            document.getElementById('ticket-cajero-body').innerHTML = vacio;
+            document.getElementById('ticket-mesero-body').innerHTML = vacio;
+            return;
+        }
+
         const tickets = ThermalPrinter.buildTickets(model, settings);
         document.getElementById('ticket-cajero-body').innerHTML =
             ThermalPrinter.helpers.opsToHtml(tickets.cajero, settings);
@@ -2684,14 +2765,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Deja constancia de cada impresión física en impresion_comanda_*.
     // Es informativo: si falla, la impresión igual se hizo.
     function logPrint(id_comanda) {
-        // El ticket de prueba no corresponde a ninguna comanda: no se registra.
         if (!Number.isInteger(Number(id_comanda))) return;
+
+        // Van los DOS responsables, no sólo quien tocó la pantalla: si el
+        // cajero y el mesero se coordinan para reimprimir y cobrar aparte, con
+        // un solo nombre apuntado el otro no aparece por ningún lado.
+        const responsables = {
+            id_cajero: currentUser ? currentUser.id_cajero : null,
+            id_mesero: currentWaiter ? currentWaiter.id_mesero : null
+        };
 
         ['cajero', 'mesero'].forEach(tipo => {
             fetch('/api/impresion', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id_comanda, tipo })
+                body: JSON.stringify(Object.assign({ id_comanda, tipo }, responsables))
             }).catch(err => console.warn('No se pudo registrar la impresión:', err));
         });
     }
@@ -2701,6 +2789,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             ThermalPrinter.printToRawBT(currentTicket);
             logPrint(currentTicket.id);
+            // A partir de aquí el papel ya salió una vez. Lo que se imprima
+            // después de este ticket es una reimpresión y tiene que decirlo,
+            // así que se marca ahora y no cuando alguien se acuerde.
+            marcarSiguienteComoReimpresion();
             setPrintStatus('Enviado a RawBT. Si no imprime nada, revisa ⚙️ Impresora.', 'ok');
         } catch (err) {
             console.error('Error al enviar a RawBT:', err);
@@ -2708,18 +2800,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Sube el contador de copias del ticket que está en pantalla y repinta la
+    // vista previa, para que lo que se ve sea lo que va a salir por el papel.
+    function marcarSiguienteComoReimpresion() {
+        if (!currentTicket) return;
+        currentTicket.numeroCopia = (currentTicket.numeroCopia || 1) + 1;
+        currentTicket.reimpresion = true;
+        renderTicketPreview(currentTicket);
+    }
+
     function triggerThermalPrint(id_comanda, data, fromAdmin = false) {
         isReprinting = fromAdmin;
         currentTicket = buildTicketModel(id_comanda, data);
+
+        // Lo que se saca desde el panel de administración es, por definición,
+        // una copia de una venta que ya se cobró: nace marcada.
+        if (fromAdmin) {
+            currentTicket.reimpresion = true;
+            currentTicket.numeroCopia = 2;
+        }
 
         renderTicketPreview(currentTicket);
         setPrintStatus('');
         document.getElementById('printer-settings').classList.add('hide');
         printModal.classList.remove('hide');
 
-        if (ThermalPrinter.getSettings().autoPrint) {
-            sendToPrinter();
-        }
+        // Siempre, sin preguntar y sin ajuste que lo desactive: la comanda sale
+        // por el papel en cuanto se cobra. Con cola en la barra, una comanda
+        // que espera a que alguien pulse Imprimir es una que no llega a cocina.
+        sendToPrinter();
     }
 
     document.getElementById('print-rawbt-btn').addEventListener('click', sendToPrinter);
@@ -2728,6 +2837,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!currentTicket) return;
         ThermalPrinter.printViaBrowser(currentTicket);
         logPrint(currentTicket.id);
+        marcarSiguienteComoReimpresion();
     });
 
     // ---- Panel de configuración de impresora ----
@@ -2738,8 +2848,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'cfg-encoding': { key: 'encoding',  parse: v => v },
         'cfg-mode':     { key: 'mode',      parse: v => v },
         'cfg-single':   { key: 'singleJob', parse: v => v === '1' },
-        'cfg-cut':      { key: 'cut',       parse: v => v === '1' },
-        'cfg-auto':     { key: 'autoPrint', parse: v => v === '1' }
+        'cfg-cut':      { key: 'cut',       parse: v => v === '1' }
     };
 
     function loadPrinterSettingsIntoForm() {
@@ -2764,30 +2873,17 @@ document.addEventListener('DOMContentLoaded', () => {
         printerSettingsPanel.classList.toggle('hide');
     });
 
-    // Prueba de impresora desde la barra superior del POS: permite dejar la
-    // impresora configurada antes de la primera venta del evento.
-    document.getElementById('printer-test-btn').addEventListener('click', () => {
+    // Configurar la impresora antes de la primera venta del evento.
+    //
+    // Antes esto imprimía una comanda de prueba con productos y un total
+    // inventados. Un ticket así, encima de la barra a las dos de la mañana, no
+    // se distingue de uno real: se prestaba a cobrarlo.
+    document.getElementById('printer-config-btn').addEventListener('click', () => {
         isReprinting = true; // no toca el carrito ni cierra la sesión del mesero
-        currentTicket = {
-            id: 'PRUEBA',
-            fecha: new Date().toLocaleString(),
-            fechaDia: new Date().toLocaleDateString(),
-            hora: new Date().toTimeString().slice(0, 5),
-            evento: configEvento.evento || '',
-            barra: configEvento.barra || (currentUser ? currentUser.nombre_barra : 'Barra'),
-            cajero: currentUser ? currentUser.nombre : 'Cajero',
-            mesero: currentWaiter ? currentWaiter.nombre : 'Mesero',
-            total: 60,
-            observaciones: 'Ticket de prueba de impresora',
-            items: [
-                { cantidad: 2, nombre: 'Cerveza Paceña 350 ml', subtotal: 36 },
-                { cantidad: 1, nombre: 'Hamburguesa clásica', subtotal: 24 }
-            ],
-            pagos: [{ etiqueta: 'Efectivo (PRUEBA)', monto: 60 }]
-        };
+        currentTicket = null;
 
-        renderTicketPreview(currentTicket);
-        setPrintStatus('Ticket de prueba: no se guarda ninguna venta.', 'info');
+        renderTicketPreview(null);
+        setPrintStatus('Ajusta la impresora aquí. La prueba real es la primera venta.', 'info');
         loadPrinterSettingsIntoForm();
         printerSettingsPanel.classList.remove('hide');
         printModal.classList.remove('hide');
@@ -2851,9 +2947,43 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (targetTab === 'tab-crear-personal') { loadPersonalSetup(); cargarPersonalAdmin(); }
             else if (targetTab === 'tab-stock') loadStockSetup();
             else if (targetTab === 'tab-inventario') loadInventoryData();
+            else if (targetTab === 'tab-reimpresiones') loadReimpresionesData();
             else if (targetTab === 'tab-auditoria') loadAuditsData();
         });
     });
+
+    // TAB: REIMPRESIONES
+    async function loadReimpresionesData() {
+        const cuerpo = document.getElementById('reimpresiones-table-body');
+        cuerpo.innerHTML = '<tr><td colspan="7">Cargando...</td></tr>';
+        try {
+            const res = await fetch('/api/admin/reimpresiones');
+            const data = await res.json();
+            const filas = data.reimpresiones || [];
+
+            if (filas.length === 0) {
+                // Que no haya ninguna es la noticia buena, y conviene decirlo
+                // así: una tabla vacía sin más parece que no cargó.
+                cuerpo.innerHTML = '<tr><td colspan="7">' +
+                    'Ninguna comanda se ha reimpreso.</td></tr>';
+                return;
+            }
+
+            cuerpo.innerHTML = filas.map(r => `
+                <tr>
+                    <td>#${r.id_comanda}</td>
+                    <td>${r.numero_copia}</td>
+                    <td>${r.copia_de}</td>
+                    <td>${r.cajero}</td>
+                    <td>${r.mesero}</td>
+                    <td>${Number(r.total).toFixed(2)} Bs.</td>
+                    <td>${r.fecha || ''}</td>
+                </tr>`).join('');
+        } catch (err) {
+            console.error('Error al cargar las reimpresiones:', err);
+            cuerpo.innerHTML = '<tr><td colspan="7">No se pudieron cargar.</td></tr>';
+        }
+    }
 
     // TAB: DASHBOARD DATA
     async function loadDashboardData() {

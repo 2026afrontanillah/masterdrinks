@@ -235,8 +235,8 @@
                             <span class="role">Mesero</span>
                             <strong id="pos-mesero-label">Juan Pérez</strong>
                         </div>
-                        <button id="printer-test-btn" class="icon-btn"
-                            title="Probar y configurar la impresora">🖨️</button>
+                        <button id="printer-config-btn" class="icon-btn"
+                            title="Configurar la impresora">⚙️</button>
                         <button id="lock-pos-btn" class="icon-btn" title="Bloquear / Cambiar Mesero">🔒</button>
                     </div>
                 </div>
@@ -309,6 +309,8 @@
                             class="nav-texto">Inventario</span></button>
                     <button class="nav-tab-btn" data-tab="tab-inventario"><span class="nav-icono">📋</span><span
                             class="nav-texto">Reporte de Stock</span></button>
+                    <button class="nav-tab-btn" data-tab="tab-reimpresiones"><span class="nav-icono">🖨️</span><span
+                            class="nav-texto">Reimpresiones</span></button>
                     <button class="nav-tab-btn" data-tab="tab-auditoria"><span class="nav-icono">🔍</span><span
                             class="nav-texto">Logs &amp; Auditoría</span></button>
                 </nav>
@@ -826,6 +828,40 @@
                 </section>
 
                 <!-- Tab: Auditoría -->
+                <!-- Reimpresiones: quién sacó copias de qué comanda.
+                     Reimprimir es la puerta de atrás de la barra, porque con el
+                     ticket en la mano se puede cobrar dos veces la misma venta.
+                     Por eso salen los dos responsables y no sólo el cajero. -->
+                <section id="tab-reimpresiones" class="tab-content hide">
+                    <h1 class="page-title">Reimpresiones</h1>
+                    <div class="glass-card table-section">
+                        <h2>Copias sacadas después del ticket original</h2>
+                        <p class="reporte-hint">
+                            La copia 1 es la venta. De la 2 en adelante alguien volvió a sacar el
+                            papel: una misma comanda repetida varias veces merece una explicación.
+                            Esta lista sale también en el reporte de cierre en PDF.
+                        </p>
+                        <div class="table-container max-h-96">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>Comanda</th>
+                                        <th>Copia</th>
+                                        <th>Ticket</th>
+                                        <th>Cajero</th>
+                                        <th>Mesero</th>
+                                        <th>Importe</th>
+                                        <th>Fecha/Hora</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="reimpresiones-table-body">
+                                    <!-- Content -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
                 <section id="tab-auditoria" class="tab-content hide">
                     <h1 class="page-title">Registros del Evento</h1>
                     <div class="admin-grid-forms">
@@ -986,13 +1022,6 @@
                         <select id="cfg-cut">
                             <option value="1">Cortar al terminar</option>
                             <option value="0">No cortar</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="cfg-auto">Al cerrar una venta</label>
-                        <select id="cfg-auto">
-                            <option value="0">Esperar a que pulse Imprimir</option>
-                            <option value="1">Imprimir automáticamente</option>
                         </select>
                     </div>
                 </div>
@@ -1197,15 +1226,8 @@
             <!-- EFECTIVO: con cuánto paga el cliente, para calcular el cambio -->
             <div id="pay-panel-efectivo" class="pay-panel">
                 <p class="pay-label">¿Con cuánto paga? <span class="pay-hint">(opcional)</span></p>
-                <div class="quick-cash-row">
-                    <button type="button" class="quick-cash-btn exact" data-cash="exacto">Justo</button>
-                    <button type="button" class="quick-cash-btn" data-cash="20">20</button>
-                    <button type="button" class="quick-cash-btn" data-cash="50">50</button>
-                    <button type="button" class="quick-cash-btn" data-cash="100">100</button>
-                    <button type="button" class="quick-cash-btn" data-cash="200">200</button>
-                </div>
                 <input type="number" id="pay-recibido" class="pay-input" min="0" step="0.01" inputmode="decimal"
-                    placeholder="Otro monto recibido">
+                    placeholder="Monto recibido">
                 <div id="pay-change-box" class="pay-change hide">
                     <span>Cambio a devolver</span>
                     <strong id="pay-change-amount">0.00 Bs.</strong>
@@ -1228,24 +1250,17 @@
             </div>
 
             <!-- MIXTO: se escribe el efectivo y el resto se completa solo -->
+            <!-- Pago mixto: tantas líneas como haga falta, cada una con el
+                 método que sea. Antes era fijo "efectivo + otro", y un cliente
+                 que pagaba con tarjeta y QR, o entre tres personas, no cabía. -->
             <div id="pay-panel-mixto" class="pay-panel hide">
-                <div class="pay-split">
-                    <div class="pay-split-field">
-                        <label for="pay-mixto-efectivo">💵 Efectivo</label>
-                        <input type="number" id="pay-mixto-efectivo" class="pay-input" min="0" step="0.01"
-                            inputmode="decimal" placeholder="0.00">
-                    </div>
-                    <div class="pay-split-field">
-                        <label for="pay-mixto-resto" id="pay-mixto-resto-label">Falta en QR</label>
-                        <input type="number" id="pay-mixto-resto" class="pay-input readonly" readonly tabindex="-1">
-                    </div>
+                <div id="pay-lineas" class="pay-lineas"></div>
+                <button type="button" id="pay-add-linea" class="secondary-btn full-btn">
+                    + Añadir forma de pago</button>
+                <div class="pay-resto-row">
+                    <span>Falta por cubrir</span>
+                    <strong id="pay-falta">0.00 Bs.</strong>
                 </div>
-                <label class="pay-label" for="pay-mixto-metodo">Cobrar el resto con</label>
-                <select id="pay-mixto-metodo" class="pay-input">
-                    <option value="3">📱 Código QR</option>
-                    <option value="2">💳 Tarjeta</option>
-                    <option value="4">🏦 Transferencia</option>
-                </select>
             </div>
 
             <div id="pay-error" class="pay-error hide"></div>

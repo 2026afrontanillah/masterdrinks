@@ -2332,6 +2332,62 @@ select option {
     gap: 12px;
 }
 
+/* Pago mixto en líneas: método + importe, y una cruz para quitarla.
+   El importe va ancho porque es lo que se teclea con prisa. */
+.pay-lineas {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.pay-linea {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.pay-linea .pay-input {
+    margin: 0;
+}
+
+.pay-linea-quitar {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.pay-linea-quitar:hover {
+    background: rgba(255, 90, 90, 0.18);
+    color: #ff7b7b;
+}
+
+/* Lo que falta por cubrir. Se pone en verde cuando cuadra: es la señal de
+   que ya se puede confirmar, sin tener que releer las cifras. */
+.pay-resto-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 12px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.pay-resto-row strong {
+    font-size: 1.15rem;
+    color: var(--text-primary);
+}
+
+.pay-resto-row strong.pay-falta-ok {
+    color: #4ade80;
+}
+
 .pay-split-field label {
     font-size: 0.75rem;
     font-weight: 600;

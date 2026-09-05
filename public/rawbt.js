@@ -106,7 +106,10 @@ window.ThermalPrinter = (function () {
     singleJob: true,    // los dos tickets en un solo trabajo de impresión
     cut: true,          // enviar corte de papel al final de cada ticket
     feed: 3,            // líneas en blanco antes del corte
-    autoPrint: false    // imprimir solo, sin pulsar el botón, al cerrar la venta
+    // La comanda sale por el papel en cuanto se cobra, sin que nadie pulse
+    // nada. En una barra con cola, esperar a que el cajero se acuerde de pulsar
+    // Imprimir es una comanda que no llega a la cocina.
+    autoPrint: true
   };
 
   function getSettings() {
@@ -363,6 +366,18 @@ window.ThermalPrinter = (function () {
     ops.push(op('COMANDA ' + (model.ref || model.id),
       { align: 'center', bold: true, tall: true, wide: true }));
     ops.push(op(subtitulo, { align: 'center' }));
+
+    // Un ticket reimpreso que sale idéntico al original vale para cobrar la
+    // misma venta otra vez. Va en grande y encima de los precios: quien lo
+    // recibe tiene que verlo sin buscarlo, aunque lea el papel de lejos.
+    if (model.reimpresion) {
+      ops.push(op(''));
+      ops.push(op('*** REIMPRESION ***',
+        { align: 'center', bold: true, tall: true }));
+      ops.push(op('copia ' + (model.numeroCopia || 2) + ' - no es un cobro nuevo',
+        { align: 'center' }));
+    }
+
     ops.push(op(''));
 
     return ops;
