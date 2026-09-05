@@ -190,6 +190,24 @@ async function abrirTablet() {
   check('Los importes suman exactamente el total', Math.abs(sumado - total) < 0.005,
     sumado + ' de ' + total);
 
+  // ---- Tras cobrar: ni vista previa, ni un botón que pulsar ----
+  //
+  // La pantalla que enseñaba cómo iban a quedar las comandas era un paso de
+  // más entre dos clientes. Ahora el papel sale y la tablet vuelve sola al
+  // PIN, lista para el siguiente mesero.
+  check('No se abre ninguna ventana de vista previa',
+    t.id('print-modal').classList.contains('hide'),
+    'el modal de impresora sigue cerrado');
+  check('La tablet vuelve sola a la pantalla del PIN',
+    !t.id('waiter-lock-modal').classList.contains('hide'),
+    'sin que nadie pulse Continuar');
+  check('Y el carrito queda vacío para la siguiente venta',
+    t.$$('.cart-item').length === 0,
+    t.$$('.cart-item').length + ' líneas en el carrito');
+  check('Ya no existe la previsualización de las dos comandas',
+    !t.id('ticket-cajero-body') && !t.id('ticket-mesero-body'),
+    'se quitó del HTML');
+
   console.log('');
   console.log(fallos === 0
     ? '  \x1b[32mEl cobro admite cualquier mezcla y no acepta de menos.\x1b[0m\n'

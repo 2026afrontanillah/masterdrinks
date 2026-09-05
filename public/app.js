@@ -2733,25 +2733,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function renderTicketPreview(model) {
-        const settings = ThermalPrinter.getSettings();
-
-        // Sin comanda no hay nada que previsualizar: es el caso de entrar sólo
-        // a configurar la impresora, antes de la primera venta.
-        if (!model) {
-            const vacio = '<p class="ticket-vacio">Aquí se verá la comanda cuando cobres.</p>';
-            document.getElementById('ticket-cajero-body').innerHTML = vacio;
-            document.getElementById('ticket-mesero-body').innerHTML = vacio;
-            return;
-        }
-
-        const tickets = ThermalPrinter.buildTickets(model, settings);
-        document.getElementById('ticket-cajero-body').innerHTML =
-            ThermalPrinter.helpers.opsToHtml(tickets.cajero, settings);
-        document.getElementById('ticket-mesero-body').innerHTML =
-            ThermalPrinter.helpers.opsToHtml(tickets.mesero, settings);
-    }
-
     function setPrintStatus(text, kind) {
         const box = document.getElementById('print-status');
         if (!text) {
@@ -2786,29 +2767,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function sendToPrinter() {
         if (!currentTicket) return;
+        const esCopia = currentTicket.reimpresion;
         try {
             ThermalPrinter.printToRawBT(currentTicket);
             logPrint(currentTicket.id);
-            // A partir de aquí el papel ya salió una vez. Lo que se imprima
-            // después de este ticket es una reimpresión y tiene que decirlo,
-            // así que se marca ahora y no cuando alguien se acuerde.
-            marcarSiguienteComoReimpresion();
-            setPrintStatus('Enviado a RawBT. Si no imprime nada, revisa ⚙️ Impresora.', 'ok');
+            // Sin vista previa, el aviso tiene que salir por encima de la
+            // pantalla: si RawBT no está, el papel no sale y nadie se entera
+            // hasta que el cliente reclama.
+            notify(esCopia ? 'Reimpresión enviada a la impresora.'
+                           : 'Comanda enviada a la impresora.', 'ok');
         } catch (err) {
             console.error('Error al enviar a RawBT:', err);
-            setPrintStatus('No se pudo abrir RawBT. ¿Está instalado en la tablet?', 'error');
+            notify('No se pudo abrir RawBT. ¿Está instalado en la tablet? ' +
+                   'La venta SÍ quedó guardada.', 'error');
         }
     }
 
-    // Sube el contador de copias del ticket que está en pantalla y repinta la
-    // vista previa, para que lo que se ve sea lo que va a salir por el papel.
-    function marcarSiguienteComoReimpresion() {
-        if (!currentTicket) return;
-        currentTicket.numeroCopia = (currentTicket.numeroCopia || 1) + 1;
-        currentTicket.reimpresion = true;
-        renderTicketPreview(currentTicket);
-    }
-
+    // Imprime y sigue. Sin vista previa de por medio.
+    //
+    // Esa pantalla enseñaba cómo iban a quedar las dos comandas y esperaba a
+    // que alguien pulsara Continuar. Con cola en la barra es un paso de más
+    // entre dos clientes, y el papel ya está saliendo mientras se mira.
     function triggerThermalPrint(id_comanda, data, fromAdmin = false) {
         isReprinting = fromAdmin;
         currentTicket = buildTicketModel(id_comanda, data);
@@ -2820,25 +2799,24 @@ document.addEventListener('DOMContentLoaded', () => {
             currentTicket.numeroCopia = 2;
         }
 
-        renderTicketPreview(currentTicket);
-        setPrintStatus('');
-        document.getElementById('printer-settings').classList.add('hide');
-        printModal.classList.remove('hide');
-
-        // Siempre, sin preguntar y sin ajuste que lo desactive: la comanda sale
-        // por el papel en cuanto se cobra. Con cola en la barra, una comanda
-        // que espera a que alguien pulse Imprimir es una que no llega a cocina.
         sendToPrinter();
+        currentTicket = null;
+
+        if (fromAdmin) {
+            isReprinting = false;
+        } else {
+            // Cobrada e impresa: la tablet vuelve sola al PIN, lista para el
+            // siguiente mesero sin que nadie toque nada.
+            volverAlBloqueoDeMesero();
+        }
     }
 
-    document.getElementById('print-rawbt-btn').addEventListener('click', sendToPrinter);
-
-    document.getElementById('print-browser-btn').addEventListener('click', () => {
-        if (!currentTicket) return;
-        ThermalPrinter.printViaBrowser(currentTicket);
-        logPrint(currentTicket.id);
-        marcarSiguienteComoReimpresion();
-    });
+    function volverAlBloqueoDeMesero() {
+        currentWaiter = null;
+        vaciarCarrito();
+        posView.classList.add('hide');
+        showWaiterModal();
+    }
 
     // ---- Panel de configuración de impresora ----
     const printerSettingsPanel = document.getElementById('printer-settings');
@@ -2863,14 +2841,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById(id).addEventListener('change', e => {
             const field = settingsFields[id];
             ThermalPrinter.saveSettings({ [field.key]: field.parse(e.target.value) });
-            // El ancho y los acentos cambian el maquetado: refrescar la vista previa.
-            if (currentTicket) renderTicketPreview(currentTicket);
         });
-    });
-
-    document.getElementById('printer-settings-btn').addEventListener('click', () => {
-        loadPrinterSettingsIntoForm();
-        printerSettingsPanel.classList.toggle('hide');
     });
 
     // Configurar la impresora antes de la primera venta del evento.
@@ -2879,11 +2850,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // inventados. Un ticket así, encima de la barra a las dos de la mañana, no
     // se distingue de uno real: se prestaba a cobrarlo.
     document.getElementById('printer-config-btn').addEventListener('click', () => {
-        isReprinting = true; // no toca el carrito ni cierra la sesión del mesero
-        currentTicket = null;
-
-        renderTicketPreview(null);
-        setPrintStatus('Ajusta la impresora aquí. La prueba real es la primera venta.', 'info');
+        setPrintStatus('Se guarda en esta tablet. La prueba real es la primera venta.', 'info');
         loadPrinterSettingsIntoForm();
         printerSettingsPanel.classList.remove('hide');
         printModal.classList.remove('hide');
@@ -2891,20 +2858,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadPrinterSettingsIntoForm();
 
-    // Cerrar la vista previa, limpiar el POS y volver al bloqueo de mesero
+    // Cerrar los ajustes de impresora. No toca el estado del POS: el paso de
+    // volver al PIN lo hace ahora la propia impresión, sin esperar a nadie.
     document.getElementById('dismiss-print-btn').addEventListener('click', () => {
         printModal.classList.add('hide');
-        currentTicket = null;
-
-        if (isReprinting) {
-            isReprinting = false;
-            // Reimpresión desde el panel admin: no se toca el estado del POS.
-        } else {
-            currentWaiter = null;
-            vaciarCarrito();
-            posView.classList.add('hide');
-            showWaiterModal();
-        }
+        printerSettingsPanel.classList.add('hide');
+        setPrintStatus('');
     });
 
     // ==========================================

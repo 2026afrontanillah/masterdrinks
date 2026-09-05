@@ -3907,16 +3907,28 @@ app.post('/api/impresion', (req, res) => {
   const { id_comanda, tipo, id_cajero, id_mesero } = req.body;
   const table = tipo === 'mesero' ? 'impresion_comanda_mesero' : 'impresion_comanda_cajero';
 
-  dbGet(`SELECT COALESCE(MAX(numero_copia), 0) AS ultima FROM ${table} WHERE id_comanda = ?`, [id_comanda])
-    .then(row => {
+  // Los responsables salen de la COMANDA, no de quien tenga la sesión abierta.
+  //
+  // Una reimpresión desde el panel la pide un administrador: ahí no hay cajero
+  // ni mesero conectados y el navegador no tiene ids que mandar, así que el
+  // registro se quedaba en blanco, que es justo cuando más falta hace. Y como
+  // los ids ya no vienen del cliente, tampoco se pueden falsear desde él.
+  Promise.all([
+    dbGet(`SELECT COALESCE(MAX(numero_copia), 0) AS ultima FROM ${table} WHERE id_comanda = ?`, [id_comanda]),
+    dbGet('SELECT id_cajero, id_mesero FROM comanda WHERE id_comanda = ?', [id_comanda])
+  ])
+    .then(([row, duenos]) => {
       const copia = (row ? row.ultima : 0) + 1;
       // De la segunda copia en adelante ya no es la venta: es una reimpresión,
       // y eso es lo que hay que poder auditar después.
       const reimpresion = copia > 1;
+      const responsableCajero = (duenos && duenos.id_cajero) || id_cajero || null;
+      const responsableMesero = (duenos && duenos.id_mesero) || id_mesero || null;
+
       return dbRun(
         `INSERT INTO ${table} (id_comanda, fecha_hora_impresion, numero_copia, id_cajero, id_mesero)
          VALUES (?, ?, ?, ?, ?)`,
-        [id_comanda, nowSql(), copia, id_cajero || null, id_mesero || null]
+        [id_comanda, nowSql(), copia, responsableCajero, responsableMesero]
       ).then(() => res.json({ success: true, numero_copia: copia, reimpresion }));
     })
     .catch(err => {

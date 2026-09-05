@@ -104,6 +104,29 @@ const post = (ruta, cuerpo) => fetch(URL + ruta, {
     fila && fila.id_cajero === comanda.id_cajero && fila.id_mesero === comanda.id_mesero,
     fila ? 'cajero ' + fila.id_cajero + ', mesero ' + fila.id_mesero : 'no se guardó');
 
+  // ---- Reimpresión desde el panel de administración ----
+  //
+  // Aquí no hay sesión de cajero ni de mesero: quien la pide es un admin, y el
+  // navegador no tiene esos ids que mandar. El registro no puede quedarse en
+  // blanco por eso: los responsables de esa comanda están en la propia comanda,
+  // y es el servidor quien los pone.
+  const desdePanel = await post('/api/impresion', {
+    id_comanda: comanda.id_comanda, tipo: 'cajero'
+  });
+  check('Una reimpresión desde el panel también se registra',
+    desdePanel.success === true && desdePanel.reimpresion === true,
+    'copia ' + desdePanel.numero_copia);
+
+  const d3 = new DatabaseSync(BASE);
+  const sinSesion = d3.prepare(
+    'SELECT id_cajero, id_mesero FROM impresion_comanda_cajero WHERE id_comanda = ? AND numero_copia = 3'
+  ).get(comanda.id_comanda);
+  d3.close();
+  check('Y NO se queda sin responsables aunque el navegador no los mande',
+    sinSesion && sinSesion.id_cajero === comanda.id_cajero &&
+    sinSesion.id_mesero === comanda.id_mesero,
+    sinSesion ? 'cajero ' + sinSesion.id_cajero + ', mesero ' + sinSesion.id_mesero : 'no se guardó');
+
   // ---- El reporte las saca ----
   const rep = await (await fetch(URL + '/api/admin/reimpresiones')).json();
   check('El reporte de reimpresiones responde', rep.success === true,
