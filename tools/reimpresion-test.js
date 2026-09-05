@@ -194,7 +194,7 @@ const post = (ruta, cuerpo) => fetch(URL + ruta, {
   check('El reporte de reimpresiones responde', rep.success === true,
     rep.message || '');
   const nuestra = (rep.reimpresiones || []).find(r =>
-    r.id_comanda === comanda.id_comanda && r.numero_copia === 2);
+    r.id_comanda === comanda.id_comanda && r.numero_reimpresion === 1);
   check('Y la reimpresión sale en él', !!nuestra,
     (rep.reimpresiones || []).length + ' reimpresiones listadas');
   check('Con el nombre del cajero y el del mesero, no solo sus números',
@@ -202,8 +202,25 @@ const post = (ruta, cuerpo) => fetch(URL + ruta, {
     nuestra ? nuestra.cajero + ' / ' + nuestra.mesero : '');
   check('La copia original NO se cuenta como reimpresión',
     !(rep.reimpresiones || []).some(r =>
-      r.id_comanda === comanda.id_comanda && r.numero_copia === 1),
-    'solo cuentan de la copia 2 en adelante');
+      r.id_comanda === comanda.id_comanda && r.numero_reimpresion === 0),
+    'la venta no es una reimpresión');
+
+  // ---- La cuenta empieza en 1, no en "copia 2" ----
+  //
+  // Antes la primera vez que se repetía un ticket salía como "copia 2" y había
+  // que restar de cabeza para saber cuántas veces se había repetido.
+  const todas = (rep.reimpresiones || []).filter(r => r.id_comanda === otra.id_comanda)
+    .map(r => r.numero_reimpresion).sort((a, b) => a - b);
+  check('La primera vez que se repite un ticket es la reimpresión 1',
+    todas[0] === 1, 'salió como la ' + todas[0]);
+  check('Y la siguiente es la 2', todas[1] === 2, 'salió como la ' + todas[1]);
+
+  // ---- Ordenado por fecha, lo más reciente arriba ----
+  const fechas = (rep.reimpresiones || []).map(r => r.fecha);
+  const ordenadas = [...fechas].sort().reverse();
+  check('El log viene ordenado por fecha, de lo más nuevo a lo más viejo',
+    JSON.stringify(fechas) === JSON.stringify(ordenadas),
+    fechas.length + ' líneas');
 
   // ---- Si la impresora falla, el apunte NO se pierde ----
   //

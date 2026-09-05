@@ -3969,8 +3969,13 @@ function leerReimpresiones(desde, hasta) {
   // quedan registrados, cada uno en la suya. Pero lo que se audita aquí es el
   // acto de reimprimir, no cuántos papeles salieron: leyendo las dos, una sola
   // reimpresión aparecía por duplicado y la lista engañaba al contarla.
+  // Se cuentan REIMPRESIONES, no copias.
+  //
+  // La copia 1 es la venta, así que la primera reimpresión era "copia 2" y
+  // había que restar de cabeza para saber cuántas veces se había repetido un
+  // ticket. Ahora la primera vez que se repite es la reimpresión 1.
   return dbAll(`
-    SELECT i.id_comanda AS id_comanda, i.numero_copia AS numero_copia,
+    SELECT i.id_comanda AS id_comanda, i.numero_copia - 1 AS numero_reimpresion,
            i.fecha_hora_impresion AS fecha,
            COALESCE(caj.nombre, 'sin registrar') AS cajero,
            COALESCE(mes.nombre, 'sin registrar') AS mesero,

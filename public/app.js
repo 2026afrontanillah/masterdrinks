@@ -2950,7 +2950,7 @@ document.addEventListener('DOMContentLoaded', () => {
             cuerpo.innerHTML = filas.map(r => `
                 <tr>
                     <td>#${r.id_comanda}</td>
-                    <td>${r.numero_copia}</td>
+                    <td>${r.numero_reimpresion}ª</td>
                     <td>${r.cajero}</td>
                     <td>${r.mesero}</td>
                     <td>${Number(r.total).toFixed(2)} Bs.</td>
