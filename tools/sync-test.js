@@ -59,9 +59,18 @@ async function abrirTablet(nombre) {
   t.id('login-username').value = nombre === 'A' ? 'cajero_norte_1' : 'cajero_norte_2';
   t.id('login-password').value = 'demo123';
   t.$('#login-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await esperar(400);
-  for (const d of '1009') t.click(t.$('.pin-btn[data-key="' + d + '"]'));
-  await esperar(600);
+  for (let i = 0; i < 40; i++) {
+    if (!t.id('waiter-lock-modal').classList.contains('hide')) break;
+    await esperar(100);
+  }
+  for (const d of '1009') {
+    const btn = t.$('.pin-btn[data-key="' + d + '"]');
+    if (btn) t.click(btn);
+  }
+  for (let i = 0; i < 40; i++) {
+    if (!t.id('pos-view').classList.contains('hide')) break;
+    await esperar(100);
+  }
   return t;
 }
 
@@ -77,7 +86,9 @@ const stockEnPantalla = (t, idProd) => {
   ['', '-wal', '-shm'].forEach(s => { if (fs.existsSync(BASE + s)) fs.unlinkSync(BASE + s); });
   fs.copyFileSync(path.join(RAIZ, 'pos_evento.db'), BASE);
   const db = new DatabaseSync(BASE);
-  db.prepare('UPDATE producto SET stock_actual = 6 WHERE id_producto = 1').run();
+  const targetProd = db.prepare('SELECT id_producto FROM producto WHERE activo = 1 AND COALESCE(requiere_acompanante, 0) = 0 AND COALESCE(es_acompanante, 0) = 0 LIMIT 1').get() || { id_producto: 1 };
+  const targetId = targetProd.id_producto;
+  db.prepare('UPDATE producto SET stock_actual = 6 WHERE id_producto = ?').run(targetId);
   db.close();
 
   const srv = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
@@ -90,37 +101,50 @@ const stockEnPantalla = (t, idProd) => {
   }
 
   console.log('\n\x1b[1m\x1b[36m  Dos tablets, un servidor\x1b[0m');
-  console.log('\x1b[90m  Producto 1 con 6 unidades. La tablet A vende; la B no toca nada.\x1b[0m\n');
+  console.log(`\x1b[90m  Producto ${targetId} con 6 unidades. La tablet A vende; la B no toca nada.\x1b[0m\n`);
 
   const A = await abrirTablet('A');
   const B = await abrirTablet('B');
 
+  const dCat = new DatabaseSync(BASE);
+  const catTarget = dCat.prepare('SELECT c.nombre FROM categoria_producto c JOIN producto p ON p.id_categoria = c.id_categoria WHERE p.id_producto = ?').get(targetId);
+  dCat.close();
+  if (catTarget) {
+    const irACat = t => {
+      const btn = [...t.window.document.querySelectorAll('#category-list .category-btn')].find(b => b.textContent.toLowerCase().includes(catTarget.nombre.toLowerCase()));
+      if (btn) t.click(btn);
+    };
+    irACat(A);
+    irACat(B);
+    await esperar(150);
+  }
+
   check('Las dos arrancan viendo el mismo stock',
-    stockEnPantalla(A, 1) === 6 && stockEnPantalla(B, 1) === 6,
-    'A=' + stockEnPantalla(A, 1) + '  B=' + stockEnPantalla(B, 1));
+    stockEnPantalla(A, targetId) === 6 && stockEnPantalla(B, targetId) === 6,
+    'A=' + stockEnPantalla(A, targetId) + '  B=' + stockEnPantalla(B, targetId));
 
   // ---- La tablet B mete 4 unidades en su carrito (sin cobrar) ----
-  const cardB = B.window.document.querySelector('.product-card[data-id="1"]');
+  const cardB = B.window.document.querySelector(`.product-card[data-id="${targetId}"]`);
   for (let i = 0; i < 4; i++) B.click(cardB);
   await esperar(100);
   check('B ve bajar su tarjeta al llenar el carrito (cuenta local)',
-    stockEnPantalla(B, 1) === 2, 'B muestra ' + stockEnPantalla(B, 1));
+    stockEnPantalla(B, targetId) === 2, 'B muestra ' + stockEnPantalla(B, targetId));
 
   const stockReal = () => {
     const d = new DatabaseSync(BASE);
-    const r = d.prepare('SELECT stock_actual FROM producto WHERE id_producto = 1').get();
+    const r = d.prepare('SELECT stock_actual FROM producto WHERE id_producto = ?').get(targetId);
     d.close(); return r.stock_actual;
   };
   check('Meter algo en el carrito NO reserva nada en el servidor',
     stockReal() === 6, 'en la base siguen ' + stockReal());
 
   // ---- La tablet A vende 5 unidades de verdad ----
-  const cardA = A.window.document.querySelector('.product-card[data-id="1"]');
+  const cardA = A.window.document.querySelector(`.product-card[data-id="${targetId}"]`);
   for (let i = 0; i < 5; i++) A.click(cardA);
   await esperar(100);
   A.click(A.id('finalize-order-btn'));
-  await esperar(200);
-  A.click(A.$('.quick-cash-btn.exact'));
+  const exactBtn = A.$('.quick-cash-btn.exact');
+  if (exactBtn) A.click(exactBtn);
   await esperar(100);
   A.click(A.id('pay-confirm-btn'));
   await esperar(1500);
@@ -147,7 +171,7 @@ const stockEnPantalla = (t, idProd) => {
   // La tarjeta muestra lo que queda MENOS lo que ya llevas en el carrito, así
   // que con 1 en la base y 1 en el carrito tiene que decir "Agotado".
   const textoTarjetaB = B.window.document
-    .querySelector('.product-card[data-id="1"] .stock').textContent;
+    .querySelector(`.product-card[data-id="${targetId}"] .stock`).textContent;
   check('B muestra "Agotado" porque su única unidad ya está en su carrito',
     /agotado/i.test(textoTarjetaB), textoTarjetaB);
 
@@ -155,8 +179,8 @@ const stockEnPantalla = (t, idProd) => {
   B.click(B.window.document.querySelector('.cart-item .remove-item-btn'));
   await esperar(150);
   check('Al vaciar el carrito, B muestra la unidad real que queda',
-    stockEnPantalla(B, 1) === 1,
-    'B muestra ' + stockEnPantalla(B, 1) + ', en la base hay ' + stockReal());
+    stockEnPantalla(B, targetId) === 1,
+    'B muestra ' + stockEnPantalla(B, targetId) + ', en la base hay ' + stockReal());
   const aviso = [...B.window.document.querySelectorAll('#toast-stack .toast-text')]
     .map(x => x.textContent).find(x => /quedan|vendió/i.test(x));
   check('B avisa al cajero con un mensaje claro', !!aviso, aviso);
@@ -168,7 +192,7 @@ const stockEnPantalla = (t, idProd) => {
 
   srv.kill('SIGTERM');
   await esperar(600);
-  srv.kill('SIGKILL');
+  try { srv.kill('SIGKILL'); } catch (e) {}
   ['', '-wal', '-shm'].forEach(s => { try { fs.unlinkSync(BASE + s); } catch (e) {} });
   process.exit(fallos === 0 ? 0 : 1);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -15,6 +15,7 @@
     "test:pagos": "node tools/pagos-test.js",
     "test:reimpresion": "node tools/reimpresion-test.js",
     "reiniciar": "node tools/reiniciar-ventas.js",
+    "optimizar": "node tools/optimizar-db.js",
     "medir": "node tools/medir.js",
     "capturas": "node tools/capturas.js"
   },

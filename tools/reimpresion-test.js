@@ -56,9 +56,21 @@ const post = (ruta, cuerpo) => fetch(URL + ruta, {
   console.log('\x1b[90m  Reimprimir es por donde se cobra dos veces la misma venta.\x1b[0m\n');
 
   const db = new DatabaseSync(BASE);
-  const comanda = db.prepare(
+  let comanda = db.prepare(
     "SELECT id_comanda, id_cajero, id_mesero FROM comanda WHERE estado_pago != 'ANULADO' ORDER BY id_comanda LIMIT 1"
   ).get();
+  if (!comanda) {
+    const p = db.prepare('SELECT id_producto, precio_venta FROM producto LIMIT 1').get();
+    const c = db.prepare('SELECT id_cajero, id_barra FROM cajero LIMIT 1').get();
+    const m = db.prepare('SELECT id_mesero FROM mesero LIMIT 1').get();
+    const resCom = db.prepare(
+      "INSERT INTO comanda (id_evento, id_barra, id_cajero, id_mesero, total, estado_pago, estatus) VALUES (1, ?, ?, ?, ?, 'PAGADO', 'COMPLETADO')"
+    ).run(c.id_barra, c.id_cajero, m.id_mesero, p.precio_venta);
+    const idCom = Number(resCom.lastInsertRowid);
+    db.prepare('INSERT INTO detalle_comanda (id_comanda, id_producto, cantidad, precio_unitario, subtotal) VALUES (?, ?, 1, ?, ?)').run(idCom, p.id_producto, p.precio_venta, p.precio_venta);
+    db.prepare('INSERT INTO pago_comanda (id_comanda, id_metodo_pago, monto) VALUES (?, 1, ?)').run(idCom, p.precio_venta);
+    comanda = { id_comanda: idCom, id_cajero: c.id_cajero, id_mesero: m.id_mesero };
+  }
   // La copia de la base trae las impresiones de aquel día. Se limpian las de
   // ESTA comanda para que la cuenta de copias empiece donde empieza de verdad.
   db.prepare('DELETE FROM impresion_comanda_cajero WHERE id_comanda = ?').run(comanda.id_comanda);
@@ -159,9 +171,20 @@ const post = (ruta, cuerpo) => fetch(URL + ruta, {
   // Se usa otra comanda limpia, y se imita al cliente: en cada impresión
   // registra los DOS papeles, el del cajero y el de la barra.
   const d5 = new DatabaseSync(BASE);
-  const otra = d5.prepare(
+  let otra = d5.prepare(
     "SELECT id_comanda FROM comanda WHERE estado_pago != 'ANULADO' AND id_comanda <> ? ORDER BY id_comanda LIMIT 1"
   ).get(comanda.id_comanda);
+  if (!otra) {
+    const p = d5.prepare('SELECT id_producto, precio_venta FROM producto LIMIT 1').get();
+    const c = d5.prepare('SELECT id_cajero, id_barra FROM cajero LIMIT 1').get();
+    const m = d5.prepare('SELECT id_mesero FROM mesero LIMIT 1').get();
+    const resCom = d5.prepare(
+      "INSERT INTO comanda (id_evento, id_barra, id_cajero, id_mesero, total, estado_pago, estatus) VALUES (1, ?, ?, ?, ?, 'PAGADO', 'COMPLETADO')"
+    ).run(c.id_barra, c.id_cajero, m.id_mesero, p.precio_venta);
+    otra = { id_comanda: Number(resCom.lastInsertRowid) };
+    d5.prepare('INSERT INTO detalle_comanda (id_comanda, id_producto, cantidad, precio_unitario, subtotal) VALUES (?, ?, 1, ?, ?)').run(otra.id_comanda, p.id_producto, p.precio_venta, p.precio_venta);
+    d5.prepare('INSERT INTO pago_comanda (id_comanda, id_metodo_pago, monto) VALUES (?, 1, ?)').run(otra.id_comanda, p.precio_venta);
+  }
   d5.prepare('DELETE FROM impresion_comanda_cajero WHERE id_comanda = ?').run(otra.id_comanda);
   d5.prepare('DELETE FROM impresion_comanda_mesero WHERE id_comanda = ?').run(otra.id_comanda);
   d5.close();

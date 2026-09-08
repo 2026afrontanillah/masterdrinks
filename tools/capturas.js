@@ -82,8 +82,8 @@ function crearPaginaPiloto() {
       var esAdmin = paso === 'admin' || paso === 'personal' || paso === 'catalogo' ||
         paso === 'productos' || paso === 'editar' || paso === 'stock' ||
         paso === 'promo-admin';
-      id('login-username').value = esAdmin ? 'admin_evento' : 'cajero_norte_1';
-      id('login-password').value = 'demo123';
+      id('login-username').value = esAdmin ? 'admin' : 'cajero_norte_1';
+      id('login-password').value = esAdmin ? '123' : 'demo123';
       q('#login-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       if (paso === 'pin' || paso === 'admin') return;
       if (paso === 'personal') {

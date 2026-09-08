@@ -129,7 +129,9 @@ async function cronometrar(veces, tarea) {
   // ---- 3. Cobrar --------------------------------------------------------
   // Lo que ocurre entre que el cajero pulsa CONFIRMAR y aparece el ticket.
   // Es el momento en que hay alguien esperando con el dinero en la mano.
-  const tresLineas = productos.slice(0, 3).map(p => ({
+  const productosSueltos = productos.filter(p => !p.requiere_acompanante && !p.es_acompanante);
+  const poolLineas = productosSueltos.length >= 3 ? productosSueltos : productos;
+  const tresLineas = poolLineas.slice(0, 3).map(p => ({
     id_producto: p.id_producto, cantidad: 2,
     precio_unitario: p.precio_venta, subtotal: p.precio_venta * 2
   }));
@@ -151,7 +153,7 @@ async function cronometrar(veces, tarea) {
   todoBien &= resumen('Cobrar (3 líneas, 6 unidades)', cobros, 150);
 
   // ---- 4. Cobrar un pedido grande ---------------------------------------
-  const diezLineas = productos.slice(0, 10).map(p => ({
+  const diezLineas = (poolLineas.length >= 10 ? poolLineas.slice(0, 10) : poolLineas).map(p => ({
     id_producto: p.id_producto, cantidad: 1,
     precio_unitario: p.precio_venta, subtotal: p.precio_venta
   }));

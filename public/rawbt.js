@@ -354,7 +354,7 @@ window.ThermalPrinter = (function () {
     const ops = [];
 
     ops.push(op(rule(w)));
-    ops.push(op('EUPHORIA', { align: 'center', bold: true, tall: true, wide: true, isLogo: true }));
+    ops.push(op(model.marca || 'MASTERDRINKS', { align: 'center', bold: true, tall: true, wide: true, isLogo: true }));
     if (model.barra) ops.push(op(model.barra, { align: 'center', bold: true }));
     // El evento sólo si lo hay: en el montaje de prueba está vacío y una línea
     // en blanco en la cabecera parece un fallo de impresión.
@@ -728,8 +728,26 @@ window.ThermalPrinter = (function () {
   }
 
   function openExternal(url) {
+    // Para esquemas rawbt:, un iframe oculto permite enviar la comanda al
+    // servicio de RawBT en segundo plano sin sacar al navegador del modo pantalla completa.
+    if (url.startsWith('rawbt:')) {
+      try {
+        let iframe = document.getElementById('rawbt-hidden-frame');
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = 'rawbt-hidden-frame';
+          iframe.style.display = 'none';
+          document.body.appendChild(iframe);
+        }
+        iframe.src = url;
+        return;
+      } catch (e) {
+        // Fallback a enlace si el iframe es bloqueado
+      }
+    }
+
     // Un <a> temporal en vez de location.href: al abrir una app externa el
-    // navegador no intenta descargar ni descargar la página actual.
+    // navegador no intenta descargar ni recargar la página actual.
     const a = document.createElement('a');
     a.href = url;
     a.rel = 'noopener';

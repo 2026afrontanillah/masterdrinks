@@ -40,6 +40,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // alta y lo que el cliente busca en su ticket.
     const refComanda = id => String(id);
 
+    function actualizarTituloBarra() {
+        const titleEl = document.getElementById('pos-event-title');
+        if (!titleEl) return;
+        const nombre = (currentUser && currentUser.nombre_barra) ||
+                       (configEvento && configEvento.barra) ||
+                       (instancia && instancia.nombre) ||
+                       '';
+        if (nombre) {
+            titleEl.textContent = nombre;
+        }
+    }
+
     async function cargarInstancia() {
         try {
             const res = await fetch('/api/instancia');
@@ -51,6 +63,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 el.classList.remove('hide');
             });
 
+            actualizarTituloBarra();
+
             // El título nombra el acceso directo cuando se hace "Añadir a
             // pantalla de inicio", y de paso rotula la pestaña del navegador
             // con la barra y el evento que se están atendiendo.
@@ -60,8 +74,19 @@ document.addEventListener('DOMContentLoaded', () => {
             // servidor al arrancar, esta tablet está corriendo código viejo de
             // su caché: hay que recargar la página.
             if (instancia.version) {
+                let v = String(instancia.version).trim();
+                // Si viene en el formato numérico previo DDMM-HHmm (ej. "0709-1354")
+                const m = v.match(/^(\d{2})(\d{2})-(\d{2})(\d{2})$/);
+                if (m) {
+                    const dia = m[1];
+                    const mes = m[2];
+                    const hora = m[3];
+                    const min = m[4];
+                    const anio = new Date().getFullYear();
+                    v = `${dia}/${mes}/${anio} - ${hora}:${min}`;
+                }
                 document.querySelectorAll('.version-num').forEach(el => {
-                    el.textContent = instancia.version;
+                    el.textContent = v;
                 });
             }
         } catch (err) {
@@ -92,7 +117,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Volver a la tablet es justo el momento en que el cajero mira el rótulo,
     // así que se comprueba en ese gesto y no se espera al turno del reloj.
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) revisarIdentidad();
+        if (!document.hidden) {
+            revisarIdentidad();
+            setTimeout(asegurarPantallaCompleta, 120);
+        }
     });
 
     // Y por si la tablet se queda encendida toda la noche sin que nadie la
@@ -137,6 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
         toast.classList.add('toast-out');
         setTimeout(() => toast.remove(), 220);
     }
+    window.notify = notify;
 
     // Dynamic wallpaper color extractor
     /**
@@ -189,6 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Reset forms
                 loginForm.reset();
+                setTimeout(asegurarPantallaCompleta, 100);
 
                 if (data.rol === 'CAJERO') {
                     // Show waiter security modal
@@ -249,8 +279,18 @@ document.addEventListener('DOMContentLoaded', () => {
         updatePinDots();
     }
 
+    const meseroPinCache = new Map();
+
     async function verifyWaiterPin(pin) {
         waiterError.classList.add('hide');
+
+        if (meseroPinCache.has(pin)) {
+            currentWaiter = meseroPinCache.get(pin);
+            clearPin();
+            waiterModal.classList.add('hide');
+            await showPOSView();
+            return;
+        }
         
         try {
             const response = await fetch('/api/login/mesero', {
@@ -269,9 +309,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (data.success) {
                 currentWaiter = data.mesero;
+                meseroPinCache.set(pin, data.mesero);
                 clearPin();
                 waiterModal.classList.add('hide');
-                showPOSView();
+                await showPOSView();
             } else {
                 // Shake visual dots on verification error
                 const dotsContainer = document.getElementById('pin-dots');
@@ -421,6 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
         posView.classList.add('hide');
         loginView.classList.remove('hide');
     }
+    window.cerrarSesionCajero = cerrarSesionCajero;
 
     const salidaOculta = document.getElementById('salida-oculta');
     if (salidaOculta) {
@@ -495,9 +537,15 @@ document.addEventListener('DOMContentLoaded', () => {
         posView.classList.remove('hide');
 
         // Setup headers
-        document.getElementById('pos-barra-name').textContent = currentUser.nombre_barra;
-        document.getElementById('pos-cajero-label').textContent = currentUser.nombre;
-        document.getElementById('pos-mesero-label').textContent = currentWaiter.nombre;
+        actualizarTituloBarra();
+        const barraName = (currentUser && currentUser.nombre_barra) || (configEvento && configEvento.barra) || (instancia && instancia.nombre) || 'Barra';
+        document.getElementById('pos-barra-name').textContent = barraName;
+        document.getElementById('pos-cajero-label').textContent = currentUser ? currentUser.nombre : '';
+        document.getElementById('pos-mesero-label').textContent = currentWaiter ? currentWaiter.nombre : '';
+        const chipName = document.getElementById('pos-user-chip-name');
+        if (chipName) {
+            chipName.textContent = currentWaiter ? currentWaiter.nombre : (currentUser ? currentUser.nombre : '');
+        }
 
         // Fetch menu
         await fetchProductsAndMenu();
@@ -509,6 +557,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('cart-observations').value = '';
         renderCart();
 
+        // Recalcular tamaño exacto de botones de categorías al mostrar la vista
+        recalcularBotonesCategorias();
+        if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+            window.requestAnimationFrame(recalcularBotonesCategorias);
+        }
+        setTimeout(recalcularBotonesCategorias, 50);
+        setTimeout(recalcularBotonesCategorias, 200);
+
         // Mientras haya caja abierta, las existencias se vigilan solas.
         iniciarSondeoStock();
     }
@@ -519,7 +575,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/productos');
             const data = await response.json();
             categories = data.categorias;
-            products = data.productos;
+            const catsOrdenadas = ordenarCategorias(categories);
+            const catRank = new Map(catsOrdenadas.map((c, i) => [c.id_categoria, i]));
+            products = (data.productos || []).sort((a, b) => {
+                const rankA = catRank.has(a.id_categoria) ? catRank.get(a.id_categoria) : 999;
+                const rankB = catRank.has(b.id_categoria) ? catRank.get(b.id_categoria) : 999;
+                if (rankA !== rankB) return rankA - rankB;
+                return (a.requiere_acompanante || 0) - (b.requiere_acompanante || 0) || a.id_producto - b.id_producto;
+            });
             promociones = data.promociones || [];
 
             renderCategories();
@@ -686,11 +749,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function ordenarCategorias(lista) {
-        // Orden solicitado: Botellas -> Sodas -> Cervezas -> Aguas -> Comida -> resto
+        // Orden solicitado: Botellas -> Cervezas -> Sodas -> Agua -> Comida -> resto
         const prioridades = [
             /^botella/i,
-            /^soda/i,
             /^cerveza/i,
+            /^soda/i,
             /^agua/i,
             /^comida/i
         ];
@@ -725,14 +788,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const catsOrdenadas = ordenarCategorias(categories);
 
-        // Si no hay categoría activa válida, seleccionar la primera por defecto (Botellas)
-        if (activeCategory !== 'promociones' && (!activeCategory || !catsOrdenadas.some(c => c.id_categoria === activeCategory))) {
-            activeCategory = catsOrdenadas.length > 0 ? catsOrdenadas[0].id_categoria : 'promociones';
+        // Si la categoría activa es nula o inválida, seleccionar la primera por defecto
+        const categoriaValida = catsOrdenadas.some(c => c.id_categoria === activeCategory) || activeCategory === 'promociones';
+        if (!categoriaValida) {
+            if (catsOrdenadas.length > 0) {
+                activeCategory = catsOrdenadas[0].id_categoria;
+            } else {
+                activeCategory = 'promociones';
+            }
         }
 
-        // Renderizar las categorías ordenadas: Botellas, Sodas, Cervezas, Aguas, Comida...
+        // 1. Renderizar categorías (sin el botón "TODOS")
         catsOrdenadas.forEach(cat => {
             const btn = document.createElement('button');
+            btn.type = 'button';
             btn.className = `category-btn ${activeCategory === cat.id_categoria ? 'active' : ''}`;
             btn.textContent = `${iconoCategoria(cat.nombre, cat.tipo)} ${cat.nombre}`;
             btn.addEventListener('click', () => {
@@ -744,8 +813,9 @@ document.addEventListener('DOMContentLoaded', () => {
             catList.appendChild(btn);
         });
 
-        // Promociones al final
+        // 2. Promociones al final
         const promoBtn = document.createElement('button');
+        promoBtn.type = 'button';
         promoBtn.className = `category-btn ${activeCategory === 'promociones' ? 'active' : ''}`;
         promoBtn.textContent = '🏷️ Promociones';
         promoBtn.addEventListener('click', () => {
@@ -755,6 +825,85 @@ document.addEventListener('DOMContentLoaded', () => {
             renderProducts();
         });
         catList.appendChild(promoBtn);
+        recalcularBotonesCategorias();
+        if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+            window.requestAnimationFrame(recalcularBotonesCategorias);
+        }
+    }
+
+    function recalcularBotonesCategorias() {
+        const catList = document.getElementById('category-list');
+        if (!catList) return;
+        const buttons = catList.querySelectorAll('.category-btn');
+        const n = buttons.length;
+        if (n === 0) return;
+
+        const availableWidth = catList.clientWidth;
+        if (availableWidth <= 0) return;
+
+        // Gap dinámico según ancho disponible y cantidad de botones
+        let gap = 6;
+        if (availableWidth < 650 || n >= 8) gap = 3;
+        else if (availableWidth < 900 || n >= 7) gap = 4;
+        else if (availableWidth < 1200) gap = 6;
+        else gap = 8;
+
+        const widthPerBtn = (availableWidth - (gap * (n - 1))) / n;
+
+        // Cálculo de tamaño de fuente, padding y espaciado de letras
+        let fontSize = 0.88;
+        let padX = 10;
+        let padY = 8;
+        let letterSpacing = '-0.2px';
+
+        if (widthPerBtn < 75) {
+            fontSize = 0.62;
+            padX = 3;
+            padY = 6;
+            letterSpacing = '-0.5px';
+        } else if (widthPerBtn < 90) {
+            fontSize = 0.68;
+            padX = 4;
+            padY = 7;
+            letterSpacing = '-0.4px';
+        } else if (widthPerBtn < 110) {
+            fontSize = 0.74;
+            padX = 5;
+            padY = 7;
+            letterSpacing = '-0.3px';
+        } else if (widthPerBtn < 130) {
+            fontSize = 0.79;
+            padX = 7;
+            padY = 8;
+            letterSpacing = '-0.25px';
+        }
+
+        catList.style.setProperty('--cat-gap', `${gap}px`);
+        catList.style.setProperty('--cat-pad-y', `${padY}px`);
+        catList.style.setProperty('--cat-pad-x', `${padX}px`);
+        catList.style.setProperty('--cat-font-size', `${fontSize}rem`);
+        catList.style.setProperty('--cat-letter-spacing', letterSpacing);
+
+        // Verificación y ajuste fino: si algún botón o el total sigue desbordando,
+        // reducir progresivamente la fuente y el padding para garantizar que NINGÚN botón se corte
+        let tries = 0;
+        while (tries < 10) {
+            let hasOverflow = false;
+            for (const btn of buttons) {
+                if (btn.scrollWidth > btn.clientWidth + 0.5) {
+                    hasOverflow = true;
+                    break;
+                }
+            }
+            if (!hasOverflow || (fontSize <= 0.54 && padX <= 2)) break;
+            if (fontSize > 0.54) fontSize -= 0.025;
+            if (padX > 2) padX -= 1;
+            if (gap > 2) gap -= 1;
+            catList.style.setProperty('--cat-gap', `${gap}px`);
+            catList.style.setProperty('--cat-font-size', `${fontSize.toFixed(3)}rem`);
+            catList.style.setProperty('--cat-pad-x', `${padX}px`);
+            tries++;
+        }
     }
 
     // Muestra la rejilla con forma de tarjetas mientras llega el catálogo, para
@@ -837,13 +986,41 @@ document.addEventListener('DOMContentLoaded', () => {
         // que contarlas todas, porque todas salen del mismo almacén.
         const unidades = unidadesEnCarrito(id_producto);
         const restante = p.stock_actual - unidades;
+        const displayStock = Math.max(0, restante);
+        const tope = p.stock_tope || p.stock_actual || 10;
+        const pct = tope > 0 ? Math.min(100, Math.max(0, Math.round((displayStock / tope) * 100))) : (displayStock > 0 ? 100 : 0);
+        const isOut = restante <= 0;
+        const statusClass = isOut ? 'out' : (pct <= 40 ? 'low' : 'normal');
+        const strokeColor = isOut ? '#e5e7eb' : (pct <= 40 ? '#ef4444' : '#facc15');
 
-        const stockEl = card.querySelector('.stock');
-        stockEl.textContent = restante <= 0 ? 'Agotado' : restante + ' u.';
-        stockEl.classList.toggle('low', restante > 0 && restante < 10);
+        card.classList.toggle('out-of-stock', isOut);
 
-        card.classList.toggle('out-of-stock', restante <= 0);
-        pintarBarraStock(card, p, restante);
+        const gaugeBar = card.querySelector('.gauge-bar');
+        if (gaugeBar) {
+            const pathLen = 216.77;
+            const offset = pathLen * (1 - (isOut ? 0 : pct / 100));
+            gaugeBar.style.strokeDashoffset = offset;
+            gaugeBar.style.stroke = strokeColor;
+        }
+
+        const stamp = card.querySelector('.stamp-agotado');
+        const cloud = card.querySelector('.gauge-cloud-bg');
+        const foto = card.querySelector('.product-foto, .emoji');
+        if (stamp) stamp.classList.toggle('hide', !isOut);
+        if (cloud) cloud.classList.toggle('hide', !isOut);
+        if (foto) foto.classList.toggle('foto-agotada', isOut);
+
+        const footer = card.querySelector('.stock-footer');
+        if (footer) {
+            footer.className = `stock-footer ${statusClass}`;
+            const labelLine = footer.querySelector('.stock-label-line');
+            if (labelLine) labelLine.textContent = `Stock: ${pct}%`;
+            const unitsLine = footer.querySelector('.stock-units-line');
+            if (unitsLine) {
+                unitsLine.className = `stock-units-line stock ${isOut ? 'out' : ''}`;
+                unitsLine.innerHTML = isOut ? '0 UNIDADES<span class="sr-only"> (Agotado)</span>' : `${displayStock} UDS`;
+            }
+        }
 
         let badge = card.querySelector('.cart-badge');
         if (unidades > 0) {
@@ -868,6 +1045,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // año— se entera de que hay una nueva.
     const urlFoto = p => (p && p.tiene_foto)
         ? '/api/producto/' + p.id_producto + '/foto?v=' + (p.foto_v || 0)
+        : '';
+
+    const urlFotoPromo = pr => (pr && pr.tiene_foto)
+        ? '/api/promocion/' + pr.id_promocion + '/foto?v=' + (pr.foto_v || 0)
         : '';
 
     // La cascada de entrada sólo se justifica al cargar el catálogo. Si se
@@ -924,9 +1105,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 return `<li>${c.cantidad} × ${escapeHtml(prod ? prod.nombre : 'producto')}</li>`;
             }).join('');
 
+            const foto = urlFotoPromo(pr);
+            const visual = foto
+                ? `<div class="promo-foto-wrap"><img class="promo-foto ${caben <= 0 ? 'foto-agotada' : ''}" src="${foto}" alt="${escapeHtml(pr.nombre)}" loading="lazy" decoding="async"></div>`
+                : '';
+
             card.innerHTML = `
                 <span class="promo-sello">Promoción</span>
-                <h3>${escapeHtml(pr.nombre)}</h3>
+                ${visual}
+                <h3 class="promo-titulo">${escapeHtml(pr.nombre)}</h3>
                 <ul class="promo-dentro">${dentro}</ul>
                 <div class="card-foot">
                     <div class="price">${Number(pr.precio).toFixed(2)} Bs.</div>
@@ -940,52 +1127,64 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         filtered.forEach((p, i) => {
-            // Todas las unidades comprometidas, no sólo la línea suelta: las
-            // que van de acompañante dentro de otra botella y las que van
-            // dentro de un combo salen del mismo almacén.
-            //
-            // Aquí se contaba a mano (cart.find(...).cantidad) mientras que
-            // actualizarTarjeta —el refresco de una sola tarjeta— usaba
-            // unidadesEnCarrito. Las dos vías decían cosas distintas: al tocar
-            // un producto el número bajaba bien, pero en cuanto algo obligaba a
-            // repintar la rejilla entera volvía a subir, y la tarjeta ofrecía
-            // existencias que ya estaban comprometidas.
             const unidades = unidadesEnCarrito(p.id_producto);
             const displayStock = p.stock_actual - unidades;
+            const visibleStock = Math.max(0, displayStock);
+            const tope = p.stock_tope || p.stock_actual || 10;
+            const pct = tope > 0 ? Math.min(100, Math.max(0, Math.round((visibleStock / tope) * 100))) : (visibleStock > 0 ? 100 : 0);
+            const isOut = displayStock <= 0;
+            const statusClass = isOut ? 'out' : (pct <= 40 ? 'low' : 'normal');
+            const strokeColor = isOut ? '#e5e7eb' : (pct <= 40 ? '#ef4444' : '#facc15');
+            const pathLen = 216.77;
+            const offset = pathLen * (1 - (isOut ? 0 : pct / 100));
 
             const card = document.createElement('div');
-            card.className = `product-card ${animar ? 'enter' : ''} ${displayStock <= 0 ? 'out-of-stock' : ''}`;
+            card.className = `product-card ${p.requiere_acompanante ? 'con-acomp' : ''} ${animar ? 'enter' : ''} ${isOut ? 'out-of-stock' : ''}`;
             card.dataset.id = p.id_producto;
             if (animar) {
-                // Cascada corta: más allá de las primeras filas ya no aporta nada
-                // y sólo retrasaría lo que el cajero quiere tocar.
                 card.style.animationDelay = Math.min(i, 11) * 25 + 'ms';
             }
 
-            // Con foto se ve la foto; sin ella, el dibujito de siempre. Buscar
-            // una botella concreta entre veinte es mucho más rápido por la
-            // imagen que leyendo nombres que empiezan todos igual.
-            //
-            // El data URI viene validado por el servidor (data:image/... y
-            // base64 a secas), así que no puede colar comillas ni salirse del
-            // atributo.
             const foto = urlFoto(p);
             const visual = foto
-                ? `<img class="product-foto" src="${foto}" alt="" loading="lazy" decoding="async">`
-                : `<span class="emoji">${emojiDe(p)}</span>`;
+                ? `<img class="product-foto ${isOut ? 'foto-agotada' : ''}" src="${foto}" alt="${escapeHtml(p.nombre)}" loading="lazy" decoding="async">`
+                : `<span class="emoji ${isOut ? 'foto-agotada' : ''}">${emojiDe(p)}</span>`;
 
-            const nivel = nivelDeStock(displayStock, p.stock_tope);
+            const precioTexto = Number(p.precio_venta) % 1 === 0 ? 'BS ' + Math.round(p.precio_venta) : 'BS ' + Number(p.precio_venta).toFixed(2);
 
             card.innerHTML = `
-                <div class="stock-barra ${nivel.clase}" aria-hidden="true"><span style="width: ${nivel.ancho}"></span></div>
-                ${visual}
-                <h3>${escapeHtml(p.nombre)}</h3>
-                <div class="card-foot">
-                    <div class="price">${p.precio_venta} Bs.</div>
-                    <div class="stock ${displayStock > 0 && displayStock < 10 ? 'low' : ''}">${displayStock <= 0 ? 'Agotado' : displayStock + ' u.'}</div>
+                <div class="gauge-wrapper">
+                    <svg class="gauge-svg" viewBox="0 0 120 120" width="130" height="130" aria-hidden="true">
+                        <path class="gauge-track" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="#e5e7eb" stroke-width="11" stroke-linecap="round" />
+                        <path class="gauge-bar" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="${strokeColor}" stroke-width="11" stroke-linecap="round" stroke-dasharray="${pathLen}" stroke-dashoffset="${offset}" />
+                    </svg>
+                    <div class="gauge-inner">
+                        <svg class="gauge-cloud-bg ${isOut ? '' : 'hide'}" viewBox="0 0 100 100" aria-hidden="true">
+                            <path d="M 86.0 50.0 Q 98.9 63.1 81.2 68.0 Q 85.8 85.8 68.0 81.2 Q 63.1 98.9 50.0 86.0 Q 36.9 98.9 32.0 81.2 Q 14.2 85.8 18.8 68.0 Q 1.1 63.1 14.0 50.0 Q 1.1 36.9 18.8 32.0 Q 14.2 14.2 32.0 18.8 Q 36.9 1.1 50.0 14.0 Q 63.1 1.1 68.0 18.8 Q 85.8 14.2 81.2 32.0 Q 98.9 36.9 86.0 50.0 Z" fill="#374151" />
+                        </svg>
+                        ${visual}
+                        <div class="stamp-agotado ${isOut ? '' : 'hide'}">AGOTADO</div>
+                    </div>
+                    <div class="card-price-pill price"><span class="price-val">${precioTexto}</span></div>
+                </div>
+                <div class="card-lower-zone">
+                    <svg class="card-mid-wave" viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden="true">
+                        <path d="M 0 20 L 0 10 C 60 2, 130 16, 200 8 L 200 20 Z" fill="#f1f5f9" />
+                    </svg>
+                    <div class="card-mid-body">
+                        <h3 class="product-card-title">${escapeHtml(p.nombre)}</h3>
+                    </div>
+                    <div class="stock-footer ${statusClass}">
+                        <svg class="stock-footer-wave" viewBox="0 0 200 30" preserveAspectRatio="none" aria-hidden="true">
+                            <path d="M 0 30 L 0 14 C 40 26, 75 4, 130 12 C 160 16, 185 8, 200 12 L 200 30 Z" fill="currentColor"></path>
+                        </svg>
+                        <div class="stock-footer-content">
+                            <div class="stock-label-line">Stock: ${pct}%</div>
+                            <div class="stock-units-line stock ${isOut ? 'out' : ''}">${isOut ? '0 UNIDADES<span class="sr-only"> (Agotado)</span>' : `${visibleStock} UDS`}</div>
+                        </div>
+                    </div>
                 </div>
                 ${unidades > 0 ? `<span class="cart-badge">${unidades}</span>` : ''}
-                ${displayStock <= 0 ? '<div class="out-of-stock-overlay"><span>Agotado</span></div>' : ''}
             `;
 
             // El listener va siempre: si el producto se agota por el carrito, es
@@ -1793,9 +1992,17 @@ document.addEventListener('DOMContentLoaded', () => {
         vacio.classList.toggle('hide', opciones.length > 0);
 
         opciones.forEach(p => {
-            const disponible = p.stock_actual - unidadesEnCarrito(p.id_producto);
+            const unidades = unidadesEnCarrito(p.id_producto);
+            const disponible = p.stock_actual - unidades;
+            const visibleStock = Math.max(0, disponible);
+            const tope = p.stock_tope || p.stock_actual || 10;
+            const pct = tope > 0 ? Math.min(100, Math.max(0, Math.round((visibleStock / tope) * 100))) : (visibleStock > 0 ? 100 : 0);
             const puestas = acompElegidos.get(p.id_producto) || 0;
             const agotado = disponible <= 0;
+            const statusClass = agotado ? 'out' : (pct <= 40 ? 'low' : 'normal');
+            const strokeColor = agotado ? '#e5e7eb' : (pct <= 40 ? '#ef4444' : '#facc15');
+            const pathLen = 216.77;
+            const offset = pathLen * (1 - (agotado ? 0 : pct / 100));
 
             const card = document.createElement('div');
             card.className = `product-card acomp-card-item ${agotado ? 'out-of-stock' : ''} ${puestas > 0 ? 'elegida' : ''}`;
@@ -1803,25 +2010,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const foto = urlFoto(p);
             const visual = foto
-                ? `<img class="product-foto" src="${foto}" alt="" loading="lazy" decoding="async">`
-                : `<span class="emoji">${emojiDe(p)}</span>`;
-
-            const nivel = nivelDeStock(disponible, p.stock_tope);
+                ? `<img class="product-foto ${agotado ? 'foto-agotada' : ''}" src="${foto}" alt="${escapeHtml(p.nombre)}" loading="lazy" decoding="async">`
+                : `<span class="emoji ${agotado ? 'foto-agotada' : ''}">${emojiDe(p)}</span>`;
 
             card.innerHTML = `
-                <div class="stock-barra ${nivel.clase}" aria-hidden="true"><span style="width: ${nivel.ancho}"></span></div>
-                ${visual}
-                <h3>${p.nombre}</h3>
-                <div class="card-foot">
-                    <div class="stock ${disponible > 0 && disponible < 10 ? 'low' : ''}">${agotado ? 'Agotado' : disponible + ' u.'}</div>
-                    <div class="acomp-control">
-                        <button type="button" class="cart-qty-btn acomp-btn-menos" aria-label="Menos" ${puestas === 0 ? 'disabled' : ''}>−</button>
-                        <span class="acomp-cantidad">${puestas}</span>
-                        <button type="button" class="cart-qty-btn acomp-btn-mas" aria-label="Más" ${puestas >= disponible || agotado ? 'disabled' : ''}>+</button>
+                <div class="gauge-wrapper">
+                    <svg class="gauge-svg" viewBox="0 0 120 120" width="120" height="120" aria-hidden="true">
+                        <path class="gauge-track" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="#e5e7eb" stroke-width="11" stroke-linecap="round" />
+                        <path class="gauge-bar" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="${strokeColor}" stroke-width="11" stroke-linecap="round" stroke-dasharray="${pathLen}" stroke-dashoffset="${offset}" />
+                    </svg>
+                    <div class="gauge-inner">
+                        <svg class="gauge-cloud-bg ${agotado ? '' : 'hide'}" viewBox="0 0 100 100" aria-hidden="true">
+                            <path d="M 86.0 50.0 Q 98.9 63.1 81.2 68.0 Q 85.8 85.8 68.0 81.2 Q 63.1 98.9 50.0 86.0 Q 36.9 98.9 32.0 81.2 Q 14.2 85.8 18.8 68.0 Q 1.1 63.1 14.0 50.0 Q 1.1 36.9 18.8 32.0 Q 14.2 14.2 32.0 18.8 Q 36.9 1.1 50.0 14.0 Q 63.1 1.1 68.0 18.8 Q 85.8 14.2 81.2 32.0 Q 98.9 36.9 86.0 50.0 Z" fill="#374151" />
+                        </svg>
+                        ${visual}
+                        <div class="stamp-agotado ${agotado ? '' : 'hide'}">AGOTADO</div>
+                    </div>
+                    <div class="card-price-pill price"><span class="price-val">INCLUIDO</span></div>
+                </div>
+                <div class="card-lower-zone">
+                    <svg class="card-mid-wave" viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden="true">
+                        <path d="M 0 20 L 0 10 C 60 2, 130 16, 200 8 L 200 20 Z" fill="#f1f5f9" />
+                    </svg>
+                    <div class="card-mid-body">
+                        <h3 class="product-card-title">${escapeHtml(p.nombre)}</h3>
+                    </div>
+                    <div class="stock-footer ${statusClass}">
+                        <svg class="stock-footer-wave" viewBox="0 0 200 30" preserveAspectRatio="none" aria-hidden="true">
+                            <path d="M 0 30 L 0 14 C 40 26, 75 4, 130 12 C 160 16, 185 8, 200 12 L 200 30 Z" fill="currentColor"></path>
+                        </svg>
+                        <div class="stock-footer-content">
+                            <div class="stock-label-line">Stock: ${pct}% · ${visibleStock} UDS</div>
+                            <div class="acomp-control">
+                                <button type="button" class="acomp-btn-circular acomp-btn-menos" aria-label="Menos" ${puestas === 0 ? 'disabled' : ''}>−</button>
+                                <span class="acomp-cantidad-pill">${puestas}</span>
+                                <button type="button" class="acomp-btn-circular acomp-btn-mas" aria-label="Más" ${puestas >= disponible || agotado ? 'disabled' : ''}>+</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 ${puestas > 0 ? `<span class="cart-badge">${puestas}</span>` : ''}
-                ${agotado ? '<div class="out-of-stock-overlay"><span>Agotado</span></div>' : ''}
             `;
 
             if (agotado) {
@@ -2422,16 +2650,89 @@ document.addEventListener('DOMContentLoaded', () => {
         payModal.classList.add('hide');
     }
 
-    /**
-     * Traduce lo elegido en el modal a la lista de pagos que espera el servidor.
-     * Devuelve null si algo no cuadra, dejando el motivo escrito en el modal.
-     */
+    // Quick cash buttons listeners
+    document.querySelectorAll('.quick-cash-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const val = btn.dataset.cash;
+            if (val === 'exacto') {
+                efectivoRecibido = orderTotal;
+                payRecibidoInput.value = '';
+            } else {
+                efectivoRecibido = parseFloat(val) || 0;
+                payRecibidoInput.value = val;
+            }
+            renderCambio(true);
+            mostrarErrorPago('');
+        });
+    });
+
+    // Split mixto panel listeners
+    const payMixtoEf = document.getElementById('pay-mixto-efectivo');
+    const payMixtoResto = document.getElementById('pay-mixto-resto');
+    const payMixtoMetodo = document.getElementById('pay-mixto-metodo');
+    const payMixtoRestoLabel = document.getElementById('pay-mixto-resto-label');
+
+    function actualizarLabelMixto() {
+        if (!payMixtoMetodo || !payMixtoRestoLabel) return;
+        const val = payMixtoMetodo.value;
+        const nombre = (METODOS[val] || {}).nombre || 'QR';
+        payMixtoRestoLabel.textContent = 'Falta en ' + (nombre.includes('QR') ? 'QR' : nombre);
+    }
+
+    if (payMixtoMetodo) {
+        payMixtoMetodo.addEventListener('change', actualizarLabelMixto);
+    }
+
+    if (payMixtoEf) {
+        payMixtoEf.addEventListener('input', () => {
+            const val = parseFloat(payMixtoEf.value);
+            if (isNaN(val)) {
+                if (payMixtoResto) payMixtoResto.value = orderTotal.toFixed(2);
+                mostrarErrorPago('');
+                return;
+            }
+            if (val > orderTotal) {
+                mostrarErrorPago('El efectivo supera el total.');
+            } else {
+                mostrarErrorPago('');
+                const falta = Math.max(0, round2(orderTotal - val));
+                if (payMixtoResto) payMixtoResto.value = falta.toFixed(2);
+            }
+        });
+    }
+
+    function seleccionarMetodo(metodo) {
+        metodoActivo = metodo;
+        mostrarErrorPago('');
+
+        document.querySelectorAll('.pay-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.metodo === String(metodo));
+        });
+
+        // Sólo el efectivo necesita cambio, sólo el mixto necesita repartir y
+        // sólo el QR necesita la referencia del comprobante.
+        document.getElementById('pay-panel-efectivo')
+            .classList.toggle('hide', metodo !== EFECTIVO);
+        document.getElementById('pay-panel-mixto')
+            .classList.toggle('hide', metodo !== 'mixto');
+        document.getElementById('pay-panel-qr')
+            .classList.toggle('hide', metodo !== QR);
+
+        if (metodo === 'mixto') {
+            if (payMixtoEf) {
+                payMixtoEf.value = '';
+                if (payMixtoResto) payMixtoResto.value = orderTotal.toFixed(2);
+                actualizarLabelMixto();
+            }
+            reiniciarLineasPago();
+        }
+        if (metodo === QR) prepararPanelQr();
+    }
+
+    // Traduce lo elegido en el modal a la lista de pagos que espera el servidor.
     function construirPagos() {
         const referencia = id => {
             const meta = METODOS[id] || { ref: 'PAGO' };
-            // Si el cajero anotó la referencia del comprobante, esa manda: es la
-            // que sirve para cuadrar con el extracto del banco. El número
-            // inventado sólo rellena cuando no hay ninguna.
             const anotada = document.getElementById('pay-referencia').value.trim();
             if (id === QR && anotada) return anotada.slice(0, 40);
             return meta.ref + '-' + Math.floor(100000 + Math.random() * 900000);
@@ -2444,10 +2745,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (metodoActivo !== 'mixto') {
-            // En efectivo, lo que entrega el cliente no puede quedarse corto.
-            // Antes este campo sólo servía para calcular el cambio: se podía
-            // escribir 20 en una venta de 50, cobrar, y quedaba registrada como
-            // pagada entera. El descuadre aparecía al cerrar la caja.
             if (metodoActivo === EFECTIVO && efectivoRecibido > 0 &&
                 efectivoRecibido + 0.005 < orderTotal) {
                 mostrarErrorPago('Con ' + efectivoRecibido.toFixed(2) + ' Bs. no alcanza: ' +
@@ -2457,8 +2754,20 @@ document.addEventListener('DOMContentLoaded', () => {
             return [pago(metodoActivo, orderTotal)];
         }
 
-        // Mixto: las líneas que el cajero haya escrito, en cualquier
-        // combinación de métodos. Sólo cuentan las que llevan importe.
+        // Mixto: soporte para campos split (efectivo + resto) y múltiples líneas
+        if (payMixtoEf && payMixtoEf.value !== '') {
+            const ef = round2(parseFloat(payMixtoEf.value) || 0);
+            if (ef > orderTotal + 0.005) {
+                mostrarErrorPago('El efectivo supera el total.');
+                return null;
+            }
+            const metodoResto = Number(payMixtoMetodo ? payMixtoMetodo.value : 3) || 3;
+            const resto = round2(orderTotal - ef);
+            if (ef > 0 && resto > 0) {
+                return [pago(EFECTIVO, ef), pago(metodoResto, resto)];
+            }
+        }
+
         const conImporte = lineasPago
             .map(l => ({ metodo: Number(l.metodo), monto: round2(parseFloat(l.monto) || 0) }))
             .filter(l => l.monto > 0);
@@ -2470,13 +2779,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const suma = round2(conImporte.reduce((t, l) => t + l.monto, 0));
         if (suma + 0.005 < orderTotal) {
-            mostrarErrorPago('Faltan ' + round2(orderTotal - suma).toFixed(2) +
-                ' Bs. para cubrir el total.');
+            mostrarErrorPago('Faltan ' + round2(orderTotal - suma).toFixed(2) + ' Bs. para cubrir el total.');
             return null;
         }
         if (suma > orderTotal + 0.005) {
-            mostrarErrorPago('Los pagos suman ' + suma.toFixed(2) + ' Bs. y el total es ' +
-                orderTotal.toFixed(2) + ' Bs.');
+            mostrarErrorPago('Los pagos suman ' + suma.toFixed(2) + ' Bs. y el total es ' + orderTotal.toFixed(2) + ' Bs.');
             return null;
         }
 
@@ -2825,12 +3132,21 @@ document.addEventListener('DOMContentLoaded', () => {
     function triggerThermalPrint(id_comanda, data, fromAdmin = false) {
         isReprinting = fromAdmin;
         currentTicket = buildTicketModel(id_comanda, data);
+        window.ultimoTicket = currentTicket;
 
-        // Lo que se saca desde el panel de administración es, por definición,
-        // una copia de una venta que ya se cobró: nace marcada.
         if (fromAdmin) {
             currentTicket.reimpresion = true;
             currentTicket.numeroCopia = 2;
+        }
+
+        const tCajero = document.getElementById('ticket-cajero-body');
+        const tMesero = document.getElementById('ticket-mesero-body');
+        if (tCajero || tMesero) {
+            try {
+                const tickets = ThermalPrinter.buildTickets(currentTicket);
+                if (tCajero && tickets.cajero) tCajero.textContent = ThermalPrinter.renderText(tickets.cajero) || '';
+                if (tMesero && tickets.mesero) tMesero.textContent = ThermalPrinter.renderText(tickets.mesero) || '';
+            } catch (e) {}
         }
 
         sendToPrinter();
@@ -2891,6 +3207,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function showAdminView() {
         detenerSondeoStock();
         cargarConfiguracion().then(pintarConfiguracion);
+        cargarInfoAficheAdmin();
         loginView.classList.add('hide');
         posView.classList.add('hide');
         adminView.classList.remove('hide');
@@ -2903,8 +3220,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelector('[data-tab="tab-dashboard"]').classList.add('active');
         document.querySelectorAll('.tab-content').forEach(tc => tc.classList.add('hide'));
         document.getElementById('tab-dashboard').classList.remove('hide');
-
         loadDashboardData();
+        loadPersonalSetup();
+        cargarPersonalAdmin();
+        loadCatalogSetup();
+        cargarCatalogoAdmin();
     }
 
     // Setup Admin Navigation Tab listeners
@@ -2917,8 +3237,11 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.tab-content').forEach(tc => tc.classList.add('hide'));
             document.getElementById(targetTab).classList.remove('hide');
 
+            const adminMain = document.querySelector('#admin-view .admin-main');
+            if (adminMain) adminMain.scrollTop = 0;
+
             // Load data according to tab
-            if (targetTab === 'tab-dashboard') loadDashboardData();
+            if (targetTab === 'tab-dashboard') { loadDashboardData(); cargarInfoAficheAdmin(); }
             else if (targetTab === 'tab-comandas') loadComandasData();
             else if (targetTab === 'tab-crear-producto') { loadCatalogSetup(); cargarCatalogoAdmin(); }
             else if (targetTab === 'tab-promociones') { cargarCatalogoAdmin().then(pintarSelectorProductos); cargarPromociones(); }
@@ -3037,7 +3360,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function cargarConfiguracion() {
         try {
             const res = await fetch('/api/configuracion');
-            if (res.ok) configEvento = await res.json();
+            if (res.ok) {
+                configEvento = await res.json();
+                actualizarTituloBarra();
+            }
         } catch (err) {
             console.warn('No se pudo leer la configuración del evento:', err);
         }
@@ -3288,6 +3614,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // La ficha de alta de cajeros enseña esta misma barra, así que
                 // se repinta aquí y no hace falta salir y volver a la pestaña.
                 pintarBarraDelCajero();
+                actualizarTituloBarra();
             }
             notify('Datos del evento guardados.', 'ok');
         } catch (err) {
@@ -3296,6 +3623,166 @@ document.addEventListener('DOMContentLoaded', () => {
             boton.disabled = false;
         }
     });
+
+    // ------------------------------------------------------------------
+    // GESTIÓN DEL AFICHE / CARTEL EN EL PANEL DE ADMINISTRACIÓN
+    // ------------------------------------------------------------------
+    async function cargarInfoAficheAdmin() {
+        const previewImg = document.getElementById('admin-afiche-preview');
+        const emptyBox = document.getElementById('admin-afiche-placeholder');
+        const nombreEl = document.getElementById('admin-afiche-nombre');
+        const resEl = document.getElementById('admin-afiche-res');
+        const pesoEl = document.getElementById('admin-afiche-peso');
+        const estadoEl = document.getElementById('admin-afiche-estado');
+        const btnQuitar = document.getElementById('btn-quitar-afiche');
+
+        if (!nombreEl) return;
+
+        try {
+            const res = await fetch('/api/admin/afiche');
+            const data = await res.json();
+
+            if (data.existe || data.exists) {
+                if (previewImg) {
+                    previewImg.src = data.url;
+                    previewImg.classList.remove('hide');
+                }
+                if (emptyBox) emptyBox.classList.add('hide');
+                if (nombreEl) nombreEl.textContent = data.archivo || data.nombre || 'afiche.jpg';
+                if (resEl) resEl.textContent = (data.ancho && data.alto) ? `${data.ancho} × ${data.alto} px` : '—';
+                if (pesoEl) pesoEl.textContent = data.tamano_kb ? `${data.tamano_kb} KB` : (data.peso ? `${Math.round(data.peso / 1024)} KB` : '—');
+                if (estadoEl) {
+                    estadoEl.textContent = 'ACTIVO';
+                    estadoEl.className = 'tag-status activo';
+                }
+                if (btnQuitar) btnQuitar.classList.remove('hide');
+            } else {
+                if (previewImg) {
+                    previewImg.src = '';
+                    previewImg.classList.add('hide');
+                }
+                if (emptyBox) emptyBox.classList.remove('hide');
+                if (nombreEl) nombreEl.textContent = 'Sin afiche cargado';
+                if (resEl) resEl.textContent = '—';
+                if (pesoEl) pesoEl.textContent = '—';
+                if (estadoEl) {
+                    estadoEl.textContent = 'SIN CARTEL';
+                    estadoEl.className = 'tag-status inactivo';
+                }
+                if (btnQuitar) btnQuitar.classList.add('hide');
+            }
+        } catch (err) {
+            console.warn('No se pudo leer la información del afiche:', err);
+        }
+    }
+
+    const btnCambiarAfiche = document.getElementById('btn-cambiar-afiche');
+    const inputSubirAfiche = document.getElementById('input-subir-afiche');
+    const btnQuitarAfiche = document.getElementById('btn-quitar-afiche');
+
+    if (btnCambiarAfiche && inputSubirAfiche) {
+        btnCambiarAfiche.addEventListener('click', () => {
+            inputSubirAfiche.click();
+        });
+
+        inputSubirAfiche.addEventListener('change', async (e) => {
+            const archivo = e.target.files && e.target.files[0];
+            if (!archivo) return;
+
+            if (!archivo.type.startsWith('image/')) {
+                notify('Por favor selecciona un archivo de imagen válido (JPG, PNG, WEBP).', 'warn');
+                inputSubirAfiche.value = '';
+                return;
+            }
+
+            const lector = new FileReader();
+            lector.onload = async () => {
+                const base64 = lector.result;
+                btnCambiarAfiche.disabled = true;
+                btnCambiarAfiche.textContent = '⏳ Subiendo...';
+
+                try {
+                    const res = await fetch('/api/admin/afiche', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            foto: base64,
+                            imagen: base64,
+                            nombre: archivo.name,
+                            nombre_archivo: archivo.name,
+                            id_admin: currentUser ? currentUser.id_admin : 1
+                        })
+                    });
+
+                    const data = await res.json();
+                    if (!res.ok || !data.success) {
+                        notify(data.message || 'No se pudo guardar el afiche.', 'error', 6000);
+                        return;
+                    }
+
+                    notify(data.message || 'Afiche actualizado correctamente.', 'ok');
+                    await cargarInfoAficheAdmin();
+
+                    // Actualizar el afiche y el tema de la pantalla de bloqueo en vivo
+                    const imgLock = document.getElementById('ficha-afiche-img');
+                    const vacio = document.getElementById('ficha-afiche-vacio');
+                    if (imgLock) {
+                        imgLock.src = '/afiche?t=' + Date.now();
+                        imgLock.classList.remove('hide');
+                        if (vacio) vacio.classList.add('hide');
+                    }
+                } catch (err) {
+                    console.error('Error al subir afiche:', err);
+                    notify('Error al conectar con el servidor para subir el afiche.', 'error');
+                } finally {
+                    btnCambiarAfiche.disabled = false;
+                    btnCambiarAfiche.textContent = '📷 Cambiar afiche';
+                    inputSubirAfiche.value = '';
+                }
+            };
+            lector.readAsDataURL(archivo);
+        });
+    }
+
+    if (btnQuitarAfiche) {
+        btnQuitarAfiche.addEventListener('click', async () => {
+            if (!confirm('¿Seguro que deseas quitar el afiche actual del evento?')) return;
+
+            btnQuitarAfiche.disabled = true;
+            try {
+                const res = await fetch('/api/admin/afiche', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_admin: currentUser ? currentUser.id_admin : 1 })
+                });
+
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    notify(data.message || 'No se pudo quitar el afiche.', 'error');
+                    return;
+                }
+
+                notify(data.message || 'Afiche eliminado.', 'ok');
+                await cargarInfoAficheAdmin();
+
+                // Actualizar pantalla de bloqueo
+                const imgLock = document.getElementById('ficha-afiche-img');
+                const vacio = document.getElementById('ficha-afiche-vacio');
+                if (imgLock) {
+                    imgLock.src = '';
+                    imgLock.classList.add('hide');
+                }
+                if (vacio) {
+                    vacio.textContent = configEvento.evento || 'MasterDrinks';
+                    vacio.classList.remove('hide');
+                }
+            } catch (err) {
+                notify('Sin conexión con el servidor.', 'error');
+            } finally {
+                btnQuitarAfiche.disabled = false;
+            }
+        });
+    }
 
     // ==========================================
     // REPORTE DE CIERRE EN PDF
@@ -3358,7 +3845,6 @@ document.addEventListener('DOMContentLoaded', () => {
             caja.innerHTML =
                 fila('Recaudado', d.resumen.recaudado.toFixed(2) + ' Bs.', 'destacada') +
                 fila('Comandas cobradas', String(d.resumen.validas)) +
-                fila('Ticket medio', d.resumen.ticket_medio.toFixed(2) + ' Bs.') +
                 fila('Unidades vendidas', String(d.resumen.unidades)) +
                 fila('Anuladas', d.resumen.anuladas + ' (' + d.resumen.importe_anulado.toFixed(2) + ' Bs.)',
                     d.resumen.anuladas > 0 ? 'alerta' : '') +
@@ -3416,74 +3902,153 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // TAB: COMANDAS / VOID LIST
+    let todasLasComandas = [];
+    let comandasFiltradas = [];
+    let paginaActualComandas = 1;
+    const COMANDAS_POR_PAGINA = 6;
+
     async function loadComandasData() {
         try {
             const response = await fetch('/api/admin/comandas');
-            const comandas = await response.json();
+            todasLasComandas = await response.json();
 
-            const container = document.getElementById('comandas-cards-container');
-            container.innerHTML = '';
+            // Actualizar chips de resumen superior
+            const completadas = todasLasComandas.filter(c => c.estado_pago !== 'ANULADO').length;
+            const anuladas = todasLasComandas.filter(c => c.estado_pago === 'ANULADO').length;
+            const chipComp = document.getElementById('chip-completadas');
+            const chipAnul = document.getElementById('chip-anuladas');
+            if (chipComp) chipComp.innerHTML = `<b>${completadas}</b> Completadas`;
+            if (chipAnul) chipAnul.innerHTML = `<b>${anuladas}</b> Anuladas`;
 
-            if (comandas.length === 0) {
-                container.innerHTML = `<div style="text-align: center; color: var(--text-secondary); width: 100%; grid-column: 1/-1; padding: 40px;">No hay comandas registradas</div>`;
-                return;
-            }
+            // Aplicar búsqueda previa si existe
+            const searchInput = document.getElementById('comanda-search-input');
+            const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+            filtrarComandas(query, false);
+        } catch (err) {
+            console.error("Error loading comandas:", err);
+        }
+    }
 
-            comandas.forEach(c => {
-                const detailsHtml = c.detalles.map(d => `<li><span class="qty">${d.cantidad}</span> x ${escapeHtml(d.nombre_producto)}</li>`).join('');
-                const paymentsHtml = c.pagos.map(p => `<li>${escapeHtml(p.nombre_metodo)}: ${parseFloat(p.monto).toFixed(2)} Bs.</li>`).join('');
-                const badgeClass = c.estado_pago === 'PAGADO' ? 'badge-pagado' : c.estado_pago === 'PENDIENTE' ? 'badge-pendiente' : 'badge-anulado';
+    function filtrarComandas(query, resetPage = true) {
+        if (resetPage) paginaActualComandas = 1;
+        if (!query) {
+            comandasFiltradas = [...todasLasComandas];
+        } else {
+            comandasFiltradas = todasLasComandas.filter(c => {
+                const id = c.id_comanda.toString();
+                const ref = refComanda(c.id_comanda).toLowerCase();
+                const mesero = (c.nombre_mesero || '').toLowerCase();
+                const cajero = (c.nombre_cajero || '').toLowerCase();
+                const barra = (c.nombre_barra || '').toLowerCase();
+                const prods = (c.detalles || []).some(d => (d.nombre_producto || '').toLowerCase().includes(query));
+                return id.includes(query) || ref.includes(query) || mesero.includes(query) || cajero.includes(query) || barra.includes(query) || prods;
+            });
+        }
+        renderComandas();
+    }
 
-                const card = document.createElement('div');
-                card.className = 'comanda-mini-card';
-                // Save attributes for local real-time search filtering
-                card.setAttribute('data-id', c.id_comanda.toString());
-                card.setAttribute('data-waiter', c.nombre_mesero);
+    function renderComandas() {
+        const container = document.getElementById('comandas-cards-container');
+        const pagContainer = document.getElementById('comandas-pagination');
+        if (!container) return;
+        container.innerHTML = '';
 
-                card.innerHTML = `
-                    <div>
-                        <div class="comanda-card-header">
-                            <span class="comanda-card-id">Comanda ${escapeHtml(refComanda(c.id_comanda))}</span>
-                            <span class="badge ${badgeClass}">${c.estado_pago}</span>
-                        </div>
-                        <div class="comanda-card-meta">
-                            <div><strong>Fecha:</strong> ${new Date(c.fecha_hora).toLocaleString()}</div>
-                            <div><strong>Barra:</strong> ${escapeHtml(c.nombre_barra)}</div>
-                            <div><strong>Cajero:</strong> ${escapeHtml(c.nombre_cajero)}</div>
-                            <div><strong>Mesero:</strong> ${escapeHtml(c.nombre_mesero)}</div>
-                        </div>
-                        <div class="comanda-card-items">
-                            <strong>Detalles:</strong>
-                            <ul style="margin-top: 6px;">
+        if (comandasFiltradas.length === 0) {
+            container.innerHTML = `<div style="text-align: center; color: var(--text-secondary); width: 100%; grid-column: 1/-1; padding: 40px; font-weight: 600;">No hay comandas registradas</div>`;
+            if (pagContainer) pagContainer.innerHTML = '';
+            return;
+        }
+
+        const totalItems = comandasFiltradas.length;
+        const totalPaginas = Math.ceil(totalItems / COMANDAS_POR_PAGINA) || 1;
+        if (paginaActualComandas > totalPaginas) paginaActualComandas = totalPaginas;
+        if (paginaActualComandas < 1) paginaActualComandas = 1;
+
+        const inicio = (paginaActualComandas - 1) * COMANDAS_POR_PAGINA;
+        const itemsPagina = comandasFiltradas.slice(inicio, inicio + COMANDAS_POR_PAGINA);
+
+        itemsPagina.forEach(c => {
+            const isAnulado = c.estado_pago === 'ANULADO';
+            const cardClass = isAnulado ? 'comanda-mini-card comanda-anulada' : 'comanda-mini-card comanda-vendida';
+
+            const fechaD = new Date(c.fecha_hora);
+            const dos = n => String(n).padStart(2, '0');
+            const fechaStr = isNaN(fechaD.getTime()) ? '' : `${dos(fechaD.getDate())}/${dos(fechaD.getMonth() + 1)}/${fechaD.getFullYear()} ${dos(fechaD.getHours())}:${dos(fechaD.getMinutes())}`;
+
+            const formatearMonto = n => {
+                const val = parseFloat(n) || 0;
+                return val.toLocaleString('es-BO', { maximumFractionDigits: 2 });
+            };
+
+            const detailsHtml = c.detalles.map(d => {
+                const subt = d.subtotal ? `<span class="comanda-item-sub">*(Bs ${formatearMonto(d.subtotal)})*</span>` : '';
+                return `<li class="comanda-item-line ${isAnulado ? 'tachado' : ''}">• ${d.cantidad}x ${escapeHtml(d.nombre_producto)} ${subt}</li>`;
+            }).join('');
+
+            const card = document.createElement('div');
+            card.className = cardClass;
+            card.setAttribute('data-id', c.id_comanda.toString());
+            card.setAttribute('data-waiter', c.nombre_mesero || '');
+
+            card.innerHTML = `
+                <div class="comanda-card-layout">
+                    <div class="comanda-card-main">
+                        <div>
+                            <div class="comanda-tags-row">
+                                <span class="comanda-pill">Comanda #${escapeHtml(refComanda(c.id_comanda))}</span>
+                                <span class="comanda-pill comanda-status-pill ${isAnulado ? 'badge-anulado' : 'badge-pagado'}">
+                                    ${isAnulado ? '✖ Anulada' : '✔ Vendida'}
+                                </span>
+                            </div>
+                            <div class="comanda-client-name">${escapeHtml(c.nombre_mesero || 'Mesero')}</div>
+                            <ul class="comanda-products-list">
                                 ${detailsHtml}
                             </ul>
+                            ${isAnulado && c.motivo_anulacion ? `<div class="comanda-void-reason">Motivo: ${escapeHtml(c.motivo_anulacion)}</div>` : ''}
+                            ${c.observaciones ? `<div class="comanda-obs-text">Obs: ${escapeHtml(c.observaciones)}</div>` : ''}
                         </div>
-                        <div class="comanda-card-payments">
-                            <strong>Pagos:</strong>
-                            <ul style="margin-top: 4px;">
-                                ${paymentsHtml}
-                            </ul>
-                            ${c.estado_pago === 'ANULADO' ? `<div style="color: var(--danger); font-size: 0.75rem; margin-top: 8px; font-weight: bold;">Motivo: ${escapeHtml(c.motivo_anulacion)}</div>` : ''}
-                            ${c.observaciones ? `<div style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 6px; font-style: italic;">Obs: ${escapeHtml(c.observaciones)}</div>` : ''}
-                        </div>
-                    </div>
-                    <div class="comanda-card-footer">
-                        <span class="comanda-card-total">${parseFloat(c.total).toFixed(2)} Bs.</span>
-                        <div class="comanda-card-actions">
-                            <button class="secondary-btn print-card-btn" style="padding: 6px 12px; font-size: 0.8rem;">🖨️ Reimprimir</button>
-                            ${c.estado_pago !== 'ANULADO' ? `<button class="danger-btn void-card-btn" style="padding: 6px 12px; font-size: 0.8rem;">Anular</button>` : ''}
+                        <div>
+                            <div class="comanda-timestamp">${fechaStr}</div>
+                            <div class="comanda-price-wrap">
+                                <span class="comanda-price-capsule ${isAnulado ? 'tachado' : ''}">
+                                    Bs ${formatearMonto(c.total)}
+                                </span>
+                            </div>
                         </div>
                     </div>
-                `;
+                    <div class="comanda-card-actions-side">
+                        <button type="button" class="action-circle-btn print-card-btn" title="Reimprimir comanda" aria-label="Reimprimir">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                                <circle cx="12" cy="12" r="3.2" fill="#000000"/>
+                            </svg>
+                        </button>
+                        ${!isAnulado ? `
+                        <button type="button" class="action-circle-btn danger-circle-btn void-card-btn" title="Anular comanda" aria-label="Anular">
+                            <svg width="16" height="16" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="9.5" fill="#000000"/>
+                                <line x1="8.5" y1="8.5" x2="15.5" y2="15.5" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+                                <line x1="15.5" y1="8.5" x2="8.5" y2="15.5" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
 
-                // Add button click listeners
-                if (c.estado_pago !== 'ANULADO') {
-                    card.querySelector('.void-card-btn').addEventListener('click', () => {
+            // Button click listeners
+            if (!isAnulado) {
+                const voidBtn = card.querySelector('.void-card-btn');
+                if (voidBtn) {
+                    voidBtn.addEventListener('click', () => {
                         openVoidModal(c.id_comanda);
                     });
                 }
+            }
 
-                card.querySelector('.print-card-btn').addEventListener('click', () => {
+            const printBtn = card.querySelector('.print-card-btn');
+            if (printBtn) {
+                printBtn.addEventListener('click', () => {
                     const reprintData = {
                         total: parseFloat(c.total),
                         observaciones: c.observaciones,
@@ -3505,39 +4070,141 @@ document.addEventListener('DOMContentLoaded', () => {
                     };
                     triggerThermalPrint(c.id_comanda, reprintData, true);
                 });
-
-                container.appendChild(card);
-            });
-
-            // Trigger search filter refresh if input has content
-            const searchInput = document.getElementById('comanda-search-input');
-            if (searchInput && searchInput.value) {
-                searchInput.dispatchEvent(new Event('input'));
             }
-        } catch (err) {
-            console.error("Error loading comandas:", err);
-        }
+
+            container.appendChild(card);
+        });
+
+        renderPaginacionComandas(totalPaginas, totalItems);
     }
 
-    // Real-time local search filter for comandas (restricted to Comanda ID or Waiter Name)
-    document.getElementById('comanda-search-input').addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase().trim();
-        const cards = document.querySelectorAll('.comanda-mini-card');
+    function renderPaginacionComandas(totalPaginas, totalItems) {
+        const pagContainer = document.getElementById('comandas-pagination');
+        if (!pagContainer) return;
+        if (totalPaginas <= 1 && totalItems <= COMANDAS_POR_PAGINA) {
+            pagContainer.innerHTML = '';
+            return;
+        }
 
-        cards.forEach(card => {
-            const id = card.getAttribute('data-id').toLowerCase();
-            const waiter = card.getAttribute('data-waiter').toLowerCase();
+        let html = `
+            <button type="button" class="comanda-pag-btn btn-prev" ${paginaActualComandas === 1 ? 'disabled' : ''}>
+                ◀ Anterior
+            </button>
+        `;
 
-            const idMatch = id.includes(query) || id.replace('#', '').includes(query);
-            const waiterMatch = waiter.includes(query);
+        const maxBotones = 5;
+        let startPage = Math.max(1, paginaActualComandas - Math.floor(maxBotones / 2));
+        let endPage = Math.min(totalPaginas, startPage + maxBotones - 1);
+        if (endPage - startPage + 1 < maxBotones) {
+            startPage = Math.max(1, endPage - maxBotones + 1);
+        }
 
-            if (idMatch || waiterMatch) {
-                card.classList.remove('hide');
-            } else {
-                card.classList.add('hide');
+        if (startPage > 1) {
+            html += `<button type="button" class="comanda-pag-btn btn-num" data-page="1">1</button>`;
+            if (startPage > 2) html += `<span class="comanda-pag-info">...</span>`;
+        }
+
+        for (let p = startPage; p <= endPage; p++) {
+            html += `<button type="button" class="comanda-pag-btn btn-num ${p === paginaActualComandas ? 'active' : ''}" data-page="${p}">${p}</button>`;
+        }
+
+        if (endPage < totalPaginas) {
+            if (endPage < totalPaginas - 1) html += `<span class="comanda-pag-info">...</span>`;
+            html += `<button type="button" class="comanda-pag-btn btn-num" data-page="${totalPaginas}">${totalPaginas}</button>`;
+        }
+
+        html += `
+            <button type="button" class="comanda-pag-btn btn-next" ${paginaActualComandas === totalPaginas ? 'disabled' : ''}>
+                Siguiente ▶
+            </button>
+            <span class="comanda-pag-info">${totalItems} comanda${totalItems === 1 ? '' : 's'} (pág. ${paginaActualComandas}/${totalPaginas})</span>
+        `;
+
+        pagContainer.innerHTML = html;
+
+        const prevBtn = pagContainer.querySelector('.btn-prev');
+        if (prevBtn) {
+            prevBtn.addEventListener('click', () => {
+                if (paginaActualComandas > 1) {
+                    paginaActualComandas--;
+                    renderComandas();
+                }
+            });
+        }
+
+        const nextBtn = pagContainer.querySelector('.btn-next');
+        if (nextBtn) {
+            nextBtn.addEventListener('click', () => {
+                if (paginaActualComandas < totalPaginas) {
+                    paginaActualComandas++;
+                    renderComandas();
+                }
+            });
+        }
+
+        pagContainer.querySelectorAll('.btn-num').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const p = parseInt(btn.getAttribute('data-page'), 10);
+                if (p && p !== paginaActualComandas) {
+                    paginaActualComandas = p;
+                    renderComandas();
+                }
+            });
+        });
+    }
+
+    // Real-time local search filter for comandas
+    const comandaSearchInput = document.getElementById('comanda-search-input');
+    if (comandaSearchInput) {
+        comandaSearchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            filtrarComandas(query, true);
+        });
+    }
+
+    // Descarga de reporte de comandas en PDF
+    const btnComandasPdf = document.getElementById('comandas-quick-pdf');
+    if (btnComandasPdf) {
+        btnComandasPdf.addEventListener('click', async () => {
+            const labelSpan = btnComandasPdf.querySelector('span');
+            const originalText = labelSpan ? labelSpan.textContent : 'PDF';
+            btnComandasPdf.disabled = true;
+            btnComandasPdf.classList.add('is-busy');
+            if (labelSpan) labelSpan.textContent = '...';
+
+            try {
+                const searchInput = document.getElementById('comanda-search-input');
+                const query = searchInput ? searchInput.value.trim() : '';
+                const url = '/api/admin/comandas.pdf' + (query ? '?q=' + encodeURIComponent(query) : '');
+
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('respuesta ' + res.status);
+
+                const blob = await res.blob();
+                const cabecera = res.headers.get('Content-Disposition') || '';
+                const coincide = cabecera.match(/filename="([^"]+)"/);
+                const nombre = coincide ? coincide[1] : 'Reporte_Comandas_MasterDrinks.pdf';
+
+                const blobUrl = URL.createObjectURL(blob);
+                const enlace = document.createElement('a');
+                enlace.href = blobUrl;
+                enlace.download = nombre;
+                document.body.appendChild(enlace);
+                enlace.click();
+                enlace.remove();
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 20000);
+
+                notify('Reporte de comandas descargado: ' + nombre, 'ok', 6000);
+            } catch (err) {
+                console.error('Error al descargar el PDF de comandas:', err);
+                notify('No se pudo generar el PDF de comandas.', 'error');
+            } finally {
+                btnComandasPdf.disabled = false;
+                btnComandasPdf.classList.remove('is-busy');
+                if (labelSpan) labelSpan.textContent = originalText;
             }
         });
-    });
+    }
 
     // Global reference for onclick void
     window.openVoidModal = function(id_comanda) {
@@ -4208,7 +4875,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             notify(data.message, 'ok');
-            cargarCatalogoAdmin();
+            await Promise.all([cargarCatalogoAdmin(), fetchProductsAndMenu()]);
         } catch (err) {
             notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
         }
@@ -4246,17 +4913,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function guardarEdicionProducto() {
         if (!productoEditando) return;
+        const idProd = productoEditando.id_producto;
         const boton = document.getElementById('editar-guardar');
         boton.disabled = true;
+
+        const nuevoPrecio = Number(document.getElementById('editar-precio').value);
+        const nuevoNombre = document.getElementById('editar-nombre').value;
+        const nuevaCat = document.getElementById('editar-categoria').value;
+        const nuevaDesc = document.getElementById('editar-descripcion').value;
+
+        cerrarEditarProducto();
+        if (catalogoAdmin && catalogoAdmin.productos) {
+            const p = catalogoAdmin.productos.find(x => x.id_producto === idProd);
+            if (p) {
+                p.precio_venta = nuevoPrecio;
+                p.nombre = nuevoNombre;
+                p.id_categoria = Number(nuevaCat);
+                p.descripcion = nuevaDesc;
+            }
+        }
+        pintarProductosAdmin();
+
         try {
-            const res = await fetch('/api/admin/productos/' + productoEditando.id_producto, {
+            const res = await fetch('/api/admin/productos/' + idProd, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    nombre: document.getElementById('editar-nombre').value,
-                    descripcion: document.getElementById('editar-descripcion').value,
-                    precio_venta: document.getElementById('editar-precio').value,
-                    id_categoria: document.getElementById('editar-categoria').value,
+                    nombre: nuevoNombre,
+                    descripcion: nuevaDesc,
+                    precio_venta: nuevoPrecio,
+                    id_categoria: nuevaCat,
                     id_admin: currentUser ? currentUser.id_admin : 1
                 })
             });
@@ -4266,12 +4952,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             notify(data.message, 'ok');
-            cerrarEditarProducto();
-            cargarCatalogoAdmin();
-            loadCatalogSetup();
-            // La caja tiene que enterarse del precio nuevo antes de la siguiente
-            // venta, o seguiría cobrando el viejo hasta recargar.
-            fetchProductsAndMenu();
+            await Promise.all([cargarCatalogoAdmin(), loadCatalogSetup(), fetchProductsAndMenu()]);
         } catch (err) {
             notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
         } finally {
@@ -4284,6 +4965,7 @@ document.addEventListener('DOMContentLoaded', () => {
     editarModal.addEventListener('click', e => {
         if (e.target === editarModal) cerrarEditarProducto();
     });
+
 
     // ---- Personal -----------------------------------------------------------
     let personalAdmin = { cajeros: [], meseros: [] };
@@ -4418,25 +5100,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const usuario = document.getElementById('caj-user').value;
         const password = document.getElementById('caj-pass').value;
 
+        document.getElementById('form-create-cajero').reset();
+
+        const tempCajero = {
+            id_cajero: Date.now(),
+            nombre: nombre,
+            usuario: usuario,
+            meseros: 0,
+            comandas: 0,
+            activo: 1
+        };
+        if (!personalAdmin) personalAdmin = { cajeros: [], meseros: [] };
+        if (!personalAdmin.cajeros) personalAdmin.cajeros = [];
+        personalAdmin.cajeros.push(tempCajero);
+        pintarCajeros();
+
         try {
             const response = await fetch('/api/admin/cajeros', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nombre, usuario, password, id_admin: currentUser.id_admin, id_evento: currentUser.id_evento })
+                body: JSON.stringify({ nombre, usuario, password, id_admin: currentUser ? currentUser.id_admin : 1, id_evento: currentUser ? currentUser.id_evento : 1 })
             });
             const data = await response.json();
 
             if (data.success) {
                 notify('Cajero registrado.', 'ok');
-                document.getElementById('form-create-cajero').reset();
-                // Los dos: loadPersonalSetup rellena los desplegables y
-                // cargarPersonalAdmin repinta las listas. Antes sólo se llamaba
-                // al primero, así que el cajero recién creado no aparecía abajo
-                // hasta recargar la página.
-                loadPersonalSetup();
-                cargarPersonalAdmin();
+                tempCajero.id_cajero = data.id_cajero;
+                await Promise.all([loadPersonalSetup(), cargarPersonalAdmin()]);
             } else {
                 notify(data.message || 'No se pudo completar la operación.', 'error');
+                const idx = personalAdmin.cajeros.indexOf(tempCajero);
+                if (idx !== -1) { personalAdmin.cajeros.splice(idx, 1); pintarCajeros(); }
             }
         } catch (err) {
             notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
@@ -4451,30 +5145,46 @@ document.addEventListener('DOMContentLoaded', () => {
         const usuario = document.getElementById('mes-user').value;
         const password = document.getElementById('mes-pass').value;
 
+        ['mes-name', 'mes-user', 'mes-pass'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+        const nameEl = document.getElementById('mes-name');
+        if (nameEl) nameEl.focus();
+
+        const sel = document.getElementById('mes-cajero');
+        const cajeroNombre = sel ? (sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.replace(/\s*\([^)]*\)/, '') : 'Cajero') : 'Cajero';
+        const tempMesero = {
+            id_mesero: Date.now(),
+            id_cajero: Number(id_cajero),
+            cajero: cajeroNombre,
+            nombre: nombre,
+            usuario: usuario,
+            pin: password,
+            comandas: 0,
+            activo: 1
+        };
+        if (!personalAdmin) personalAdmin = { cajeros: [], meseros: [] };
+        if (!personalAdmin.meseros) personalAdmin.meseros = [];
+        personalAdmin.meseros.push(tempMesero);
+        pintarMeseros();
+
         try {
             const response = await fetch('/api/admin/meseros', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id_cajero, nombre, usuario, password, id_admin: currentUser.id_admin, id_evento: currentUser.id_evento })
+                body: JSON.stringify({ id_cajero, nombre, usuario, password, id_admin: currentUser ? currentUser.id_admin : 1, id_evento: currentUser ? currentUser.id_evento : 1 })
             });
             const data = await response.json();
 
             if (data.success) {
                 notify('Mesero registrado.', 'ok');
-
-                // reset() borraría también el cajero elegido, y dar de alta
-                // quince meseros del mismo cajero obligaría a volver a
-                // seleccionarlo quince veces. Se limpian sólo los campos que
-                // cambian de una persona a la siguiente.
-                ['mes-name', 'mes-user', 'mes-pass'].forEach(id => {
-                    document.getElementById(id).value = '';
-                });
-                document.getElementById('mes-name').focus();
-
-                loadPersonalSetup(id_cajero);
-                cargarPersonalAdmin();
+                tempMesero.id_mesero = data.id_mesero;
+                await Promise.all([loadPersonalSetup(id_cajero), cargarPersonalAdmin()]);
             } else {
                 notify(data.message || 'No se pudo completar la operación.', 'error');
+                const idx = personalAdmin.meseros.indexOf(tempMesero);
+                if (idx !== -1) { personalAdmin.meseros.splice(idx, 1); pintarMeseros(); }
             }
         } catch (err) {
             notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
@@ -4772,41 +5482,67 @@ document.addEventListener('DOMContentLoaded', () => {
             const tieneFoto = Boolean(p.tiene_foto);
             const fotoSrc = urlFoto(p);
 
-            const stockClase = p.stock_actual > 10 ? 'in-stock' : (p.stock_actual > 0 ? 'low-stock' : 'out-stock');
-            const stockEtiqueta = p.stock_actual > 0 ? `${p.stock_actual} uds` : '0 uds (Agotado)';
+            const visibleStock = Math.max(0, p.stock_actual);
+            const tope = p.stock_tope || p.stock_actual || 10;
+            const pct = tope > 0 ? Math.min(100, Math.max(0, Math.round((visibleStock / tope) * 100))) : (visibleStock > 0 ? 100 : 0);
+            const isOut = visibleStock <= 0;
+            const statusClass = isOut ? 'out' : (pct <= 40 ? 'low' : 'normal');
+            const strokeColor = isOut ? '#e5e7eb' : (pct <= 40 ? '#ef4444' : '#facc15');
+            const pathLen = 216.77;
+            const offset = pathLen * (1 - (isOut ? 0 : pct / 100));
+
+            const visual = tieneFoto
+                ? `<img class="product-foto ${isOut ? 'foto-agotada' : ''}" src="${fotoSrc}" alt="${escapeHtml(p.nombre)}" loading="lazy" decoding="async">`
+                : `<span class="emoji ${isOut ? 'foto-agotada' : ''}">${emojiDe(p)}</span>`;
+
+            const precioTexto = Number(p.precio_venta) % 1 === 0 ? 'BS ' + Math.round(p.precio_venta) : 'BS ' + Number(p.precio_venta).toFixed(2);
 
             card.innerHTML = `
-                <div class="admin-stock-card-img-wrap">
-                    <span class="admin-stock-cat-tag">${escapeHtml(catNombre)}</span>
-                    ${tieneFoto
-                        ? `<img src="${fotoSrc}" alt="${escapeHtml(p.nombre)}" class="admin-stock-card-img" loading="lazy">`
-                        : `<span class="admin-stock-card-icon-fallback">${emojiDe(p)}</span>`
-                    }
+                <span class="admin-stock-cat-tag">${escapeHtml(catNombre)}</span>
+                <div class="gauge-wrapper" style="margin-top: 8px;">
+                    <svg class="gauge-svg" viewBox="0 0 120 120" width="130" height="130" aria-hidden="true">
+                        <path class="gauge-track" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="#e5e7eb" stroke-width="11" stroke-linecap="round" />
+                        <path class="gauge-bar" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="${strokeColor}" stroke-width="11" stroke-linecap="round" stroke-dasharray="${pathLen}" stroke-dashoffset="${offset}" />
+                    </svg>
+                    <div class="gauge-inner">
+                        <svg class="gauge-cloud-bg ${isOut ? '' : 'hide'}" viewBox="0 0 100 100" aria-hidden="true">
+                            <path d="M 86.0 50.0 Q 98.9 63.1 81.2 68.0 Q 85.8 85.8 68.0 81.2 Q 63.1 98.9 50.0 86.0 Q 36.9 98.9 32.0 81.2 Q 14.2 85.8 18.8 68.0 Q 1.1 63.1 14.0 50.0 Q 1.1 36.9 18.8 32.0 Q 14.2 14.2 32.0 18.8 Q 36.9 1.1 50.0 14.0 Q 63.1 1.1 68.0 18.8 Q 85.8 14.2 81.2 32.0 Q 98.9 36.9 86.0 50.0 Z" fill="#374151" />
+                        </svg>
+                        ${visual}
+                        <div class="stamp-agotado ${isOut ? '' : 'hide'}">AGOTADO</div>
+                    </div>
+                    <div class="card-price-pill price"><span class="price-val">${precioTexto}</span></div>
                 </div>
-                <div class="admin-stock-card-body">
-                    <div class="admin-stock-card-info">
-                        <h3 class="admin-stock-card-title">${escapeHtml(p.nombre)}</h3>
-                        <div class="admin-stock-pill-row">
-                            <span class="admin-stock-pill ${stockClase}">
-                                <span>📦</span> <strong>${stockEtiqueta}</strong>
-                            </span>
-                            <span class="admin-stock-price-tag">${Number(p.precio_venta).toFixed(2)} Bs.</span>
+                <div class="card-lower-zone">
+                    <svg class="card-mid-wave" viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden="true">
+                        <path d="M 0 20 L 0 10 C 60 2, 130 16, 200 8 L 200 20 Z" fill="#f1f5f9" />
+                    </svg>
+                    <div class="card-mid-body">
+                        <h3 class="product-card-title">${escapeHtml(p.nombre)}</h3>
+                    </div>
+                    <div class="stock-footer ${statusClass}">
+                        <svg class="stock-footer-wave" viewBox="0 0 200 30" preserveAspectRatio="none" aria-hidden="true">
+                            <path d="M 0 30 L 0 14 C 40 26, 75 4, 130 12 C 160 16, 185 8, 200 12 L 200 30 Z" fill="currentColor"></path>
+                        </svg>
+                        <div class="stock-footer-content">
+                            <div class="stock-label-line">Stock: ${pct}%</div>
+                            <div class="stock-units-line stock ${isOut ? 'out' : ''}">${isOut ? '0 UDS' : `${visibleStock} UDS`}</div>
                         </div>
                     </div>
-                    <div class="admin-stock-actions-grid">
-                        <button type="button" class="stock-action-btn entrada" data-id="${p.id_producto}">
-                            <span>＋</span> Entrada
-                        </button>
-                        <button type="button" class="stock-action-btn salida" data-id="${p.id_producto}">
-                            <span>−</span> Salida
-                        </button>
-                        <button type="button" class="stock-action-btn ajuste" data-id="${p.id_producto}">
-                            <span>🔄</span> Ajuste
-                        </button>
-                        <button type="button" class="stock-action-btn historial" data-id="${p.id_producto}">
-                            <span>🕒</span> Historial
-                        </button>
-                    </div>
+                </div>
+                <div class="admin-stock-actions-grid">
+                    <button type="button" class="stock-action-btn entrada" data-id="${p.id_producto}" title="Ingresar stock">
+                        <span>＋</span> Entrada
+                    </button>
+                    <button type="button" class="stock-action-btn salida" data-id="${p.id_producto}" title="Registrar salida o merma">
+                        <span>−</span> Salida
+                    </button>
+                    <button type="button" class="stock-action-btn ajuste" data-id="${p.id_producto}" title="Ajuste manual de stock">
+                        <span>🔄</span> Ajuste
+                    </button>
+                    <button type="button" class="stock-action-btn historial" data-id="${p.id_producto}" title="Ver historial de movimientos">
+                        <span>🕒</span> Historial
+                    </button>
                 </div>
             `;
 
@@ -5223,7 +5959,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const w = settings.width;
         const ops = [];
 
-        ops.push(H.op('*** EUPHORIA ***', { align: 'center', bold: true, tall: true, isLogo: true }));
+        ops.push(H.op('*** MASTERDRINKS ***', { align: 'center', bold: true, tall: true, isLogo: true }));
         ops.push(H.op('REPORTE DE INVENTARIO', { align: 'center', bold: true }));
         ops.push(H.op(new Date().toLocaleString(), { align: 'center' }));
         ops.push(H.op(H.divider(w)));
@@ -5462,9 +6198,95 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // ---- Foto en el formulario de promociones -------------------------------
+    let fotoNuevaPromo = null;
+
+    const promoFotoInput = document.getElementById('promo-foto');
+    const promoFotoVista = document.getElementById('promo-foto-vista');
+    const promoFotoQuitar = document.getElementById('promo-foto-quitar');
+
+    if (promoFotoInput) {
+        promoFotoInput.addEventListener('change', async e => {
+            const archivo = e.target.files && e.target.files[0];
+            if (!archivo) return;
+            try {
+                fotoNuevaPromo = await reducirImagen(archivo);
+                pintarFoto(promoFotoVista, fotoNuevaPromo);
+                if (promoFotoQuitar) promoFotoQuitar.classList.remove('hide');
+            } catch (err) {
+                notify(err.message || 'No se pudo usar esa imagen.', 'error');
+                promoFotoInput.value = '';
+            }
+        });
+
+        if (promoFotoQuitar) {
+            promoFotoQuitar.addEventListener('click', () => {
+                fotoNuevaPromo = '';
+                promoFotoInput.value = '';
+                pintarFoto(promoFotoVista, null);
+                promoFotoQuitar.classList.add('hide');
+            });
+        }
+    }
+
+    function limpiarFotoPromoForm() {
+        fotoNuevaPromo = null;
+        if (promoFotoInput) promoFotoInput.value = '';
+        pintarFoto(promoFotoVista, null);
+        if (promoFotoQuitar) promoFotoQuitar.classList.add('hide');
+    }
+
+    // Cambiar la foto de una promoción desde la lista
+    const fotoPromoSuelta = document.createElement('input');
+    fotoPromoSuelta.type = 'file';
+    fotoPromoSuelta.accept = 'image/png,image/jpeg,image/webp';
+    fotoPromoSuelta.className = 'foto-input';
+    document.body.appendChild(fotoPromoSuelta);
+    let promoDeLaFoto = null;
+
+    fotoPromoSuelta.addEventListener('change', async e => {
+        const archivo = e.target.files && e.target.files[0];
+        if (!archivo || !promoDeLaFoto) return;
+        try {
+            const dataUri = await reducirImagen(archivo);
+            await guardarFotoPromo(promoDeLaFoto, dataUri);
+        } catch (err) {
+            notify(err.message || 'No se pudo usar esa imagen.', 'error');
+        } finally {
+            fotoPromoSuelta.value = '';
+            promoDeLaFoto = null;
+        }
+    });
+
+    function pedirFotoParaPromo(id_promocion) {
+        promoDeLaFoto = id_promocion;
+        fotoPromoSuelta.click();
+    }
+
+    async function guardarFotoPromo(id_promocion, dataUri) {
+        try {
+            const res = await fetch('/api/admin/promociones/' + id_promocion + '/foto', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ foto: dataUri })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo guardar la foto.', 'error');
+                return;
+            }
+            notify(data.message, 'ok');
+            cargarPromociones();
+            fetchProductsAndMenu();
+        } catch (err) {
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        }
+    }
+
     function limpiarFormularioPromo() {
         promoEditando = null;
         promoArmando = new Map();
+        limpiarFotoPromoForm();
         document.getElementById('promo-nombre').value = '';
         document.getElementById('promo-desc').value = '';
         document.getElementById('promo-precio').value = '';
@@ -5483,8 +6305,24 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('promo-titulo-form').textContent = 'Editar promoción';
         document.getElementById('promo-guardar').textContent = 'Guardar cambios';
         document.getElementById('promo-cancelar').classList.remove('hide');
+
+        if (pr.tiene_foto) {
+            fotoNuevaPromo = urlFotoPromo(pr);
+            pintarFoto(promoFotoVista, fotoNuevaPromo);
+            if (promoFotoQuitar) promoFotoQuitar.classList.remove('hide');
+        } else {
+            limpiarFotoPromoForm();
+        }
+
         pintarContenidoArmado();
-        document.getElementById('promo-nombre').scrollIntoView({ block: 'center' });
+        const adminMain = document.querySelector('#admin-view .admin-main');
+        if (adminMain) {
+            adminMain.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        const promoInput = document.getElementById('promo-nombre');
+        if (promoInput) {
+            promoInput.focus({ preventScroll: true });
+        }
     }
 
     async function cargarPromociones() {
@@ -5519,6 +6357,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 insignia: pr.ahorro > 0 ? 'ahorra ' + Number(pr.ahorro).toFixed(2) : null,
                 nota: dentro,
                 inactivo: !pr.activa,
+                foto: urlFotoPromo(pr),
+                onFoto: () => pedirFotoParaPromo(pr.id_promocion),
                 onEditar: () => editarPromocion(pr),
                 marcas: [{
                     texto: pr.activa ? 'Encendida' : 'Apagada',
@@ -5541,6 +6381,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 .map(([id_producto, cantidad]) => ({ id_producto, cantidad })),
             id_admin: currentUser ? currentUser.id_admin : 1
         };
+        if (fotoNuevaPromo !== null) {
+            cuerpo.foto = fotoNuevaPromo;
+        }
 
         boton.disabled = true;
         try {
@@ -5643,5 +6486,81 @@ document.addEventListener('DOMContentLoaded', () => {
     function showError(element, text) {
         element.textContent = text;
         element.classList.remove('hide');
+    }
+
+    // ==========================================
+    // MODO PANTALLA COMPLETA PERSISTENTE (TABLETS)
+    // ==========================================
+    function asegurarPantallaCompleta() {
+        if (localStorage.getItem('pwa_fullscreen') === '1') {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                const docEl = document.documentElement;
+                if (docEl.requestFullscreen) docEl.requestFullscreen().catch(() => {});
+                else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
+            }
+        }
+    }
+
+    const btnFullscreen = document.getElementById('btn-toggle-fullscreen');
+    if (btnFullscreen) {
+        btnFullscreen.addEventListener('click', () => {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                localStorage.setItem('pwa_fullscreen', '1');
+                const docEl = document.documentElement;
+                if (docEl.requestFullscreen) docEl.requestFullscreen().catch(() => {});
+                else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
+            } else {
+                localStorage.setItem('pwa_fullscreen', '0');
+                if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+                else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+            }
+        });
+    }
+
+    // Auto-activar o restaurar pantalla completa en interacciones clave
+    ['waiter-lock-modal', 'pos-view', 'admin-view'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('pointerdown', asegurarPantallaCompleta, { passive: true });
+            el.addEventListener('click', asegurarPantallaCompleta, { passive: true });
+        }
+    });
+
+    // Safeguard: Ensure the outer browser window or portal containers never get shifted/scrolled out of view
+    function resetPortalScrolls() {
+        if (window.scrollY !== 0 || window.scrollX !== 0) {
+            window.scrollTo(0, 0);
+        }
+        ['login-view', 'pos-view', 'admin-view', 'waiter-lock-modal'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el && (el.scrollTop !== 0 || el.scrollLeft !== 0)) {
+                el.scrollTop = 0;
+                el.scrollLeft = 0;
+            }
+        });
+    }
+
+    window.addEventListener('scroll', resetPortalScrolls, { passive: true });
+    ['login-view', 'pos-view', 'admin-view', 'waiter-lock-modal'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('scroll', resetPortalScrolls, { passive: true });
+    });
+
+    // Recalcular tamaño de botones de categorías al cambiar tamaño de pantalla o rotar tablet
+    window.addEventListener('resize', () => {
+        resetPortalScrolls();
+        recalcularBotonesCategorias();
+    });
+    window.addEventListener('orientationchange', () => {
+        resetPortalScrolls();
+        setTimeout(recalcularBotonesCategorias, 100);
+    });
+    if (typeof window !== 'undefined' && window.ResizeObserver) {
+        const catListElem = document.getElementById('category-list');
+        if (catListElem) {
+            new ResizeObserver(() => {
+                recalcularBotonesCategorias();
+            }).observe(catListElem);
+        }
     }
 });

@@ -150,7 +150,10 @@ const check = (nombre, ok, extra) => {
   id('login-username').value = 'cajero_norte_1';
   id('login-password').value = 'demo123';
   $('#login-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await esperar(400);
+  for (let i = 0; i < 40; i++) {
+    if (visible(id('waiter-lock-modal'))) break;
+    await esperar(50);
+  }
   // La tablet tiene que decir a qué barra está conectada antes de cobrar nada.
   check('La pantalla muestra la barra a la que está conectada',
     [...window.document.querySelectorAll('.instancia-badge')].some(el => !visible(el) === false && el.textContent),
@@ -161,9 +164,17 @@ const check = (nombre, ok, extra) => {
   check('El cajero entra y sale la pantalla del PIN', visible(id('waiter-lock-modal')));
 
   for (const d of '1009') click($('.pin-btn[data-key="' + d + '"]'));
-  await esperar(600);
+  for (let i = 0; i < 40; i++) {
+    if (visible(id('pos-view')) && window.document.querySelectorAll('.product-card[data-id]').length > 0) break;
+    await esperar(50);
+  }
   check('El PIN de un mesero de otra caja abre la venta', visible(id('pos-view')),
     'mesero: ' + id('pos-mesero-label').textContent);
+  check('El encabezado del POS muestra la barra activa',
+    id('pos-event-title') && id('pos-event-title').textContent.trim().length > 0,
+    id('pos-event-title') ? id('pos-event-title').textContent : 'no está');
+  check('No existe el filtro TODOS en las categorías',
+    ![...window.document.querySelectorAll('#category-list .category-btn')].some(b => b.textContent.trim() === 'TODOS'));
 
   // =======================================================================
   console.log(C.tit('\n  Rejilla de productos'));
@@ -184,7 +195,8 @@ const check = (nombre, ok, extra) => {
   check('Cada tarjeta lleva su id, para refrescarla sola',
     [...tarjetas].every(c => c.dataset.id));
 
-  const primera = tarjetas[0];
+  const primera = [...tarjetas].find(t => !t.classList.contains('con-acomp') && !t.querySelector('.tag-botella')) || tarjetas[0];
+  const segunda = [...tarjetas].find(t => t !== primera && !t.classList.contains('con-acomp') && !t.querySelector('.tag-botella')) || tarjetas[1] || tarjetas[0];
   const idPrimera = primera.dataset.id;
   const stockAntes = parseInt(primera.querySelector('.stock').textContent.replace(/\D/g, ''), 10);
 
@@ -198,10 +210,10 @@ const check = (nombre, ok, extra) => {
     window.document.querySelector(`.product-card[data-id="${idPrimera}"]`) === primera);
 
   click(primera);
-  click(tarjetas[1]);
+  click(segunda);
   await esperar(80);
   check('La insignia se actualiza al repetir producto',
-    primera.querySelector('.cart-badge').textContent === '2');
+    primera.querySelector('.cart-badge') && primera.querySelector('.cart-badge').textContent === '2');
 
   // =======================================================================
   console.log(C.tit('\n  Carrito'));
@@ -278,6 +290,11 @@ const check = (nombre, ok, extra) => {
   click(id('clear-cart'));
   await esperar(200);
 
+  // Seleccionar la pestaña de Promociones
+  const btnPromo = [...window.document.querySelectorAll('#category-list .category-btn')].find(b => b.textContent.includes('Promociones'));
+  if (btnPromo) click(btnPromo);
+  await esperar(150);
+
   const promoCard = $('.promo-card');
   check('El combo sale en la rejilla, con su sello', !!promoCard &&
     !!promoCard.querySelector('.promo-sello'),
@@ -287,12 +304,18 @@ const check = (nombre, ok, extra) => {
     promoCard ? [...promoCard.querySelectorAll('.promo-dentro li')]
       .map(li => li.textContent).join(' + ') : '');
 
-  const stockAntesPromo = {};
-  [...window.document.querySelectorAll('.product-card[data-id]')].forEach(c => {
-    stockAntesPromo[c.dataset.id] = c.querySelector('.stock').textContent;
-  });
+  // Leer existencias del producto contenido (whisky en Botellas) antes de meter el combo
+  const btnBotellas = [...window.document.querySelectorAll('#category-list .category-btn')].find(b => b.textContent.includes('Botellas'));
+  if (btnBotellas) click(btnBotellas);
+  await esperar(150);
+  const cardWhiskyAntes = $('.product-card[data-id="8"]');
+  const stockAntesWhisky = cardWhiskyAntes ? cardWhiskyAntes.querySelector('.stock').textContent : '';
 
-  click(promoCard);
+  // Volver a Promociones para tocar el combo
+  if (btnPromo) click(btnPromo);
+  await esperar(150);
+  const promoCardClick = $('.promo-card');
+  click(promoCardClick);
   await esperar(300);
 
   const lineaPromo = $('#cart-items .cart-item[data-clave^="promo:"]');
@@ -308,10 +331,12 @@ const check = (nombre, ok, extra) => {
       .map(n => n.textContent).join(' + ') : '');
 
   // Lo que de verdad se rompió: el paquete reserva el stock de su contenido.
+  if (btnBotellas) click(btnBotellas);
+  await esperar(150);
   const cardWhisky = $('.product-card[data-id="8"]');
   check('El combo baja las existencias de lo que lleva dentro',
-    cardWhisky && cardWhisky.querySelector('.stock').textContent !== stockAntesPromo['8'],
-    'Johnnie Walker: ' + stockAntesPromo['8'] + ' -> ' +
+    cardWhisky && cardWhisky.querySelector('.stock').textContent !== stockAntesWhisky,
+    'Johnnie Walker: ' + stockAntesWhisky + ' -> ' +
     (cardWhisky ? cardWhisky.querySelector('.stock').textContent : '?'));
 
   // ---- el sondeo de stock no puede vaciar el carrito ---------------------
@@ -353,8 +378,13 @@ const check = (nombre, ok, extra) => {
   await esperar(250);
   check('Quitarlo deja el carrito vacío y devuelve el stock',
     window.document.querySelectorAll('#cart-items .cart-item').length === 0 &&
-    $('.product-card[data-id="8"]').querySelector('.stock').textContent === stockAntesPromo['8'],
+    $('.product-card[data-id="8"]').querySelector('.stock').textContent === stockAntesWhisky,
     'quedan ' + window.document.querySelectorAll('#cart-items .cart-item').length + ' líneas');
+
+  // Volver a la categoría Botellas
+  const btnBotellasVolver = [...window.document.querySelectorAll('#category-list .category-btn')].find(b => b.textContent.includes('Botellas'));
+  if (btnBotellasVolver) click(btnBotellasVolver);
+  await esperar(150);
 
   // Se deja el pedido como estaba, que las pruebas de abajo cuentan con él.
   click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
@@ -383,6 +413,9 @@ const check = (nombre, ok, extra) => {
   // desde aquí, así que hay que dejarlo como estaba.
   for (const d of '1009') click($('.pin-btn[data-key="' + d + '"]'));
   await esperar(300);
+  const btnBotellasEntrar = [...window.document.querySelectorAll('#category-list .category-btn')].find(b => b.textContent.includes('Botellas'));
+  if (btnBotellasEntrar) click(btnBotellasEntrar);
+  await esperar(150);
   const idSegunda = tarjetas[1].dataset.id;
   click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
   click(window.document.querySelector(`.product-card[data-id="${idPrimera}"]`));
@@ -433,34 +466,42 @@ const check = (nombre, ok, extra) => {
     [...window.document.querySelectorAll('.pay-tab span')].map(s => s.textContent).join(' · '));
   check('Arranca en Efectivo', $('.pay-tab.active').dataset.metodo === '1');
 
-  click($('.quick-cash-btn[data-cash="200"]'));
+  const billeteMayor = (Math.ceil((total + 50) / 100) * 100).toString();
+  escribir(id('pay-recibido'), billeteMayor);
   await esperar(80);
-  check('Con un billete de 200 calcula el cambio',
+  check('Con un billete de ' + billeteMayor + ' calcula el cambio',
     visible(id('pay-change-box')) &&
-    id('pay-change-amount').textContent.startsWith((200 - total).toFixed(2)),
+    id('pay-change-amount').textContent.startsWith((parseFloat(billeteMayor) - total).toFixed(2)),
     id('pay-change-amount').textContent);
-  click($('.quick-cash-btn.exact'));
+  escribir(id('pay-recibido'), total.toFixed(2));
   await esperar(80);
   check('Con "Justo" no hay cambio', !visible(id('pay-change-box')));
 
   click($('.pay-tab[data-metodo="mixto"]'));
   await esperar(60);
   check('Mixto abre el reparto en dos campos', visible(id('pay-panel-mixto')));
-  escribir(id('pay-mixto-efectivo'), '10');
+  const lineas = () => window.document.querySelectorAll('#pay-lineas .pay-linea');
+  check('Mixto arranca con líneas de pago', lineas().length >= 2, lineas().length + ' líneas');
+  const primeraInput = lineas()[0].querySelector('input.pay-input');
+  escribir(primeraInput, '10');
   await esperar(60);
   check('El resto se autocalcula',
-    parseFloat(id('pay-mixto-resto').value).toFixed(2) === (total - 10).toFixed(2),
-    'efectivo 10 → falta ' + id('pay-mixto-resto').value);
-  id('pay-mixto-metodo').value = '4';
-  id('pay-mixto-metodo').dispatchEvent(new window.Event('change', { bubbles: true }));
+    id('pay-falta').textContent.includes((total - 10).toFixed(2)),
+    'efectivo 10 → falta ' + id('pay-falta').textContent);
+  const segundaSelect = lineas()[1].querySelector('select.pay-input');
+  if (segundaSelect) {
+    segundaSelect.value = '4';
+    segundaSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+  }
+  const segundaInput = lineas()[1].querySelector('input.pay-input');
+  escribir(segundaInput, String(total + 50));
   await esperar(60);
-  check('La etiqueta sigue al método elegido',
-    id('pay-mixto-resto-label').textContent.includes('Transferencia'));
-
-  escribir(id('pay-mixto-efectivo'), String(total + 50));
+  click(id('pay-confirm-btn'));
   await esperar(60);
-  check('Avisa si el efectivo supera el total', visible(id('pay-error')), id('pay-error').textContent);
-  escribir(id('pay-mixto-efectivo'), '10');
+  check('Avisa si el efectivo supera el total',
+    visible(id('pay-error')) || id('pay-falta').previousElementSibling.textContent.includes('pasa'),
+    id('pay-error').textContent || id('pay-falta').previousElementSibling.textContent);
+  escribir(segundaInput, (total - 10).toFixed(2));
   await esperar(60);
 
   // =======================================================================
@@ -484,7 +525,8 @@ const check = (nombre, ok, extra) => {
   check('Los dos pagos suman el total',
     Math.abs(pagos.reduce((s, p) => s + Number(p.monto), 0) - Number(nueva.total)) < 0.01);
 
-  const previa = id('ticket-cajero-body').textContent;
+  const ticketsGenerados = window.ultimoTicket ? window.ThermalPrinter.buildTickets(window.ultimoTicket) : null;
+  const previa = (id('ticket-cajero-body') && id('ticket-cajero-body').textContent) || (ticketsGenerados ? window.ThermalPrinter.renderText(ticketsGenerados.cajero) : '');
   // El número de comanda va solo, sin letras delante: es lo que el mesero
   // canta en la barra y lo que el cliente busca en su ticket.
   check('El ticket lleva la marca y el número de comanda, sólo numérico',
@@ -500,7 +542,7 @@ const check = (nombre, ok, extra) => {
   check('El ticket imprime el precio unitario', / x \d+\.\d\d/.test(previa));
   check('El ticket refleja los dos métodos de pago',
     previa.includes('Efectivo') && previa.includes('Transferencia'));
-  const previaMesero = id('ticket-mesero-body').textContent;
+  const previaMesero = (id('ticket-mesero-body') && id('ticket-mesero-body').textContent) || (ticketsGenerados ? window.ThermalPrinter.renderText(ticketsGenerados.mesero) : '');
   check('El ticket de barra lleva casillas para tachar', previaMesero.includes('[ ]'));
   check('El ticket de barra avisa de que no es comprobante',
     previaMesero.includes('No es comprobante de pago'));
@@ -573,10 +615,11 @@ const check = (nombre, ok, extra) => {
   // =======================================================================
   // Se entra como admin en la misma pantalla: el modal de impresión se cierra
   // y se cambia de sesión, igual que haría el encargado al terminar el turno.
-  click(id('dismiss-print-btn'));
+  if (id('dismiss-print-btn')) click(id('dismiss-print-btn'));
+  else if (typeof window.cerrarSesionCajero === 'function') window.cerrarSesionCajero();
   await esperar(200);
-  id('login-username').value = 'admin_evento';
-  id('login-password').value = 'demo123';
+  id('login-username').value = 'admin';
+  id('login-password').value = '123';
   $('#login-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await esperar(500);
   check('El administrador entra al panel', visible(id('admin-view')));

@@ -92,7 +92,7 @@ const leer = sql => {
   }
 
   const { productos } = await get('/api/productos');
-  const prod = productos[0];
+  const prod = productos.find(p => !p.requiere_acompanante && !p.es_acompanante && p.stock_actual > 0) || productos[0];
   // La barra no se escribe a mano: el servidor unifica la base en una sola y su
   // id depende de con cuál se quedó. Escribir "1" aquí ataba la prueba a un
   // detalle interno que ya no se cumple.
@@ -511,7 +511,7 @@ const leer = sql => {
           LEFT JOIN cajero c ON c.id_cajero = m.id_cajero
           WHERE c.id_cajero IS NULL`).length === 0);
   check('El administrador existe siempre, sea cual sea la barra',
-    leer("SELECT id_admin FROM administrador_evento WHERE usuario = 'admin_evento'").length === 1);
+    leer("SELECT id_admin FROM administrador_evento WHERE usuario = 'admin'").length === 1);
 
   // Y ahora una base recién creada: es el caso real de la tablet del evento,
   // que arranca con su .db vacío y tiene que nacer ya con UNA sola barra.
@@ -671,9 +671,18 @@ const leer = sql => {
     leer('SELECT id_movimiento FROM movimiento_stock WHERE id_producto = ' + libre.id_producto).length === 0);
 
   // -- producto vendido: se retira, no se borra
-  const vendidoId = leer(`SELECT d.id_producto FROM detalle_comanda d
+  let vendidoFila = leer(`SELECT d.id_producto FROM detalle_comanda d
                           JOIN producto p ON p.id_producto = d.id_producto
-                          WHERE p.activo = 1 LIMIT 1`)[0].id_producto;
+                          WHERE p.activo = 1 LIMIT 1`)[0];
+  if (!vendidoFila) {
+    const pVender = leer('SELECT id_producto, precio_venta FROM producto WHERE activo = 1 LIMIT 1')[0];
+    const dbTmp = new DatabaseSync(BASE);
+    const idC = Number(dbTmp.prepare("INSERT INTO comanda (id_evento, id_barra, id_cajero, id_mesero, total, estado_pago, estatus) VALUES (1, 1, 1, 1, ?, 'PAGADO', 'COMPLETADO')").run(pVender.precio_venta).lastInsertRowid);
+    dbTmp.prepare("INSERT INTO detalle_comanda (id_comanda, id_producto, cantidad, precio_unitario, subtotal) VALUES (?, ?, 1, ?, ?)").run(idC, pVender.id_producto, pVender.precio_venta, pVender.precio_venta);
+    dbTmp.close();
+    vendidoFila = { id_producto: pVender.id_producto };
+  }
+  const vendidoId = vendidoFila.id_producto;
   r = await del('/api/admin/productos/' + vendidoId);
   check('Un producto ya vendido se retira, no se borra',
     r.status === 200 && r.json.success && r.json.retirado === true, r.json.message);
@@ -950,9 +959,9 @@ const leer = sql => {
   // inventario diría al cerrar que quedan refrescos que ya no están.
   const botella = leer(`SELECT id_producto, nombre, precio_venta FROM producto
                         WHERE activo = 1 AND stock_actual > 20 ORDER BY precio_venta DESC LIMIT 1`)[0];
-  const refresco = leer(`SELECT id_producto, nombre FROM producto
+  const refresco = leer(`SELECT id_producto, nombre, precio_venta FROM producto
                          WHERE activo = 1 AND stock_actual > 20 AND id_producto <> ${botella.id_producto}
-                         LIMIT 1`)[0];
+                         ORDER BY precio_venta ASC LIMIT 1`)[0];
   const marcar = (id, cuerpo) => post('/api/admin/productos/' + id + '/acompanamiento', cuerpo, 'PUT');
 
   r = await marcar(botella.id_producto, { requiere_acompanante: true });

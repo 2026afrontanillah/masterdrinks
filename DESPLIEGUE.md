@@ -132,7 +132,7 @@ reiniciarlo, cierra la otra ventana con `Ctrl+C`.
 
 ## 5. Poner los datos del evento
 
-Entra como administrador (`admin_evento` / `demo123`) y ve a **Dashboard ->
+Entra como administrador (`admin` / `123`) y ve a **Dashboard ->
 Datos del evento**. Rellena:
 
 | Campo | Dónde sale |

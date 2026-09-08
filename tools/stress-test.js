@@ -134,7 +134,7 @@ async function esperarServidor(intentos = 40) {
 async function correrTablet(idTablet, catalogo, resultados) {
   const cajero = catalogo.cajeros[idTablet % catalogo.cajeros.length];
 
-  const login = await post('/api/login', { usuario: cajero.usuario, password: 'demo123' });
+  const login = await post('/api/login', { usuario: cajero.usuario, password: cajero.password || 'demo123' });
   if (!login.json || !login.json.success) {
     resultados.erroresLogin.push('tablet ' + idTablet + ': login cajero ' + login.status);
     return;
@@ -202,7 +202,7 @@ async function correrTablet(idTablet, catalogo, resultados) {
       if (round2(res.json.total) !== total) {
         resultados.totalesDispares.push({ id: res.json.id_comanda, servidor: res.json.total, tablet: total });
       }
-    } else if (res.status === 400 && res.json && /Stock insuficiente/i.test(res.json.message || '')) {
+    } else if (res.status === 400 && res.json && /(?:No hay stock suficiente|Stock insuficiente)/i.test(res.json.message || '')) {
       resultados.sinStock++;
     } else {
       resultados.fallos.push({ status: res.status, message: (res.json && res.json.message) || 'sin cuerpo' });
