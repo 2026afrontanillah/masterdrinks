@@ -1,0 +1,213 @@
+// Esquema de Base de Datos MasterDrinks (DBML)
+// Puedes pegarlo directamente en https://dbdiagram.io
+
+Table evento {
+  id_evento integer [pk, increment]
+  nombre_evento varchar
+  fecha_evento varchar
+  lugar varchar
+  descripcion text
+  hora_inicio varchar
+  hora_fin varchar
+  activo integer [default: 1]
+}
+
+Table administrador_evento {
+  id_admin integer [pk, increment]
+  id_evento integer [ref: > evento.id_evento]
+  nombre varchar
+  usuario varchar [unique]
+  password varchar
+  rol varchar
+  activo integer [default: 1]
+}
+
+Table barra {
+  id_barra integer [pk, increment]
+  id_evento integer [ref: > evento.id_evento]
+  nombre_barra varchar
+  descripcion text
+  ubicacion varchar
+  activo integer [default: 1]
+}
+
+Table cajero {
+  id_cajero integer [pk, increment]
+  id_barra integer [ref: > barra.id_barra]
+  nombre varchar
+  usuario varchar [unique]
+  password varchar
+  activo integer [default: 1]
+}
+
+Table mesero {
+  id_mesero integer [pk, increment]
+  id_evento integer [ref: > evento.id_evento]
+  id_cajero integer [ref: > cajero.id_cajero]
+  nombre varchar
+  usuario varchar [unique]
+  password varchar
+  activo integer [default: 1]
+}
+
+Table categoria_producto {
+  id_categoria integer [pk, increment]
+  nombre varchar [unique]
+  descripcion text
+  tipo varchar
+  activo integer [default: 1]
+  creado_por_admin integer
+  fecha_creacion varchar
+}
+
+Table producto {
+  id_producto integer [pk, increment]
+  id_categoria integer [ref: > categoria_producto.id_categoria]
+  nombre varchar
+  descripcion text
+  tipo_producto varchar
+  precio_venta decimal
+  stock_actual integer
+  activo integer [default: 1]
+  creado_por_admin integer
+  fecha_creacion varchar
+  foto varchar
+  requiere_acompanante integer [default: 0]
+  es_acompanante integer [default: 0]
+}
+
+Table comanda {
+  id_comanda integer [pk, increment]
+  id_evento integer [ref: > evento.id_evento]
+  id_barra integer [ref: > barra.id_barra]
+  id_cajero integer [ref: > cajero.id_cajero]
+  id_mesero integer [ref: > mesero.id_mesero]
+  fecha_hora timestamp
+  total decimal
+  estado_pago varchar
+  estatus varchar
+  observaciones text
+  anulada_por_admin integer
+  fecha_anulacion timestamp
+  motivo_anulacion text
+  clave_idempotencia varchar
+}
+
+Table detalle_comanda {
+  id_detalle integer [pk, increment]
+  id_comanda integer [ref: > comanda.id_comanda]
+  id_producto integer [ref: > producto.id_producto]
+  cantidad integer
+  precio_unitario decimal
+  subtotal decimal
+  id_detalle_padre integer
+  id_promocion integer
+}
+
+Table metodo_pago {
+  id_metodo_pago integer [pk, increment]
+  nombre varchar [unique]
+  descripcion text
+  activo integer [default: 1]
+}
+
+Table pago_comanda {
+  id_pago integer [pk, increment]
+  id_comanda integer [ref: > comanda.id_comanda]
+  id_metodo_pago integer [ref: > metodo_pago.id_metodo_pago]
+  monto decimal
+  fecha_hora timestamp
+  referencia varchar
+  estado varchar
+}
+
+Table movimiento_stock {
+  id_movimiento integer [pk, increment]
+  id_producto integer [ref: > producto.id_producto]
+  id_admin integer [ref: > administrador_evento.id_admin]
+  tipo_movimiento varchar
+  cantidad integer
+  stock_anterior integer
+  stock_nuevo integer
+  motivo varchar
+  fecha_hora timestamp
+}
+
+Table promocion {
+  id_promocion integer [pk, increment]
+  nombre varchar
+  descripcion text
+  precio decimal
+  activa integer [default: 1]
+  creada_por_admin integer
+  fecha_creacion timestamp
+  foto varchar
+}
+
+Table promocion_detalle {
+  id_detalle_promocion integer [pk, increment]
+  id_promocion integer [ref: > promocion.id_promocion]
+  id_producto integer [ref: > producto.id_producto]
+  cantidad integer
+}
+
+Table traspaso {
+  id_traspaso integer [pk, increment]
+  tipo varchar
+  motivo varchar
+  contraparte varchar
+  observaciones text
+  id_cajero integer
+  id_admin integer
+  fecha_hora timestamp
+}
+
+Table traspaso_detalle {
+  id_detalle_traspaso integer [pk, increment]
+  id_traspaso integer [ref: > traspaso.id_traspaso]
+  id_producto integer [ref: > producto.id_producto]
+  cantidad integer
+}
+
+Table impresion_comanda_cajero {
+  id_impresion_cajero integer [pk, increment]
+  id_comanda integer [ref: > comanda.id_comanda]
+  fecha_hora_impresion timestamp
+  numero_copia integer
+  id_cajero integer
+  id_mesero integer
+}
+
+Table impresion_comanda_mesero {
+  id_impresion_mesero integer [pk, increment]
+  id_comanda integer [ref: > comanda.id_comanda]
+  fecha_hora_impresion timestamp
+  numero_copia integer
+  id_cajero integer
+  id_mesero integer
+}
+
+Table auditoria_admin {
+  id_auditoria integer [pk, increment]
+  id_admin integer [ref: > administrador_evento.id_admin]
+  id_evento integer [ref: > evento.id_evento]
+  accion varchar
+  entidad varchar
+  id_registro integer
+  detalle text
+  fecha_hora timestamp
+}
+
+Table configuracion {
+  id_configuracion integer [pk]
+  evento varchar
+  fecha varchar
+  lugar varchar
+  barra varchar
+  responsable varchar
+}
+
+Table instancia {
+  clave varchar [pk]
+  valor varchar
+}

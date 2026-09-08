@@ -1,0 +1,259 @@
+{
+  "database": "pos_evento.db",
+  "engine": "SQLite",
+  "tables": [
+    {
+      "name": "evento",
+      "columns": [
+        { "name": "id_evento", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "nombre_evento", "type": "TEXT" },
+        { "name": "fecha_evento", "type": "TEXT" },
+        { "name": "lugar", "type": "TEXT" },
+        { "name": "descripcion", "type": "TEXT" },
+        { "name": "hora_inicio", "type": "TEXT" },
+        { "name": "hora_fin", "type": "TEXT" },
+        { "name": "activo", "type": "INTEGER", "default": 1 }
+      ]
+    },
+    {
+      "name": "administrador_evento",
+      "columns": [
+        { "name": "id_admin", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_evento", "type": "INTEGER", "fk": { "table": "evento", "column": "id_evento" } },
+        { "name": "nombre", "type": "TEXT" },
+        { "name": "usuario", "type": "TEXT", "unique": true },
+        { "name": "password", "type": "TEXT" },
+        { "name": "rol", "type": "TEXT" },
+        { "name": "activo", "type": "INTEGER", "default": 1 }
+      ]
+    },
+    {
+      "name": "barra",
+      "columns": [
+        { "name": "id_barra", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_evento", "type": "INTEGER", "fk": { "table": "evento", "column": "id_evento" } },
+        { "name": "nombre_barra", "type": "TEXT" },
+        { "name": "descripcion", "type": "TEXT" },
+        { "name": "ubicacion", "type": "TEXT" },
+        { "name": "activo", "type": "INTEGER", "default": 1 }
+      ]
+    },
+    {
+      "name": "cajero",
+      "columns": [
+        { "name": "id_cajero", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_barra", "type": "INTEGER", "fk": { "table": "barra", "column": "id_barra" } },
+        { "name": "nombre", "type": "TEXT" },
+        { "name": "usuario", "type": "TEXT", "unique": true },
+        { "name": "password", "type": "TEXT" },
+        { "name": "activo", "type": "INTEGER", "default": 1 }
+      ]
+    },
+    {
+      "name": "mesero",
+      "columns": [
+        { "name": "id_mesero", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_evento", "type": "INTEGER", "fk": { "table": "evento", "column": "id_evento" } },
+        { "name": "id_cajero", "type": "INTEGER", "fk": { "table": "cajero", "column": "id_cajero" } },
+        { "name": "nombre", "type": "TEXT" },
+        { "name": "usuario", "type": "TEXT", "unique": true },
+        { "name": "password", "type": "TEXT" },
+        { "name": "activo", "type": "INTEGER", "default": 1 }
+      ]
+    },
+    {
+      "name": "categoria_producto",
+      "columns": [
+        { "name": "id_categoria", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "nombre", "type": "TEXT", "unique": true },
+        { "name": "descripcion", "type": "TEXT" },
+        { "name": "tipo", "type": "TEXT" },
+        { "name": "activo", "type": "INTEGER", "default": 1 },
+        { "name": "creado_por_admin", "type": "INTEGER" },
+        { "name": "fecha_creacion", "type": "TEXT" }
+      ]
+    },
+    {
+      "name": "producto",
+      "columns": [
+        { "name": "id_producto", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_categoria", "type": "INTEGER", "fk": { "table": "categoria_producto", "column": "id_categoria" } },
+        { "name": "nombre", "type": "TEXT" },
+        { "name": "descripcion", "type": "TEXT" },
+        { "name": "tipo_producto", "type": "TEXT" },
+        { "name": "precio_venta", "type": "REAL" },
+        { "name": "stock_actual", "type": "INTEGER" },
+        { "name": "activo", "type": "INTEGER", "default": 1 },
+        { "name": "creado_por_admin", "type": "INTEGER" },
+        { "name": "fecha_creacion", "type": "TEXT" },
+        { "name": "foto", "type": "TEXT" },
+        { "name": "requiere_acompanante", "type": "INTEGER", "default": 0 },
+        { "name": "es_acompanante", "type": "INTEGER", "default": 0 }
+      ]
+    },
+    {
+      "name": "comanda",
+      "columns": [
+        { "name": "id_comanda", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_evento", "type": "INTEGER", "fk": { "table": "evento", "column": "id_evento" } },
+        { "name": "id_barra", "type": "INTEGER", "fk": { "table": "barra", "column": "id_barra" } },
+        { "name": "id_cajero", "type": "INTEGER", "fk": { "table": "cajero", "column": "id_cajero" } },
+        { "name": "id_mesero", "type": "INTEGER", "fk": { "table": "mesero", "column": "id_mesero" } },
+        { "name": "fecha_hora", "type": "TEXT", "default": "CURRENT_TIMESTAMP" },
+        { "name": "total", "type": "REAL" },
+        { "name": "estado_pago", "type": "TEXT" },
+        { "name": "estatus", "type": "TEXT" },
+        { "name": "observaciones", "type": "TEXT" },
+        { "name": "anulada_por_admin", "type": "INTEGER" },
+        { "name": "fecha_anulacion", "type": "TEXT" },
+        { "name": "motivo_anulacion", "type": "TEXT" },
+        { "name": "clave_idempotencia", "type": "TEXT" }
+      ]
+    },
+    {
+      "name": "detalle_comanda",
+      "columns": [
+        { "name": "id_detalle", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_comanda", "type": "INTEGER", "fk": { "table": "comanda", "column": "id_comanda" } },
+        { "name": "id_producto", "type": "INTEGER", "fk": { "table": "producto", "column": "id_producto" } },
+        { "name": "cantidad", "type": "INTEGER" },
+        { "name": "precio_unitario", "type": "REAL" },
+        { "name": "subtotal", "type": "REAL" },
+        { "name": "id_detalle_padre", "type": "INTEGER" },
+        { "name": "id_promocion", "type": "INTEGER" }
+      ]
+    },
+    {
+      "name": "metodo_pago",
+      "columns": [
+        { "name": "id_metodo_pago", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "nombre", "type": "TEXT", "unique": true },
+        { "name": "descripcion", "type": "TEXT" },
+        { "name": "activo", "type": "INTEGER", "default": 1 }
+      ]
+    },
+    {
+      "name": "pago_comanda",
+      "columns": [
+        { "name": "id_pago", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_comanda", "type": "INTEGER", "fk": { "table": "comanda", "column": "id_comanda" } },
+        { "name": "id_metodo_pago", "type": "INTEGER", "fk": { "table": "metodo_pago", "column": "id_metodo_pago" } },
+        { "name": "monto", "type": "REAL" },
+        { "name": "fecha_hora", "type": "TEXT", "default": "CURRENT_TIMESTAMP" },
+        { "name": "referencia", "type": "TEXT" },
+        { "name": "estado", "type": "TEXT" }
+      ]
+    },
+    {
+      "name": "movimiento_stock",
+      "columns": [
+        { "name": "id_movimiento", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_producto", "type": "INTEGER", "fk": { "table": "producto", "column": "id_producto" } },
+        { "name": "id_admin", "type": "INTEGER", "fk": { "table": "administrador_evento", "column": "id_admin" } },
+        { "name": "tipo_movimiento", "type": "TEXT" },
+        { "name": "cantidad", "type": "INTEGER" },
+        { "name": "stock_anterior", "type": "INTEGER" },
+        { "name": "stock_nuevo", "type": "INTEGER" },
+        { "name": "motivo", "type": "TEXT" },
+        { "name": "fecha_hora", "type": "TEXT", "default": "CURRENT_TIMESTAMP" }
+      ]
+    },
+    {
+      "name": "promocion",
+      "columns": [
+        { "name": "id_promocion", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "nombre", "type": "TEXT" },
+        { "name": "descripcion", "type": "TEXT" },
+        { "name": "precio", "type": "REAL" },
+        { "name": "activa", "type": "INTEGER", "default": 1 },
+        { "name": "creada_por_admin", "type": "INTEGER" },
+        { "name": "fecha_creacion", "type": "TEXT" },
+        { "name": "foto", "type": "TEXT" }
+      ]
+    },
+    {
+      "name": "promocion_detalle",
+      "columns": [
+        { "name": "id_detalle_promocion", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_promocion", "type": "INTEGER", "fk": { "table": "promocion", "column": "id_promocion" } },
+        { "name": "id_producto", "type": "INTEGER", "fk": { "table": "producto", "column": "id_producto" } },
+        { "name": "cantidad", "type": "INTEGER" }
+      ]
+    },
+    {
+      "name": "traspaso",
+      "columns": [
+        { "name": "id_traspaso", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "tipo", "type": "TEXT" },
+        { "name": "motivo", "type": "TEXT" },
+        { "name": "contraparte", "type": "TEXT" },
+        { "name": "observaciones", "type": "TEXT" },
+        { "name": "id_cajero", "type": "INTEGER" },
+        { "name": "id_admin", "type": "INTEGER" },
+        { "name": "fecha_hora", "type": "TEXT", "default": "CURRENT_TIMESTAMP" }
+      ]
+    },
+    {
+      "name": "traspaso_detalle",
+      "columns": [
+        { "name": "id_detalle_traspaso", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_traspaso", "type": "INTEGER", "fk": { "table": "traspaso", "column": "id_traspaso" } },
+        { "name": "id_producto", "type": "INTEGER", "fk": { "table": "producto", "column": "id_producto" } },
+        { "name": "cantidad", "type": "INTEGER" }
+      ]
+    },
+    {
+      "name": "impresion_comanda_cajero",
+      "columns": [
+        { "name": "id_impresion_cajero", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_comanda", "type": "INTEGER", "fk": { "table": "comanda", "column": "id_comanda" } },
+        { "name": "fecha_hora_impresion", "type": "TEXT", "default": "CURRENT_TIMESTAMP" },
+        { "name": "numero_copia", "type": "INTEGER" },
+        { "name": "id_cajero", "type": "INTEGER" },
+        { "name": "id_mesero", "type": "INTEGER" }
+      ]
+    },
+    {
+      "name": "impresion_comanda_mesero",
+      "columns": [
+        { "name": "id_impresion_mesero", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_comanda", "type": "INTEGER", "fk": { "table": "comanda", "column": "id_comanda" } },
+        { "name": "fecha_hora_impresion", "type": "TEXT", "default": "CURRENT_TIMESTAMP" },
+        { "name": "numero_copia", "type": "INTEGER" },
+        { "name": "id_cajero", "type": "INTEGER" },
+        { "name": "id_mesero", "type": "INTEGER" }
+      ]
+    },
+    {
+      "name": "auditoria_admin",
+      "columns": [
+        { "name": "id_auditoria", "type": "INTEGER", "pk": true, "autoIncrement": true },
+        { "name": "id_admin", "type": "INTEGER", "fk": { "table": "administrador_evento", "column": "id_admin" } },
+        { "name": "id_evento", "type": "INTEGER", "fk": { "table": "evento", "column": "id_evento" } },
+        { "name": "accion", "type": "TEXT" },
+        { "name": "entidad", "type": "TEXT" },
+        { "name": "id_registro", "type": "INTEGER" },
+        { "name": "detalle", "type": "TEXT" },
+        { "name": "fecha_hora", "type": "TEXT", "default": "CURRENT_TIMESTAMP" }
+      ]
+    },
+    {
+      "name": "configuracion",
+      "columns": [
+        { "name": "id_configuracion", "type": "INTEGER", "pk": true },
+        { "name": "evento", "type": "TEXT" },
+        { "name": "fecha", "type": "TEXT" },
+        { "name": "lugar", "type": "TEXT" },
+        { "name": "barra", "type": "TEXT" },
+        { "name": "responsable", "type": "TEXT" }
+      ]
+    },
+    {
+      "name": "instancia",
+      "columns": [
+        { "name": "clave", "type": "TEXT", "pk": true },
+        { "name": "valor", "type": "TEXT" }
+      ]
+    }
+  ]
+}

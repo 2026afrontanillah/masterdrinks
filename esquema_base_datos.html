@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Esquema Entidad-Relación - MasterDrinks POS</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --primary: #38bdf8;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #818cf8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 1rem 2rem;
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .title-group h1 {
+      font-size: 1.4rem;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .title-group p {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-top: 0.2rem;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    button {
+      background: #334155;
+      border: 1px solid #475569;
+      color: white;
+      padding: 0.5rem 0.9rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      background: #475569;
+      border-color: var(--primary);
+    }
+
+    .main-container {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      height: calc(100vh - 75px);
+    }
+
+    #diagram-viewport {
+      flex: 1;
+      height: 100%;
+      background: #090d16;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #mermaid-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #mermaid-container svg {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: 100%;
+    }
+
+    .sidebar {
+      width: 320px;
+      background: var(--card-bg);
+      border-left: 1px solid var(--border);
+      padding: 1.2rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+    }
+
+    .card {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .card h3 {
+      font-size: 0.95rem;
+      color: var(--accent);
+      margin-bottom: 0.6rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.4rem;
+    }
+
+    .module-list {
+      list-style: none;
+      font-size: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .module-list li {
+      padding: 0.35rem 0.5rem;
+      border-radius: 4px;
+      background: #1e293b;
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+    }
+
+    .module-list li span.count {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--primary);
+      margin-right: 0.3rem;
+      margin-bottom: 0.3rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title-group">
+      <h1>🍹 Diagrama Entidad - Relación | MasterDrinks</h1>
+      <p>Base de Datos SQLite (`pos_evento.db`) - 19 Tablas Relacionadas</p>
+    </div>
+    <div class="toolbar">
+      <button onclick="panZoom.zoomIn()">🔍+ Acercar</button>
+      <button onclick="panZoom.zoomOut()">🔍- Alejar</button>
+      <button onclick="panZoom.resetZoom(); panZoom.center();">🔄 Restablecer</button>
+    </div>
+  </header>
+
+  <div class="main-container">
+    <div id="diagram-viewport">
+      <div id="mermaid-container" class="mermaid">
+erDiagram
+    %% ORGANIZACION Y ROLES
+    evento ||--o{ administrador_evento : "tiene"
+    evento ||--o{ barra : "tiene"
+    evento ||--o{ mesero : "asigna"
+    evento ||--o{ comanda : "registra"
+    evento ||--o{ auditoria_admin : "registra"
+
+    barra ||--o{ cajero : "aloja"
+    barra ||--o{ comanda : "atiende"
+
+    cajero ||--o{ mesero : "supervisa"
+    cajero ||--o{ comanda : "cobra"
+
+    mesero ||--o{ comanda : "atiende"
+
+    administrador_evento ||--o{ auditoria_admin : "ejecuta"
+    administrador_evento ||--o{ movimiento_stock : "autoriza"
+
+    %% CATALOGO E INVENTARIO
+    categoria_producto ||--o{ producto : "clasifica"
+    producto ||--o{ movimiento_stock : "tiene"
+    producto ||--o{ detalle_comanda : "se vende en"
+    producto ||--o{ promocion_detalle : "compone"
+    producto ||--o{ traspaso_detalle : "se transfiere"
+
+    %% VENTAS, PAGOS E IMPRESION
+    comanda ||--o{ detalle_comanda : "contiene"
+    comanda ||--o{ pago_comanda : "se liquida con"
+    comanda ||--o{ impresion_comanda_cajero : "genera copia"
+    comanda ||--o{ impresion_comanda_mesero : "genera copia"
+
+    metodo_pago ||--o{ pago_comanda : "procesa"
+
+    %% LOGISTICA Y PROMOS
+    promocion ||--o{ promocion_detalle : "incluye"
+    traspaso ||--o{ traspaso_detalle : "incluye"
+
+    %% ATRIBUTOS
+    evento {
+        INTEGER id_evento PK
+        TEXT nombre_evento
+        TEXT fecha_evento
+        TEXT lugar
+        TEXT descripcion
+        TEXT hora_inicio
+        TEXT hora_fin
+        INTEGER activo
+    }
+    administrador_evento {
+        INTEGER id_admin PK
+        INTEGER id_evento FK
+        TEXT nombre
+        TEXT usuario UK
+        TEXT password
+        TEXT rol
+        INTEGER activo
+    }
+    barra {
+        INTEGER id_barra PK
+        INTEGER id_evento FK
+        TEXT nombre_barra
+        TEXT descripcion
+        TEXT ubicacion
+        INTEGER activo
+    }
+    cajero {
+        INTEGER id_cajero PK
+        INTEGER id_barra FK
+        TEXT nombre
+        TEXT usuario UK
+        TEXT password
+        INTEGER activo
+    }
+    mesero {
+        INTEGER id_mesero PK
+        INTEGER id_evento FK
+        INTEGER id_cajero FK
+        TEXT nombre
+        TEXT usuario UK
+        TEXT password
+        INTEGER activo
+    }
+    categoria_producto {
+        INTEGER id_categoria PK
+        TEXT nombre UK
+        TEXT descripcion
+        TEXT tipo
+        INTEGER activo
+    }
+    producto {
+        INTEGER id_producto PK
+        INTEGER id_categoria FK
+        TEXT nombre
+        TEXT tipo_producto
+        REAL precio_venta
+        INTEGER stock_actual
+        INTEGER activo
+        INTEGER requiere_acompanante
+        INTEGER es_acompanante
+        TEXT foto
+    }
+    comanda {
+        INTEGER id_comanda PK
+        INTEGER id_evento FK
+        INTEGER id_barra FK
+        INTEGER id_cajero FK
+        INTEGER id_mesero FK
+        TEXT fecha_hora
+        REAL total
+        TEXT estado_pago
+        TEXT estatus
+        TEXT observaciones
+        TEXT clave_idempotencia
+        INTEGER anulada_por_admin
+        TEXT fecha_anulacion
+        TEXT motivo_anulacion
+    }
+    detalle_comanda {
+        INTEGER id_detalle PK
+        INTEGER id_comanda FK
+        INTEGER id_producto FK
+        INTEGER cantidad
+        REAL precio_unitario
+        REAL subtotal
+        INTEGER id_detalle_padre
+        INTEGER id_promocion
+    }
+    metodo_pago {
+        INTEGER id_metodo_pago PK
+        TEXT nombre UK
+        TEXT descripcion
+        INTEGER activo
+    }
+    pago_comanda {
+        INTEGER id_pago PK
+        INTEGER id_comanda FK
+        INTEGER id_metodo_pago FK
+        REAL monto
+        TEXT fecha_hora
+        TEXT referencia
+        TEXT estado
+    }
+    movimiento_stock {
+        INTEGER id_movimiento PK
+        INTEGER id_producto FK
+        INTEGER id_admin FK
+        TEXT tipo_movimiento
+        INTEGER cantidad
+        INTEGER stock_anterior
+        INTEGER stock_nuevo
+        TEXT motivo
+        TEXT fecha_hora
+    }
+    traspaso {
+        INTEGER id_traspaso PK
+        TEXT tipo
+        TEXT motivo
+        TEXT contraparte
+        TEXT observaciones
+        INTEGER id_cajero
+        INTEGER id_admin
+        TEXT fecha_hora
+    }
+    traspaso_detalle {
+        INTEGER id_detalle_traspaso PK
+        INTEGER id_traspaso FK
+        INTEGER id_producto FK
+        INTEGER cantidad
+    }
+    promocion {
+        INTEGER id_promocion PK
+        TEXT nombre
+        TEXT descripcion
+        REAL precio
+        INTEGER activa
+        TEXT foto
+    }
+    promocion_detalle {
+        INTEGER id_detalle_promocion PK
+        INTEGER id_promocion FK
+        INTEGER id_producto FK
+        INTEGER cantidad
+    }
+    impresion_comanda_cajero {
+        INTEGER id_impresion_cajero PK
+        INTEGER id_comanda FK
+        TEXT fecha_hora_impresion
+        INTEGER numero_copia
+        INTEGER id_cajero
+        INTEGER id_mesero
+    }
+    impresion_comanda_mesero {
+        INTEGER id_impresion_mesero PK
+        INTEGER id_comanda FK
+        TEXT fecha_hora_impresion
+        INTEGER numero_copia
+        INTEGER id_cajero
+        INTEGER id_mesero
+    }
+    auditoria_admin {
+        INTEGER id_auditoria PK
+        INTEGER id_admin FK
+        INTEGER id_evento FK
+        TEXT accion
+        TEXT entidad
+        INTEGER id_registro
+        TEXT detalle
+        TEXT fecha_hora
+    }
+    configuracion {
+        INTEGER id_configuracion PK
+        TEXT evento
+        TEXT fecha
+        TEXT lugar
+        TEXT barra
+        TEXT responsable
+    }
+    instancia {
+        TEXT clave PK
+        TEXT valor
+    }
+      </div>
+    </div>
+
+    <aside class="sidebar">
+      <div class="card">
+        <h3>📊 Módulos</h3>
+        <ul class="module-list">
+          <li><span>Organización & RRHH</span> <span class="count">5 tablas</span></li>
+          <li><span>Catálogo & Stock</span> <span class="count">3 tablas</span></li>
+          <li><span>Ventas & Caja</span> <span class="count">4 tablas</span></li>
+          <li><span>Promociones & Traspasos</span> <span class="count">4 tablas</span></li>
+          <li><span>Auditoría & Control</span> <span class="count">3 tablas</span></li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>💡 Navegación</h3>
+        <p style="font-size: 0.85rem; color: var(--muted); line-height: 1.4;">
+          Usa la rueda del ratón o los botones superiores para hacer <strong>Zoom</strong> y arrastra con el ratón para hacer <strong>Pan (desplazar)</strong> por el diagrama.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>🔗 Herramientas Compatibles</h3>
+        <div>
+          <span class="badge">dbdiagram.io (DBML)</span>
+          <span class="badge">Mermaid Live Editor</span>
+          <span class="badge">QuickDBD</span>
+          <span class="badge">Draw.io</span>
+          <span class="badge">DBeaver / DataGrip</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      er: {
+        useMaxWidth: false,
+        layoutDirection: 'TB',
+        minEntityWidth: 100,
+        minEntityHeight: 75,
+        entityPadding: 15,
+        stroke: '#38bdf8',
+        fill: '#1e293b',
+        fontSize: 12
+      }
+    });
+
+    let panZoom;
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        const svgElement = document.querySelector('#mermaid-container svg');
+        if (svgElement) {
+          panZoom = svgPanZoom(svgElement, {
+            zoomEnabled: true,
+            controlIconsEnabled: false,
+            fit: true,
+            center: true,
+            minZoom: 0.1,
+            maxZoom: 10
+          });
+        }
+      }, 500);
+    });
+  </script>
+</body>
+</html>
