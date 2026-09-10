@@ -167,6 +167,93 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     window.notify = notify;
 
+    // Modal de confirmación elegante en la app (sustituye a window.confirm / localhost dice...)
+    function pedirConfirmacion({
+        titulo = '¿Estás seguro?',
+        mensaje = 'Esta acción no se puede deshacer.',
+        detalle = null,
+        textoAceptar = 'Eliminar',
+        textoCancelar = 'Cancelar',
+        tipo = 'peligro', // 'peligro' | 'aviso' | 'info'
+        icono = null
+    } = {}) {
+        return new Promise(resolve => {
+            const modal = document.getElementById('confirm-modal');
+            if (!modal) {
+                resolve(window.confirm(mensaje + (detalle ? '\n\n' + detalle : '')));
+                return;
+            }
+
+            const elTitulo = document.getElementById('confirm-modal-titulo');
+            const elMensaje = document.getElementById('confirm-modal-mensaje');
+            const elNotaBox = document.getElementById('confirm-modal-nota-box');
+            const elNota = document.getElementById('confirm-modal-nota');
+            const elIcono = document.getElementById('confirm-modal-icono');
+            const elBadge = document.getElementById('confirm-modal-badge');
+            const btnAceptar = document.getElementById('confirm-modal-btn-aceptar');
+            const btnCancelar = document.getElementById('confirm-modal-btn-cancelar');
+            const btnCerrar = document.getElementById('confirm-modal-cerrar');
+
+            if (elTitulo) elTitulo.textContent = titulo;
+            if (elMensaje) elMensaje.textContent = mensaje;
+
+            if (elNota && elNotaBox) {
+                if (detalle) {
+                    elNota.textContent = detalle;
+                    elNotaBox.classList.remove('hide');
+                } else {
+                    elNotaBox.classList.add('hide');
+                }
+            }
+
+            const iconosDef = { peligro: '🗑️', aviso: '⚠️', info: 'ℹ️' };
+            if (elIcono) elIcono.textContent = icono || iconosDef[tipo] || '⚠️';
+            if (elBadge) elBadge.className = 'confirm-modal-badge tipo-' + tipo;
+            if (btnAceptar) {
+                btnAceptar.className = 'btn-confirm-aceptar tipo-' + tipo;
+                btnAceptar.textContent = textoAceptar;
+            }
+            if (btnCancelar) btnCancelar.textContent = textoCancelar;
+
+            function limpiar() {
+                modal.classList.add('hide');
+                btnAceptar.removeEventListener('click', onAceptar);
+                btnCancelar.removeEventListener('click', onCancelar);
+                btnCerrar.removeEventListener('click', onCancelar);
+                modal.removeEventListener('click', onBackdrop);
+                window.removeEventListener('keydown', onKey);
+            }
+
+            function onAceptar() {
+                limpiar();
+                resolve(true);
+            }
+
+            function onCancelar() {
+                limpiar();
+                resolve(false);
+            }
+
+            function onBackdrop(e) {
+                if (e.target === modal) onCancelar();
+            }
+
+            function onKey(e) {
+                if (e.key === 'Escape') onCancelar();
+            }
+
+            btnAceptar.addEventListener('click', onAceptar);
+            btnCancelar.addEventListener('click', onCancelar);
+            btnCerrar.addEventListener('click', onCancelar);
+            modal.addEventListener('click', onBackdrop);
+            window.addEventListener('keydown', onKey);
+
+            modal.classList.remove('hide');
+            btnAceptar.focus();
+        });
+    }
+    window.pedirConfirmacion = pedirConfirmacion;
+
     // Dynamic wallpaper color extractor
     /**
      * Carga el fondo de pantalla. Nada más.
@@ -3041,13 +3128,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setPrintStatus(text, kind) {
-        const box = document.getElementById('print-status');
-        if (!text) {
-            box.classList.add('hide');
-            return;
-        }
-        box.textContent = text;
-        box.className = 'print-status ' + (kind || 'info');
+        const boxes = [document.getElementById('print-status'), document.getElementById('modal-print-status')];
+        boxes.forEach(box => {
+            if (!box) return;
+            if (!text) {
+                box.className = 'print-status hide';
+                box.textContent = '';
+                return;
+            }
+            box.textContent = text;
+            box.className = 'print-status ' + (kind || 'info');
+        });
     }
 
     // Deja constancia de cada impresión física en impresion_comanda_*.
@@ -3098,37 +3189,52 @@ document.addEventListener('DOMContentLoaded', () => {
         }).catch(err => console.warn('No se pudo registrar la impresión:', err));
     }
 
+    function renderTicketPreview(model) {
+        const settings = ThermalPrinter.getSettings();
+        const tCajero = document.getElementById('ticket-cajero-body');
+        const tMesero = document.getElementById('ticket-mesero-body');
+        if (!tCajero || !tMesero) return;
+
+        if (!model) {
+            const vacio = '<p class="ticket-vacio" style="text-align:center; padding: 20px; color:var(--text-muted);">Aquí se verá la comanda cuando cobres.</p>';
+            tCajero.innerHTML = vacio;
+            tMesero.innerHTML = vacio;
+            return;
+        }
+
+        const tickets = ThermalPrinter.buildTickets(model, settings);
+        tCajero.innerHTML = ThermalPrinter.helpers.opsToHtml(tickets.cajero, settings);
+        tMesero.innerHTML = ThermalPrinter.helpers.opsToHtml(tickets.mesero, settings);
+    }
+
+    function marcarSiguienteComoReimpresion() {
+        if (!currentTicket) return;
+        currentTicket.numeroCopia = (currentTicket.numeroCopia || 1) + 1;
+        currentTicket.reimpresion = true;
+        renderTicketPreview(currentTicket);
+    }
+
     function sendToPrinter() {
         if (!currentTicket) return;
         const esCopia = currentTicket.reimpresion;
 
         // El registro va ANTES de mandar el papel, y fuera del try.
-        //
-        // Estaba detrás de printToRawBT y dentro del mismo try: si la
-        // impresora fallaba -RawBT sin instalar, sin papel, sin permiso- se
-        // perdía también el apunte. Justo al revés de lo que hace falta: lo
-        // que se audita es que alguien PIDIÓ la copia, salga o no salga.
         logPrint(currentTicket.id);
 
         try {
             ThermalPrinter.printToRawBT(currentTicket);
-            // Sin vista previa, el aviso tiene que salir por encima de la
-            // pantalla: si RawBT no está, el papel no sale y nadie se entera
-            // hasta que el cliente reclama.
             notify(esCopia ? 'Reimpresión enviada a la impresora.'
                            : 'Comanda enviada a la impresora.', 'ok');
+            setPrintStatus('Enviado a RawBT. Si no imprime nada, revisa ⚙️ Impresora.', 'ok');
         } catch (err) {
             console.error('Error al enviar a RawBT:', err);
             notify('No se pudo abrir RawBT. ¿Está instalado en la tablet? ' +
                    'La venta SÍ quedó guardada.', 'error');
+            setPrintStatus('No se pudo abrir RawBT. ¿Está instalado en la tablet?', 'error');
         }
     }
 
-    // Imprime y sigue. Sin vista previa de por medio.
-    //
-    // Esa pantalla enseñaba cómo iban a quedar las dos comandas y esperaba a
-    // que alguien pulsara Continuar. Con cola en la barra es un paso de más
-    // entre dos clientes, y el papel ya está saliendo mientras se mira.
+    // Muestra la vista previa de los tickets (Cajero y Mesero) y manda la impresión
     function triggerThermalPrint(id_comanda, data, fromAdmin = false) {
         isReprinting = fromAdmin;
         currentTicket = buildTicketModel(id_comanda, data);
@@ -3139,26 +3245,58 @@ document.addEventListener('DOMContentLoaded', () => {
             currentTicket.numeroCopia = 2;
         }
 
-        const tCajero = document.getElementById('ticket-cajero-body');
-        const tMesero = document.getElementById('ticket-mesero-body');
-        if (tCajero || tMesero) {
-            try {
-                const tickets = ThermalPrinter.buildTickets(currentTicket);
-                if (tCajero && tickets.cajero) tCajero.textContent = ThermalPrinter.renderText(tickets.cajero) || '';
-                if (tMesero && tickets.mesero) tMesero.textContent = ThermalPrinter.renderText(tickets.mesero) || '';
-            } catch (e) {}
+        renderTicketPreview(currentTicket);
+        setPrintStatus('');
+
+        const printModal = document.getElementById('print-modal');
+        if (printModal) {
+            printModal.classList.remove('hide');
         }
 
         sendToPrinter();
+    }
+
+    function cerrarVistaPreviaTicket() {
+        const printModal = document.getElementById('print-modal');
+        if (printModal) {
+            printModal.classList.add('hide');
+        }
         currentTicket = null;
 
-        if (fromAdmin) {
+        if (isReprinting) {
             isReprinting = false;
         } else {
-            // Cobrada e impresa: la tablet vuelve sola al PIN, lista para el
-            // siguiente mesero sin que nadie toque nada.
             volverAlBloqueoDeMesero();
         }
+    }
+
+    const dismissPrintBtn = document.getElementById('dismiss-print-btn');
+    if (dismissPrintBtn) {
+        dismissPrintBtn.addEventListener('click', cerrarVistaPreviaTicket);
+    }
+
+    const closePrintModalBtn = document.getElementById('close-print-modal-btn');
+    if (closePrintModalBtn) {
+        closePrintModalBtn.addEventListener('click', cerrarVistaPreviaTicket);
+    }
+
+    const printRawbtBtn = document.getElementById('print-rawbt-btn');
+    if (printRawbtBtn) {
+        printRawbtBtn.addEventListener('click', () => {
+            if (!currentTicket) return;
+            sendToPrinter();
+            marcarSiguienteComoReimpresion();
+        });
+    }
+
+    const printBrowserBtn = document.getElementById('print-browser-btn');
+    if (printBrowserBtn) {
+        printBrowserBtn.addEventListener('click', () => {
+            if (!currentTicket) return;
+            ThermalPrinter.printViaBrowser(currentTicket);
+            logPrint(currentTicket.id);
+            marcarSiguienteComoReimpresion();
+        });
     }
 
     function volverAlBloqueoDeMesero() {
@@ -3182,16 +3320,22 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadPrinterSettingsIntoForm() {
         const settings = ThermalPrinter.getSettings();
         Object.keys(settingsFields).forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
             const value = settings[settingsFields[id].key];
-            document.getElementById(id).value = typeof value === 'boolean' ? (value ? '1' : '0') : String(value);
+            el.value = typeof value === 'boolean' ? (value ? '1' : '0') : String(value);
         });
     }
 
     Object.keys(settingsFields).forEach(id => {
-        document.getElementById(id).addEventListener('change', e => {
-            const field = settingsFields[id];
-            ThermalPrinter.saveSettings({ [field.key]: field.parse(e.target.value) });
-        });
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('change', e => {
+                const field = settingsFields[id];
+                ThermalPrinter.saveSettings({ [field.key]: field.parse(e.target.value) });
+                if (currentTicket) renderTicketPreview(currentTicket);
+            });
+        }
     });
 
     // Configurar la impresora antes de la primera venta del evento.
@@ -3363,6 +3507,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok) {
                 configEvento = await res.json();
                 actualizarTituloBarra();
+                if (window.ThermalPrinter && typeof window.ThermalPrinter.setLogoUrl === 'function') {
+                    window.ThermalPrinter.setLogoUrl('/api/configuracion/logo?t=' + Date.now());
+                }
             }
         } catch (err) {
             console.warn('No se pudo leer la configuración del evento:', err);
@@ -3576,6 +3723,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const el = document.getElementById('cfg-' + campo);
             if (el) el.value = configEvento[campo] || '';
         });
+
+        const imgLogo = document.getElementById('logo-ticket-preview-img');
+        const btnQuitar = document.getElementById('btn-quitar-logo-ticket');
+        if (imgLogo) {
+            imgLogo.src = '/api/configuracion/logo?v=' + Date.now();
+        }
+        if (btnQuitar) {
+            if (configEvento.tiene_logo_ticket) {
+                btnQuitar.classList.remove('hide');
+            } else {
+                btnQuitar.classList.add('hide');
+            }
+        }
     }
 
     document.getElementById('cfg-guardar-btn').addEventListener('click', async () => {
@@ -3623,6 +3783,112 @@ document.addEventListener('DOMContentLoaded', () => {
             boton.disabled = false;
         }
     });
+
+    // ------------------------------------------------------------------
+    // LOGO DEL TICKET TÉRMICO (PERSONALIZACIÓN POR EVENTO)
+    // ------------------------------------------------------------------
+    const btnSubirLogoTicket = document.getElementById('btn-subir-logo-ticket');
+    const inputSubirLogoTicket = document.getElementById('input-subir-logo-ticket');
+    const btnQuitarLogoTicket = document.getElementById('btn-quitar-logo-ticket');
+    const imgLogoTicketPreview = document.getElementById('logo-ticket-preview-img');
+
+    if (btnSubirLogoTicket && inputSubirLogoTicket) {
+        btnSubirLogoTicket.addEventListener('click', () => {
+            inputSubirLogoTicket.click();
+        });
+
+        inputSubirLogoTicket.addEventListener('change', async (e) => {
+            const archivo = e.target.files && e.target.files[0];
+            if (!archivo) return;
+
+            if (!archivo.type.startsWith('image/')) {
+                notify('Por favor selecciona una imagen válida (PNG, JPG o WEBP).', 'warn');
+                inputSubirLogoTicket.value = '';
+                return;
+            }
+
+            if (archivo.size > 500 * 1024) {
+                notify('La imagen no debe superar los 500 KB.', 'warn');
+                inputSubirLogoTicket.value = '';
+                return;
+            }
+
+            const lector = new FileReader();
+            lector.onload = async () => {
+                const base64 = lector.result;
+                btnSubirLogoTicket.disabled = true;
+                btnSubirLogoTicket.textContent = '⏳ Subiendo...';
+
+                try {
+                    const res = await fetch('/api/admin/configuracion/logo', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            logo: base64,
+                            id_admin: currentUser ? currentUser.id_admin : 1
+                        })
+                    });
+
+                    const data = await res.json();
+                    if (!res.ok || !data.success) {
+                        notify(data.message || 'No se pudo guardar el logo.', 'error');
+                        return;
+                    }
+
+                    notify(data.message || 'Logo de tickets actualizado.', 'ok');
+                    configEvento.tiene_logo_ticket = 1;
+                    const nuevoUrl = '/api/configuracion/logo?t=' + Date.now();
+                    if (imgLogoTicketPreview) imgLogoTicketPreview.src = nuevoUrl;
+                    if (btnQuitarLogoTicket) btnQuitarLogoTicket.classList.remove('hide');
+                    if (window.ThermalPrinter && typeof window.ThermalPrinter.setLogoUrl === 'function') {
+                        window.ThermalPrinter.setLogoUrl(nuevoUrl);
+                    }
+                } catch (err) {
+                    console.error('Error al subir logo de ticket:', err);
+                    notify('Error de red al subir el logo.', 'error');
+                } finally {
+                    btnSubirLogoTicket.disabled = false;
+                    btnSubirLogoTicket.textContent = '📁 Cambiar logo';
+                    inputSubirLogoTicket.value = '';
+                }
+            };
+            lector.readAsDataURL(archivo);
+        });
+    }
+
+    if (btnQuitarLogoTicket) {
+        btnQuitarLogoTicket.addEventListener('click', async () => {
+            if (!confirm('¿Restablecer el logo del ticket al predeterminado de Euphoria?')) return;
+            btnQuitarLogoTicket.disabled = true;
+            try {
+                const res = await fetch('/api/admin/configuracion/logo', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id_admin: currentUser ? currentUser.id_admin : 1
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    notify(data.message || 'No se pudo restablecer el logo.', 'error');
+                    return;
+                }
+                notify(data.message || 'Logo restablecido al predeterminado.', 'ok');
+                configEvento.tiene_logo_ticket = 0;
+                const nuevoUrl = '/api/configuracion/logo?t=' + Date.now();
+                if (imgLogoTicketPreview) imgLogoTicketPreview.src = nuevoUrl;
+                btnQuitarLogoTicket.classList.add('hide');
+                if (window.ThermalPrinter && typeof window.ThermalPrinter.setLogoUrl === 'function') {
+                    window.ThermalPrinter.setLogoUrl(nuevoUrl);
+                }
+            } catch (err) {
+                console.error('Error al restablecer logo de ticket:', err);
+                notify('Error de red al restablecer el logo.', 'error');
+            } finally {
+                btnQuitarLogoTicket.disabled = false;
+            }
+        });
+    }
 
     // ------------------------------------------------------------------
     // GESTIÓN DEL AFICHE / CARTEL EN EL PANEL DE ADMINISTRACIÓN
@@ -3746,7 +4012,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (btnQuitarAfiche) {
         btnQuitarAfiche.addEventListener('click', async () => {
-            if (!confirm('¿Seguro que deseas quitar el afiche actual del evento?')) return;
+            const si = await pedirConfirmacion({
+                titulo: '¿Quitar afiche?',
+                mensaje: '¿Seguro que deseas quitar el afiche actual del evento?',
+                textoAceptar: 'Quitar afiche',
+                textoCancelar: 'Cancelar',
+                tipo: 'aviso',
+                icono: '🖼️'
+            });
+            if (!si) return;
 
             btnQuitarAfiche.disabled = true;
             try {
@@ -3905,6 +4179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let todasLasComandas = [];
     let comandasFiltradas = [];
     let paginaActualComandas = 1;
+    let filtroEstadoComanda = 'todos';
     const COMANDAS_POR_PAGINA = 6;
 
     async function loadComandasData() {
@@ -3915,35 +4190,109 @@ document.addEventListener('DOMContentLoaded', () => {
             // Actualizar chips de resumen superior
             const completadas = todasLasComandas.filter(c => c.estado_pago !== 'ANULADO').length;
             const anuladas = todasLasComandas.filter(c => c.estado_pago === 'ANULADO').length;
+            const chipTodas = document.getElementById('chip-todas');
             const chipComp = document.getElementById('chip-completadas');
             const chipAnul = document.getElementById('chip-anuladas');
+            if (chipTodas) chipTodas.innerHTML = `<b>${todasLasComandas.length}</b> Todas`;
             if (chipComp) chipComp.innerHTML = `<b>${completadas}</b> Completadas`;
             if (chipAnul) chipAnul.innerHTML = `<b>${anuladas}</b> Anuladas`;
 
-            // Aplicar búsqueda previa si existe
-            const searchInput = document.getElementById('comanda-search-input');
-            const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
-            filtrarComandas(query, false);
+            actualizarOpcionesFiltroMesero();
+            filtrarComandas(false);
         } catch (err) {
             console.error("Error loading comandas:", err);
         }
     }
 
-    function filtrarComandas(query, resetPage = true) {
+    function actualizarOpcionesFiltroMesero() {
+        const sel = document.getElementById('comanda-filter-mesero');
+        if (!sel) return;
+        const actual = sel.value;
+        const meseros = new Set();
+        todasLasComandas.forEach(c => {
+            if (c.nombre_mesero && c.nombre_mesero.trim()) {
+                meseros.add(c.nombre_mesero.trim());
+            }
+        });
+        sel.innerHTML = '<option value="">Todos los meseros</option>';
+        [...meseros].sort((a, b) => a.localeCompare(b)).forEach(nom => {
+            const opt = document.createElement('option');
+            opt.value = nom.toLowerCase();
+            opt.textContent = nom;
+            if (nom.toLowerCase() === actual.toLowerCase()) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+
+    function filtrarComandas(resetPage = true) {
         if (resetPage) paginaActualComandas = 1;
-        if (!query) {
-            comandasFiltradas = [...todasLasComandas];
-        } else {
-            comandasFiltradas = todasLasComandas.filter(c => {
-                const id = c.id_comanda.toString();
-                const ref = refComanda(c.id_comanda).toLowerCase();
-                const mesero = (c.nombre_mesero || '').toLowerCase();
-                const cajero = (c.nombre_cajero || '').toLowerCase();
-                const barra = (c.nombre_barra || '').toLowerCase();
-                const prods = (c.detalles || []).some(d => (d.nombre_producto || '').toLowerCase().includes(query));
-                return id.includes(query) || ref.includes(query) || mesero.includes(query) || cajero.includes(query) || barra.includes(query) || prods;
-            });
+
+        const searchInput = document.getElementById('comanda-search-input');
+        const rawQuery = searchInput ? searchInput.value.trim() : '';
+        // REGLA CRÍTICA: BÚSQUEDA EXCLUSIVAMENTE POR NÚMERO DE COMANDA (NO mesero, NO producto)
+        const numQuery = rawQuery.replace(/[^0-9]/g, '');
+
+        const selectMesero = document.getElementById('comanda-filter-mesero');
+        const meseroVal = selectMesero ? selectMesero.value.toLowerCase().trim() : '';
+
+        const selectPago = document.getElementById('comanda-filter-pago');
+        const pagoVal = selectPago ? selectPago.value.toLowerCase().trim() : '';
+
+        const inputDesde = document.getElementById('comanda-filter-desde');
+        const desdeVal = inputDesde ? inputDesde.value.trim() : '';
+
+        const inputHasta = document.getElementById('comanda-filter-hasta');
+        const hastaVal = inputHasta ? inputHasta.value.trim() : '';
+
+        // Comprobar si hay algún filtro activo para mostrar botón Limpiar
+        const hayFiltros = Boolean(rawQuery || meseroVal || pagoVal || desdeVal || hastaVal || filtroEstadoComanda !== 'todos');
+        const btnLimpiar = document.getElementById('comanda-btn-limpiar');
+        if (btnLimpiar) {
+            btnLimpiar.classList.toggle('hide', !hayFiltros);
         }
+
+        comandasFiltradas = todasLasComandas.filter(c => {
+            // 1. FILTRO ÚNICAMENTE POR NÚMERO DE COMANDA
+            if (numQuery) {
+                const idStr = String(c.id_comanda);
+                if (!idStr.includes(numQuery)) return false;
+            } else if (rawQuery && !numQuery) {
+                // Escribió caracteres no numéricos pero la búsqueda es SOLO por número
+                return false;
+            }
+
+            // 2. FILTRO POR ESTADO (Todas / Completadas / Anuladas)
+            const isAnulado = c.estado_pago === 'ANULADO';
+            if (filtroEstadoComanda === 'completadas' && isAnulado) return false;
+            if (filtroEstadoComanda === 'anuladas' && !isAnulado) return false;
+
+            // 3. FILTRO POR MESERO
+            if (meseroVal) {
+                const meseroNom = (c.nombre_mesero || '').toLowerCase();
+                if (meseroNom !== meseroVal) return false;
+            }
+
+            // 4. FILTRO POR MÉTODO DE PAGO
+            if (pagoVal) {
+                const pagos = c.pagos || [];
+                if (pagoVal === 'mixto') {
+                    if (pagos.length < 2) return false;
+                } else {
+                    const coincide = pagos.some(p => (p.nombre_metodo || '').toLowerCase().includes(pagoVal));
+                    if (!coincide) return false;
+                }
+            }
+
+            // 5. FILTRO POR RANGO DE FECHAS (DESDE / HASTA)
+            if (desdeVal || hastaVal) {
+                const fComanda = (c.fecha_hora || '').slice(0, 10);
+                if (desdeVal && fComanda < desdeVal) return false;
+                if (hastaVal && fComanda > hastaVal) return false;
+            }
+
+            return true;
+        });
+
         renderComandas();
     }
 
@@ -4153,16 +4502,60 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Real-time local search filter for comandas
+    // Event listeners para los filtros de comandas
     const comandaSearchInput = document.getElementById('comanda-search-input');
     if (comandaSearchInput) {
-        comandaSearchInput.addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase().trim();
-            filtrarComandas(query, true);
+        comandaSearchInput.addEventListener('input', () => filtrarComandas(true));
+    }
+
+    const selectFilterMesero = document.getElementById('comanda-filter-mesero');
+    if (selectFilterMesero) {
+        selectFilterMesero.addEventListener('change', () => filtrarComandas(true));
+    }
+
+    const selectFilterPago = document.getElementById('comanda-filter-pago');
+    if (selectFilterPago) {
+        selectFilterPago.addEventListener('change', () => filtrarComandas(true));
+    }
+
+    const inputFilterDesde = document.getElementById('comanda-filter-desde');
+    if (inputFilterDesde) {
+        inputFilterDesde.addEventListener('change', () => filtrarComandas(true));
+    }
+
+    const inputFilterHasta = document.getElementById('comanda-filter-hasta');
+    if (inputFilterHasta) {
+        inputFilterHasta.addEventListener('change', () => filtrarComandas(true));
+    }
+
+    // Chips interactivas de Estado (Todas / Completadas / Anuladas)
+    document.querySelectorAll('.comandas-summary-pills .comanda-pill-badge').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.comandas-summary-pills .comanda-pill-badge').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            filtroEstadoComanda = btn.dataset.estado || 'todos';
+            filtrarComandas(true);
+        });
+    });
+
+    // Botón Limpiar filtros
+    const btnLimpiarComandas = document.getElementById('comanda-btn-limpiar');
+    if (btnLimpiarComandas) {
+        btnLimpiarComandas.addEventListener('click', () => {
+            if (comandaSearchInput) comandaSearchInput.value = '';
+            if (selectFilterMesero) selectFilterMesero.value = '';
+            if (selectFilterPago) selectFilterPago.value = '';
+            if (inputFilterDesde) inputFilterDesde.value = '';
+            if (inputFilterHasta) inputFilterHasta.value = '';
+            filtroEstadoComanda = 'todos';
+            document.querySelectorAll('.comandas-summary-pills .comanda-pill-badge').forEach(b => {
+                b.classList.toggle('active', b.dataset.estado === 'todos');
+            });
+            filtrarComandas(true);
         });
     }
 
-    // Descarga de reporte de comandas en PDF
+    // Descarga de reporte de comandas en PDF con filtros sincronizados
     const btnComandasPdf = document.getElementById('comandas-quick-pdf');
     if (btnComandasPdf) {
         btnComandasPdf.addEventListener('click', async () => {
@@ -4173,9 +4566,21 @@ document.addEventListener('DOMContentLoaded', () => {
             if (labelSpan) labelSpan.textContent = '...';
 
             try {
-                const searchInput = document.getElementById('comanda-search-input');
-                const query = searchInput ? searchInput.value.trim() : '';
-                const url = '/api/admin/comandas.pdf' + (query ? '?q=' + encodeURIComponent(query) : '');
+                const rawQuery = comandaSearchInput ? comandaSearchInput.value.trim() : '';
+                const numQuery = rawQuery.replace(/[^0-9]/g, '');
+                const meseroVal = selectFilterMesero ? selectFilterMesero.value.trim() : '';
+                const desdeVal = inputFilterDesde ? inputFilterDesde.value.trim() : '';
+                const hastaVal = inputFilterHasta ? inputFilterHasta.value.trim() : '';
+
+                const params = new URLSearchParams();
+                if (numQuery) params.set('q', numQuery);
+                if (filtroEstadoComanda && filtroEstadoComanda !== 'todos') params.set('estado', filtroEstadoComanda);
+                if (meseroVal) params.set('mesero', meseroVal);
+                if (desdeVal) params.set('desde', desdeVal);
+                if (hastaVal) params.set('hasta', hastaVal);
+
+                const qs = params.toString();
+                const url = '/api/admin/comandas.pdf' + (qs ? '?' + qs : '');
 
                 const res = await fetch(url);
                 if (!res.ok) throw new Error('respuesta ' + res.status);
@@ -4547,15 +4952,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // en la caja) pero se conserva, porque el cierre de caja lo nombra. El
     // servidor decide cuál de los dos casos es y lo dice en su respuesta.
 
-    // Pregunta antes de borrar. Es el único sitio de la aplicación donde se
-    // pierde algo de forma irreversible, así que se pide confirmación aunque
-    // sea un toque más.
+    // Pregunta antes de borrar con el modal nativo de la app
     function confirmarBorrado(texto) {
-        return window.confirm(texto);
+        const partes = String(texto || '').split('\n\n');
+        const mensaje = partes[0] || '¿Deseas eliminar este elemento?';
+        const detalle = partes.slice(1).join(' ').trim() || null;
+        return pedirConfirmacion({
+            titulo: '¿Eliminar elemento?',
+            mensaje: mensaje,
+            detalle: detalle,
+            textoAceptar: 'Eliminar',
+            textoCancelar: 'Cancelar',
+            tipo: 'peligro',
+            icono: '🗑️'
+        });
     }
 
     async function borrar(url, texto, alTerminar) {
-        if (!confirmarBorrado(texto)) return;
+        const si = await confirmarBorrado(texto);
+        if (!si) return;
         try {
             const res = await fetch(url, {
                 method: 'DELETE',
@@ -4587,7 +5002,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // leían igual. El nombre es lo que se busca en esta lista, así que es lo
     // único que tiene garantizada la línea entera.
     function filaLista({ titulo, detalle, insignia, inactivo, onBorrar,
-                         foto, onFoto, onQuitarFoto, marcas, onEditar, nota }) {
+                         foto, onFoto, marcas, onEditar, nota,
+                         onAlternar, alternarActivo, alternarTitulo }) {
         const fila = document.createElement('div');
         fila.className = 'lista-fila' + (inactivo ? ' inactiva' : '');
 
@@ -4656,9 +5072,9 @@ document.addEventListener('DOMContentLoaded', () => {
             marcas.forEach(m => {
                 const b = document.createElement('button');
                 b.type = 'button';
-                b.className = 'lista-marca' + (m.activa ? ' activa' : '');
+                b.className = 'lista-marca' + (m.activa ? ' activa' : '') + (m.clase ? ' ' + m.clase : '');
                 b.textContent = m.texto;
-                b.title = (m.activa ? 'Quitar: ' : 'Marcar: ') + m.texto;
+                b.title = m.titulo || ((m.activa ? 'Quitar: ' : 'Marcar: ') + m.texto);
                 b.setAttribute('aria-pressed', m.activa ? 'true' : 'false');
                 b.addEventListener('click', m.onTocar);
                 meta.appendChild(b);
@@ -4696,23 +5112,25 @@ document.addEventListener('DOMContentLoaded', () => {
             acciones.appendChild(ed);
         }
 
-        if (onQuitarFoto && !inactivo) {
-            const quitar = document.createElement('button');
-            quitar.type = 'button';
-            quitar.className = 'lista-quitar-foto';
-            quitar.title = 'Quitar la foto';
-            quitar.setAttribute('aria-label', 'Quitar la foto de ' + titulo);
-            quitar.textContent = '🚫';
-            quitar.addEventListener('click', onQuitarFoto);
-            acciones.appendChild(quitar);
+
+        if (onAlternar) {
+            const btnAlt = document.createElement('button');
+            btnAlt.type = 'button';
+            btnAlt.className = 'lista-alternar' + (alternarActivo ? ' activo' : ' inactivo');
+            btnAlt.title = alternarTitulo || (alternarActivo ? 'Desactivar' : 'Activar');
+            btnAlt.setAttribute('aria-label', btnAlt.title);
+            btnAlt.setAttribute('aria-pressed', alternarActivo ? 'true' : 'false');
+            btnAlt.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`;
+            btnAlt.addEventListener('click', onAlternar);
+            acciones.appendChild(btnAlt);
         }
 
         if (!inactivo) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'lista-borrar';
-            btn.title = 'Eliminar';
-            btn.setAttribute('aria-label', 'Eliminar ' + titulo);
+            btn.title = 'Eliminar por completo';
+            btn.setAttribute('aria-label', 'Eliminar por completo ' + titulo);
             btn.textContent = '✕';
             btn.addEventListener('click', onBorrar);
             acciones.appendChild(btn);
@@ -4783,17 +5201,80 @@ document.addEventListener('DOMContentLoaded', () => {
 
         cont.innerHTML = '';
         cats.forEach(c => {
-            cont.appendChild(filaLista({
+            const estaActiva = c.activo !== 0;
+            const fila = filaLista({
                 titulo: c.nombre,
                 detalle: c.descripcion || '',
-                insignia: c.productos + (c.productos === 1 ? ' producto' : ' productos'),
-                inactivo: c.activo === 0,
+                insignia: (c.productos + (c.productos === 1 ? ' producto' : ' productos')) + (!estaActiva ? ' · Desactivada' : ''),
+                inactivo: false,
+                onEditar: () => abrirEditarCategoria(c),
+                onAlternar: () => alternarCategoria(c),
+                alternarActivo: estaActiva,
+                alternarTitulo: estaActiva
+                    ? `Desactivar "${c.nombre}" (ocultar de la caja sin borrar)`
+                    : `Activar "${c.nombre}" (mostrar en la caja)`,
                 onBorrar: () => borrar(
                     '/api/admin/categorias/' + c.id_categoria,
-                    '¿Eliminar la categoría "' + c.nombre + '"?',
+                    '¿Eliminar la categoría "' + c.nombre + '" por completo de la base de datos?',
                     () => { cargarCatalogoAdmin(); loadCatalogSetup(); })
-            }));
+            });
+            if (!estaActiva) {
+                fila.classList.add('cat-desactivada');
+            }
+            cont.appendChild(fila);
         });
+    }
+
+    async function alternarCategoria(cat) {
+        try {
+            const nuevoActivo = cat.activo ? 0 : 1;
+            const res = await fetch('/api/admin/categorias/' + cat.id_categoria, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activo: nuevoActivo,
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+
+            if (!res.ok || !data.success) {
+                notify(data.message || ('Error del servidor (código ' + res.status + ').'), 'error');
+                return;
+            }
+            notify(nuevoActivo ? `Categoría "${cat.nombre}" activada.` : `Categoría "${cat.nombre}" desactivada.`, 'ok');
+            await Promise.all([cargarCatalogoAdmin(), loadCatalogSetup(), fetchProductsAndMenu()]);
+        } catch (err) {
+            console.error('Error al alternar categoría:', err);
+            notify('Sin conexión con el servidor. Revisa que el servidor esté activo.', 'error');
+        }
+    }
+
+    async function alternarProducto(p) {
+        try {
+            const nuevoActivo = p.activo ? 0 : 1;
+            const res = await fetch('/api/admin/productos/' + p.id_producto + '/estado', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activo: nuevoActivo,
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+
+            if (!res.ok || !data.success) {
+                notify(data.message || ('Error del servidor (' + res.status + ').'), 'error');
+                return;
+            }
+            notify(nuevoActivo ? `"${p.nombre}" activado.` : `"${p.nombre}" desactivado.`, 'ok');
+            await Promise.all([cargarCatalogoAdmin(), fetchProductsAndMenu()]);
+        } catch (err) {
+            console.error('Error al alternar producto:', err);
+            notify('Sin conexión con el servidor. Revisa que el servidor esté activo.', 'error');
+        }
     }
 
     function pintarProductosAdmin() {
@@ -4817,16 +5298,24 @@ document.addEventListener('DOMContentLoaded', () => {
         // Agrupados por categoría, como en la caja: repasar veinte productos
         // mezclados obliga a leerlos todos para saber si falta una cerveza.
         agrupar(lista, p => p.categoria).forEach((productos, categoria) => {
-            cont.appendChild(cabeceraGrupo(categoria, productos.length));
+            const catObj = (catalogoAdmin.categorias || []).find(c => c.nombre === categoria);
+            const estaDesactivada = catObj && catObj.activo === 0;
+            cont.appendChild(cabeceraGrupo(categoria + (estaDesactivada ? ' · Desactivada' : ''), productos.length));
             productos.forEach(p => {
                 const precio = Number(p.precio_venta).toFixed(2) + ' Bs.';
-                cont.appendChild(filaLista({
+                const estaActivo = p.activo !== 0;
+                const fila = filaLista({
                     titulo: p.nombre,
                     detalle: [precio, p.stock_actual + ' u.'].join(' · '),
-                    insignia: p.vendido > 0 ? 'vendido ' + p.vendido + '×' : '',
-                    inactivo: p.activo === 0,
+                    insignia: (p.vendido > 0 ? 'vendido ' + p.vendido + '×' : '') + (!estaActivo ? ' · Desactivado' : ''),
+                    inactivo: false,
                     foto: urlFoto(p),
                     onEditar: () => abrirEditarProducto(p),
+                    onAlternar: () => alternarProducto(p),
+                    alternarActivo: estaActivo,
+                    alternarTitulo: estaActivo
+                        ? `Desactivar "${p.nombre}" (ocultar de la caja sin borrar)`
+                        : `Activar "${p.nombre}" (mostrar en la caja)`,
                     marcas: [
                         { texto: 'con acompañante', activa: !!p.requiere_acompanante,
                           onTocar: () => marcarAcompanamiento(p, 'requiere') },
@@ -4836,7 +5325,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     // La miniatura es el botón: se toca la foto para cambiarla, que
                     // es donde todo el mundo va a tocar de todas formas.
                     onFoto: () => pedirFotoPara(p.id_producto),
-                    onQuitarFoto: p.tiene_foto ? () => guardarFotoProducto(p.id_producto, '') : null,
                     onBorrar: () => borrar(
                         '/api/admin/productos/' + p.id_producto,
                         p.vendido > 0
@@ -4844,7 +5332,11 @@ document.addEventListener('DOMContentLoaded', () => {
                               'apareciendo en el cierre. ¿Continuar?'
                             : '¿Eliminar "' + p.nombre + '"?',
                         () => { cargarCatalogoAdmin(); loadCatalogSetup(); })
-                }));
+                });
+                if (!estaActivo) {
+                    fila.classList.add('cat-desactivada');
+                }
+                cont.appendChild(fila);
             });
         });
     }
@@ -4897,10 +5389,23 @@ document.addEventListener('DOMContentLoaded', () => {
         (catalogoAdmin.categorias || []).forEach(c => {
             const opt = document.createElement('option');
             opt.value = c.id_categoria;
-            opt.textContent = c.nombre;
+            opt.textContent = c.nombre + (c.activo === 0 ? ' (desactivada)' : '');
             sel.appendChild(opt);
         });
         sel.value = p.id_categoria || '';
+
+        // Mostrar foto actual del producto
+        const editFotoVista = document.getElementById('editar-foto-vista');
+        if (editFotoVista) {
+            if (p.tiene_foto) {
+                const fotoUrl = '/api/producto/' + p.id_producto + '/foto?v=' + (p.foto_v || 0);
+                editFotoVista.innerHTML = `<img src="${fotoUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">`;
+                editFotoVista.classList.add('tiene');
+            } else {
+                editFotoVista.innerHTML = '<span class="foto-vacia">Sin foto</span>';
+                editFotoVista.classList.remove('tiene');
+            }
+        }
 
         editarModal.classList.remove('hide');
         document.getElementById('editar-nombre').focus();
@@ -4966,6 +5471,115 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target === editarModal) cerrarEditarProducto();
     });
 
+    // Botoón cambiar foto en modal de edición
+    document.getElementById('editar-foto-btn').addEventListener('click', () => {
+        if (!productoEditando) return;
+        // Reutilizamos fotoSuelta pero con un listener especial para el modal
+        const idProd = productoEditando.id_producto;
+        productoDeLaFoto = idProd;
+        // Al guardar, actualizamos también la preview del modal
+        const origChange = fotoSuelta.onchange;
+        fotoSuelta.onchange = async (e) => {
+            const archivo = e.target.files && e.target.files[0];
+            if (!archivo) { fotoSuelta.onchange = null; return; }
+            try {
+                const dataUri = await reducirImagen(archivo);
+                await guardarFotoProducto(idProd, dataUri);
+                // Actualizar preview inmediatamente
+                const editFotoVista = document.getElementById('editar-foto-vista');
+                if (editFotoVista) {
+                    editFotoVista.innerHTML = `<img src="${dataUri}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">`;
+                    editFotoVista.classList.add('tiene');
+                }
+            } catch (err) {
+                notify(err.message || 'No se pudo usar esa imagen.', 'error');
+            } finally {
+                fotoSuelta.value = '';
+                fotoSuelta.onchange = null;
+                productoDeLaFoto = null;
+            }
+        };
+        fotoSuelta.click();
+    });
+
+    // ---- Editar una categoría -----------------------------------------------
+    const editarCatModal = document.getElementById('editar-categoria-modal');
+    let categoriaEditando = null;
+
+    function abrirEditarCategoria(c) {
+        categoriaEditando = c;
+        const cualEl = document.getElementById('editar-categoria-cual');
+        if (cualEl) cualEl.textContent = c.nombre;
+        const nombreInput = document.getElementById('editar-categoria-nombre');
+        if (nombreInput) nombreInput.value = c.nombre || '';
+        const tipoSelect = document.getElementById('editar-categoria-tipo');
+        if (tipoSelect) tipoSelect.value = c.tipo || 'BEBIDA';
+        const descInput = document.getElementById('editar-categoria-descripcion');
+        if (descInput) descInput.value = c.descripcion || '';
+
+        if (editarCatModal) editarCatModal.classList.remove('hide');
+        if (nombreInput) nombreInput.focus();
+    }
+
+    function cerrarEditarCategoria() {
+        if (editarCatModal) editarCatModal.classList.add('hide');
+        categoriaEditando = null;
+    }
+
+    async function guardarEdicionCategoria() {
+        if (!categoriaEditando) return;
+        const idCat = categoriaEditando.id_categoria;
+        const boton = document.getElementById('editar-categoria-guardar');
+        if (boton) boton.disabled = true;
+
+        const nombreInput = document.getElementById('editar-categoria-nombre');
+        const tipoSelect = document.getElementById('editar-categoria-tipo');
+        const descInput = document.getElementById('editar-categoria-descripcion');
+
+        const nuevoNombre = nombreInput ? nombreInput.value.trim() : '';
+        const nuevoTipo = tipoSelect ? tipoSelect.value : 'BEBIDA';
+        const nuevaDesc = descInput ? descInput.value.trim() : '';
+
+        if (!nuevoNombre) {
+            notify('La categoría necesita un nombre.', 'error');
+            if (boton) boton.disabled = false;
+            return;
+        }
+
+        cerrarEditarCategoria();
+        try {
+            const res = await fetch('/api/admin/categorias/' + idCat, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nombre: nuevoNombre,
+                    tipo: nuevoTipo,
+                    descripcion: nuevaDesc,
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo guardar los cambios.', 'error');
+                return;
+            }
+            notify(data.message || `Categoría "${nuevoNombre}" actualizada.`, 'ok');
+            await Promise.all([cargarCatalogoAdmin(), loadCatalogSetup(), fetchProductsAndMenu()]);
+        } catch (err) {
+            console.error('Error al editar categoría:', err);
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        } finally {
+            if (boton) boton.disabled = false;
+        }
+    }
+
+    document.getElementById('editar-categoria-cerrar')?.addEventListener('click', cerrarEditarCategoria);
+    document.getElementById('editar-categoria-guardar')?.addEventListener('click', guardarEdicionCategoria);
+    editarCatModal?.addEventListener('click', e => {
+        if (e.target === editarCatModal) cerrarEditarCategoria();
+    });
+
 
     // ---- Personal -----------------------------------------------------------
     let personalAdmin = { cajeros: [], meseros: [] };
@@ -4984,13 +5598,25 @@ document.addEventListener('DOMContentLoaded', () => {
     function pintarCajeros() {
         const cont = document.getElementById('lista-cajeros');
         if (!cont) return;
-        const cajeros = personalAdmin.cajeros || [];
-        document.getElementById('cont-cajeros').textContent = cajeros.length;
+        const inputBuscar = document.getElementById('buscar-cajero');
+        const filtro = (inputBuscar ? inputBuscar.value : '').trim().toLowerCase();
+        const todos = personalAdmin.cajeros || [];
+        const lista = filtro
+            ? todos.filter(c => (c.nombre || '').toLowerCase().includes(filtro) ||
+                                (c.usuario || '').toLowerCase().includes(filtro))
+            : todos;
 
-        if (!cajeros.length) return pintarVacio(cont, 'Todavía no hay cajeros.');
+        const contEl = document.getElementById('cont-cajeros');
+        if (contEl) {
+            contEl.textContent = filtro ? lista.length + ' de ' + todos.length : todos.length;
+        }
+
+        if (!lista.length) {
+            return pintarVacio(cont, filtro ? 'Ningún cajero con ese nombre o usuario.' : 'Todavía no hay cajeros.');
+        }
 
         cont.innerHTML = '';
-        cajeros.forEach(c => {
+        lista.forEach(c => {
             const partes = [c.usuario];
             if (c.meseros) partes.push(c.meseros + (c.meseros === 1 ? ' mesero' : ' meseros'));
             cont.appendChild(filaLista({
@@ -5053,6 +5679,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('buscar-producto-cat').addEventListener('input', pintarProductosAdmin);
+    const inputBuscarCajero = document.getElementById('buscar-cajero');
+    if (inputBuscarCajero) inputBuscarCajero.addEventListener('input', pintarCajeros);
     document.getElementById('buscar-mesero').addEventListener('input', pintarMeseros);
 
     // TAB: PERSONAL & BARRAS SETUP
@@ -5378,8 +6006,52 @@ document.addEventListener('DOMContentLoaded', () => {
     let adminStockCategories = [];
     let adminStockActiveCategory = 'all';
     let adminStockSearchQuery = '';
+    let adminStockPage = 1;
     let currentStockModalProduct = null;
     let currentStockModalType = 'ENTRADA';
+
+    function getStockCardsPerPage() {
+        const grid = document.getElementById('admin-stock-cards-grid');
+        const main = document.querySelector('#admin-view .admin-main');
+
+        // Si ya hay tarjetas en pantalla, medir las columnas reales físicamente
+        if (grid && grid.children.length > 0 && grid.clientWidth > 0) {
+            const cards = Array.from(grid.querySelectorAll('.admin-stock-card'));
+            if (cards.length > 0) {
+                const top0 = cards[0].offsetTop;
+                const row1 = cards.filter(c => Math.abs(c.offsetTop - top0) < 12);
+                if (row1.length > 0) {
+                    return Math.max(2, row1.length * 2);
+                }
+            }
+        }
+
+        let cols = 6;
+        let width = 0;
+
+        if (grid && grid.clientWidth > 0) {
+            width = grid.clientWidth;
+            const comp = window.getComputedStyle(grid).gridTemplateColumns;
+            if (comp && comp !== 'none') {
+                const tracks = comp.trim().split(/\s+/).filter(Boolean);
+                if (tracks.length > 0) {
+                    return Math.max(2, tracks.length * 2);
+                }
+            }
+        } else if (main && main.clientWidth > 0) {
+            width = main.clientWidth - 48;
+        } else {
+            width = (window.innerWidth || 1366) - 280;
+        }
+
+        // Cada columna en .admin-stock-grid mide min 220px con gap 20px
+        if (width > 0) {
+            cols = Math.max(1, Math.floor((width + 20) / 240));
+        }
+
+        // Retorna EXACTAMENTE 2 filas completas
+        return Math.max(2, cols * 2);
+    }
 
     async function loadStockSetup() {
         try {
@@ -5422,6 +6094,7 @@ document.addEventListener('DOMContentLoaded', () => {
         allBtn.textContent = '🍹 Todos';
         allBtn.addEventListener('click', () => {
             adminStockActiveCategory = 'all';
+            adminStockPage = 1;
             document.querySelectorAll('#admin-stock-category-pills .category-btn').forEach(b => b.classList.remove('active'));
             allBtn.classList.add('active');
             renderAdminStockGrid();
@@ -5436,6 +6109,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.textContent = `${icons[cat.tipo] || '📦'} ${cat.nombre}`;
             btn.addEventListener('click', () => {
                 adminStockActiveCategory = cat.id_categoria;
+                adminStockPage = 1;
                 document.querySelectorAll('#admin-stock-category-pills .category-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 renderAdminStockGrid();
@@ -5447,8 +6121,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderAdminStockGrid() {
         const grid = document.getElementById('admin-stock-cards-grid');
         const summaryText = document.getElementById('admin-stock-summary-text');
+        const paginationContainer = document.getElementById('admin-stock-pagination');
         if (!grid) return;
-        grid.innerHTML = '';
 
         const search = (adminStockSearchQuery || '').toLowerCase().trim();
         const filtered = adminStockProducts.filter(p => {
@@ -5467,13 +6141,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (filtered.length === 0) {
             grid.innerHTML = `<div class="empty-cart-msg" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center;">No se encontraron productos que coincidan con la búsqueda.</div>`;
+            if (paginationContainer) paginationContainer.innerHTML = '';
             return;
         }
+
+        // Medir cuántas tarjetas entran en 2 filas ANTES de limpiar el grid
+        let perPage = getStockCardsPerPage();
+        const totalItems = filtered.length;
+        let totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+        if (adminStockPage > totalPages) adminStockPage = totalPages;
+        if (adminStockPage < 1) adminStockPage = 1;
+
+        const startIdx = (adminStockPage - 1) * perPage;
+        const pagedProducts = filtered.slice(startIdx, startIdx + perPage);
 
         const catMap = {};
         adminStockCategories.forEach(c => { catMap[c.id_categoria] = c.nombre; });
 
-        filtered.forEach(p => {
+        grid.innerHTML = '';
+
+        pagedProducts.forEach(p => {
             const card = document.createElement('div');
             card.className = 'admin-stock-card';
             card.dataset.id = p.id_producto;
@@ -5486,7 +6173,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const tope = p.stock_tope || p.stock_actual || 10;
             const pct = tope > 0 ? Math.min(100, Math.max(0, Math.round((visibleStock / tope) * 100))) : (visibleStock > 0 ? 100 : 0);
             const isOut = visibleStock <= 0;
-            const statusClass = isOut ? 'out' : (pct <= 40 ? 'low' : 'normal');
+            const stockStatus = isOut ? 'is-out' : (pct <= 40 ? 'is-low' : 'is-ok');
             const strokeColor = isOut ? '#e5e7eb' : (pct <= 40 ? '#ef4444' : '#facc15');
             const pathLen = 216.77;
             const offset = pathLen * (1 - (isOut ? 0 : pct / 100));
@@ -5519,14 +6206,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     </svg>
                     <div class="card-mid-body">
                         <h3 class="product-card-title">${escapeHtml(p.nombre)}</h3>
-                    </div>
-                    <div class="stock-footer ${statusClass}">
-                        <svg class="stock-footer-wave" viewBox="0 0 200 30" preserveAspectRatio="none" aria-hidden="true">
-                            <path d="M 0 30 L 0 14 C 40 26, 75 4, 130 12 C 160 16, 185 8, 200 12 L 200 30 Z" fill="currentColor"></path>
-                        </svg>
-                        <div class="stock-footer-content">
-                            <div class="stock-label-line">Stock: ${pct}%</div>
-                            <div class="stock-units-line stock ${isOut ? 'out' : ''}">${isOut ? '0 UDS' : `${visibleStock} UDS`}</div>
+                        <div class="admin-stock-qty-pill ${stockStatus}">
+                            <span class="stock-qty-label">Stock:</span>
+                            <span class="stock-qty-num">${visibleStock}</span>
+                            <span class="stock-qty-unit">${isOut ? 'agotado' : 'uds.'}</span>
                         </div>
                     </div>
                 </div>
@@ -5546,7 +6229,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
 
-            // Botones de acción
             card.querySelector('.stock-action-btn.entrada').addEventListener('click', () => openStockActionModal(p, 'ENTRADA'));
             card.querySelector('.stock-action-btn.salida').addEventListener('click', () => openStockActionModal(p, 'SALIDA'));
             card.querySelector('.stock-action-btn.ajuste').addEventListener('click', () => openStockActionModal(p, 'AJUSTE'));
@@ -5554,7 +6236,81 @@ document.addEventListener('DOMContentLoaded', () => {
 
             grid.appendChild(card);
         });
+
+        // SALVAGUARDA ESTRICTA EN EL DOM: NUNCA MÁS DE 2 FILAS
+        const renderedCards = Array.from(grid.querySelectorAll('.admin-stock-card'));
+        if (renderedCards.length > 0) {
+            const firstTop = renderedCards[0].offsetTop;
+            const row1Cards = renderedCards.filter(c => Math.abs(c.offsetTop - firstTop) < 12);
+            const actualCols = row1Cards.length;
+            if (actualCols > 0) {
+                const maxAllowedCards = actualCols * 2; // EXACTAMENTE 2 FILAS
+                if (renderedCards.length > maxAllowedCards) {
+                    for (let i = maxAllowedCards; i < renderedCards.length; i++) {
+                        renderedCards[i].remove();
+                    }
+                }
+                if (perPage !== maxAllowedCards) {
+                    perPage = maxAllowedCards;
+                    totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+                    if (adminStockPage > totalPages) adminStockPage = totalPages;
+                }
+            }
+        }
+
+        // Render Pagination Controls
+        renderAdminStockPaginationControls(paginationContainer, adminStockPage, totalPages, totalItems);
     }
+
+    function renderAdminStockPaginationControls(container, currentPage, totalPages, totalItems) {
+        if (!container) return;
+        if (totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+        container.innerHTML = `
+            <button type="button" class="comanda-pag-btn" id="admin-stock-prev" ${currentPage <= 1 ? 'disabled' : ''}>
+                ◀ Anterior
+            </button>
+            <span class="comanda-pag-info">
+                Página <strong>${currentPage}</strong> de <strong>${totalPages}</strong> (${totalItems} productos)
+            </span>
+            <button type="button" class="comanda-pag-btn" id="admin-stock-next" ${currentPage >= totalPages ? 'disabled' : ''}>
+                Siguiente ▶
+            </button>
+        `;
+
+        const prevBtn = document.getElementById('admin-stock-prev');
+        if (prevBtn && currentPage > 1) {
+            prevBtn.addEventListener('click', () => {
+                adminStockPage--;
+                renderAdminStockGrid();
+                const adminMain = document.querySelector('#admin-view .admin-main');
+                if (adminMain) adminMain.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        }
+        const nextBtn = document.getElementById('admin-stock-next');
+        if (nextBtn && currentPage < totalPages) {
+            nextBtn.addEventListener('click', () => {
+                adminStockPage++;
+                renderAdminStockGrid();
+                const adminMain = document.querySelector('#admin-view .admin-main');
+                if (adminMain) adminMain.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        }
+    }
+
+    // Auto-ajustar a exactamente 2 filas ante redimensiones de ventana
+    let stockResizeTimer = null;
+    window.addEventListener('resize', () => {
+        const stockTab = document.getElementById('tab-stock');
+        if (stockTab && !stockTab.classList.contains('hide')) {
+            clearTimeout(stockResizeTimer);
+            stockResizeTimer = setTimeout(() => {
+                renderAdminStockGrid();
+            }, 120);
+        }
+    });
 
     // Modal de acción rápida de stock (+ Entrada, - Salida, Ajuste)
     function openStockActionModal(prod, type = 'ENTRADA') {
@@ -5790,6 +6546,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (adminStockSearchInput) {
         adminStockSearchInput.addEventListener('input', (e) => {
             adminStockSearchQuery = e.target.value;
+            adminStockPage = 1;
             renderAdminStockGrid();
         });
     }
@@ -5869,9 +6626,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // TAB: INVENTARIO / STOCK REPORT
     let inventoryPage = 1;
-    const inventoryLimit = 10;
+    const inventoryLimit = 12;
     let allInventoryProducts = [];
     let allInventoryCategoriesMap = {};
+    let filteredInventoryProducts = [];
+
+    let invFilterSearch = '';
+    let invFilterCategory = 'all';
+    let invFilterStatus = 'all';
+    let invFilterSort = 'id_asc';
+    let invFiltersInitialized = false;
 
     async function loadInventoryData() {
         try {
@@ -5883,74 +6647,225 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (data.categorias) {
                 data.categorias.forEach(cat => {
-                    allInventoryCategoriesMap[cat.id_categoria] = cat.nombre; // Fixed to show actual category name
+                    allInventoryCategoriesMap[cat.id_categoria] = cat.nombre;
                 });
             }
 
-            inventoryPage = 1; // reset to page 1 on tab click
-            renderInventoryPage();
+            const catSelect = document.getElementById('inv-filter-cat');
+            if (catSelect && data.categorias) {
+                const currentVal = catSelect.value || 'all';
+                catSelect.innerHTML = '<option value="all">Todas las categorías</option>';
+                data.categorias.forEach(cat => {
+                    const opt = document.createElement('option');
+                    opt.value = cat.id_categoria;
+                    opt.textContent = cat.nombre;
+                    catSelect.appendChild(opt);
+                });
+                catSelect.value = currentVal;
+            }
+
+            initInventoryFilterListeners();
+            applyInventoryFilters();
         } catch (err) {
             console.error("Error loading inventory:", err);
         }
     }
 
+    function initInventoryFilterListeners() {
+        if (invFiltersInitialized) return;
+        invFiltersInitialized = true;
+
+        const searchInput = document.getElementById('inv-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                invFilterSearch = e.target.value;
+                inventoryPage = 1;
+                applyInventoryFilters();
+            });
+        }
+
+        const catSelect = document.getElementById('inv-filter-cat');
+        if (catSelect) {
+            catSelect.addEventListener('change', (e) => {
+                invFilterCategory = e.target.value;
+                inventoryPage = 1;
+                applyInventoryFilters();
+            });
+        }
+
+        const statusSelect = document.getElementById('inv-filter-status');
+        if (statusSelect) {
+            statusSelect.addEventListener('change', (e) => {
+                invFilterStatus = e.target.value;
+                inventoryPage = 1;
+                applyInventoryFilters();
+            });
+        }
+
+        const sortSelect = document.getElementById('inv-filter-sort');
+        if (sortSelect) {
+            sortSelect.addEventListener('change', (e) => {
+                invFilterSort = e.target.value;
+                inventoryPage = 1;
+                applyInventoryFilters();
+            });
+        }
+
+        const clearBtn = document.getElementById('inv-clear-filters-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                invFilterSearch = '';
+                invFilterCategory = 'all';
+                invFilterStatus = 'all';
+                invFilterSort = 'id_asc';
+
+                if (searchInput) searchInput.value = '';
+                if (catSelect) catSelect.value = 'all';
+                if (statusSelect) statusSelect.value = 'all';
+                if (sortSelect) sortSelect.value = 'id_asc';
+
+                inventoryPage = 1;
+                applyInventoryFilters();
+            });
+        }
+
+        // Listeners de paginación
+        const prevBtn = document.getElementById('inventory-prev-btn');
+        if (prevBtn) {
+            prevBtn.addEventListener('click', () => {
+                if (inventoryPage > 1) {
+                    inventoryPage--;
+                    renderInventoryPage();
+                    const container = document.querySelector('#tab-inventario .table-container');
+                    if (container) container.scrollTop = 0;
+                }
+            });
+        }
+
+        const nextBtn = document.getElementById('inventory-next-btn');
+        if (nextBtn) {
+            nextBtn.addEventListener('click', () => {
+                const totalPages = Math.ceil(filteredInventoryProducts.length / inventoryLimit) || 1;
+                if (inventoryPage < totalPages) {
+                    inventoryPage++;
+                    renderInventoryPage();
+                    const container = document.querySelector('#tab-inventario .table-container');
+                    if (container) container.scrollTop = 0;
+                }
+            });
+        }
+    }
+
+    function applyInventoryFilters() {
+        const query = (invFilterSearch || '').toLowerCase().trim();
+
+        filteredInventoryProducts = allInventoryProducts.filter(p => {
+            // Buscador por nombre, ID o categoría
+            const catName = (allInventoryCategoriesMap[p.id_categoria] || '').toLowerCase();
+            const prodName = (p.nombre || '').toLowerCase();
+            const prodId = '#' + p.id_producto;
+            const matchSearch = !query || prodName.includes(query) || prodId.includes(query) || catName.includes(query);
+
+            // Categoría
+            const matchCat = (invFilterCategory === 'all') || (p.id_categoria === invFilterCategory);
+
+            // Estado
+            let matchStatus = true;
+            if (invFilterStatus === 'out') {
+                matchStatus = (p.stock_actual <= 0);
+            } else if (invFilterStatus === 'low') {
+                matchStatus = (p.stock_actual > 0 && p.stock_actual <= 15);
+            } else if (invFilterStatus === 'ok') {
+                matchStatus = (p.stock_actual > 0);
+            }
+
+            return matchSearch && matchCat && matchStatus;
+        });
+
+        // Ordenamiento
+        filteredInventoryProducts.sort((a, b) => {
+            if (invFilterSort === 'id_desc') return b.id_producto - a.id_producto;
+            if (invFilterSort === 'nombre_asc') return (a.nombre || '').localeCompare(b.nombre || '');
+            if (invFilterSort === 'stock_asc') return a.stock_actual - b.stock_actual;
+            if (invFilterSort === 'stock_desc') return b.stock_actual - a.stock_actual;
+            return a.id_producto - b.id_producto; // default id_asc
+        });
+
+        const summaryCount = document.getElementById('inv-summary-count');
+        if (summaryCount) {
+            summaryCount.innerHTML = `<strong>${allInventoryProducts.length}</strong> productos en total · Mostrando <strong>${filteredInventoryProducts.length}</strong> con filtros aplicados`;
+        }
+
+        renderInventoryPage();
+    }
+
+    function formatFechaRegistro(fechaStr) {
+        if (!fechaStr) return '<span style="color: #9ca3af;">—</span>';
+        try {
+            const parts = fechaStr.split(' ');
+            const dateParts = parts[0].split('-');
+            if (dateParts.length === 3) {
+                const timePart = parts[1] ? parts[1].slice(0, 5) : '';
+                return `<span style="font-size: 0.82rem; color: #374151; font-weight: 600;">${dateParts[2]}/${dateParts[1]}/${dateParts[0]}</span> <small style="color: #6b7280; font-size: 0.74rem;">${timePart}</small>`;
+            }
+            return escapeHtml(fechaStr);
+        } catch {
+            return escapeHtml(fechaStr);
+        }
+    }
+
     function renderInventoryPage() {
         const tbody = document.getElementById('inventory-table-body');
+        const pageInfo = document.getElementById('inventory-page-info');
+        const prevBtn = document.getElementById('inventory-prev-btn');
+        const nextBtn = document.getElementById('inventory-next-btn');
+        if (!tbody) return;
         tbody.innerHTML = '';
 
-        if (allInventoryProducts.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">No hay productos registrados</td></tr>';
-            document.getElementById('inventory-page-info').textContent = 'Mostrando página 0 de 0';
-            document.getElementById('inventory-prev-btn').disabled = true;
-            document.getElementById('inventory-next-btn').disabled = true;
+        if (filteredInventoryProducts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 28px; color: #71717a; font-weight: 600;">No se encontraron productos con los filtros aplicados.</td></tr>';
+            if (pageInfo) pageInfo.innerHTML = 'Página <strong>0</strong> de <strong>0</strong> (0 productos)';
+            if (prevBtn) prevBtn.disabled = true;
+            if (nextBtn) nextBtn.disabled = true;
             return;
         }
 
-        const totalPages = Math.ceil(allInventoryProducts.length / inventoryLimit);
+        const totalPages = Math.ceil(filteredInventoryProducts.length / inventoryLimit) || 1;
         if (inventoryPage > totalPages) inventoryPage = totalPages;
         if (inventoryPage < 1) inventoryPage = 1;
 
         const start = (inventoryPage - 1) * inventoryLimit;
         const end = start + inventoryLimit;
-        const pageProducts = allInventoryProducts.slice(start, end);
+        const pageProducts = filteredInventoryProducts.slice(start, end);
 
         pageProducts.forEach(p => {
             const catName = allInventoryCategoriesMap[p.id_categoria] || 'General';
-            const isLow = p.stock_actual <= 15; // Warn if stock is 15 or less
-            const stockStyle = isLow ? 'color: var(--danger); font-weight: 700;' : 'font-weight: 700;';
+            let stockBadge = '';
+            if (p.stock_actual <= 0) {
+                stockBadge = `<span class="badge-stock agotado">0 ⚠️ (Agotado)</span>`;
+            } else if (p.stock_actual <= 15) {
+                stockBadge = `<span class="badge-stock bajo">${p.stock_actual} ⚠️ (Bajo)</span>`;
+            } else {
+                stockBadge = `<span class="badge-stock normal">${p.stock_actual} uds.</span>`;
+            }
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>#${p.id_producto}</td>
+                <td><strong>#${p.id_producto}</strong></td>
                 <td>${escapeHtml(catName)}</td>
-                <td style="font-weight: 600;">${escapeHtml(p.nombre)}</td>
-                <td style="${stockStyle}">${p.stock_actual} ${isLow ? '⚠️ (Bajo)' : ''}</td>
+                <td style="font-weight: 700; color: #000000;">${escapeHtml(p.nombre)}</td>
+                <td>${stockBadge}</td>
             `;
             tbody.appendChild(tr);
         });
 
-        document.getElementById('inventory-page-info').textContent = `Mostrando página ${inventoryPage} de ${totalPages} (Total: ${allInventoryProducts.length} productos)`;
+        if (pageInfo) {
+            pageInfo.innerHTML = `Página <strong>${inventoryPage}</strong> de <strong>${totalPages}</strong> (${filteredInventoryProducts.length} productos)`;
+        }
         
-        // Enable/Disable pagination buttons
-        document.getElementById('inventory-prev-btn').disabled = (inventoryPage === 1);
-        document.getElementById('inventory-next-btn').disabled = (inventoryPage === totalPages);
+        if (prevBtn) prevBtn.disabled = (inventoryPage <= 1);
+        if (nextBtn) nextBtn.disabled = (inventoryPage >= totalPages);
     }
-
-    // Bind Pagination listeners
-    document.getElementById('inventory-prev-btn').addEventListener('click', () => {
-        if (inventoryPage > 1) {
-            inventoryPage--;
-            renderInventoryPage();
-        }
-    });
-
-    document.getElementById('inventory-next-btn').addEventListener('click', () => {
-        const totalPages = Math.ceil(allInventoryProducts.length / inventoryLimit);
-        if (inventoryPage < totalPages) {
-            inventoryPage++;
-            renderInventoryPage();
-        }
-    });
 
     // Reporte de inventario en papel térmico, con el mismo maquetado en columnas
     // fijas que los tickets de venta (ver rawbt.js).
@@ -5958,6 +6873,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const H = ThermalPrinter.helpers;
         const w = settings.width;
         const ops = [];
+
+        const prods = (filteredInventoryProducts && filteredInventoryProducts.length > 0) ? filteredInventoryProducts : allInventoryProducts;
 
         ops.push(H.op('*** MASTERDRINKS ***', { align: 'center', bold: true, tall: true, isLogo: true }));
         ops.push(H.op('REPORTE DE INVENTARIO', { align: 'center', bold: true }));
@@ -5967,7 +6884,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Agrupado por categoría: en 32 columnas se lee mucho mejor que una
         // tabla de cuatro columnas apretadas.
         const porCategoria = new Map();
-        allInventoryProducts.forEach(p => {
+        prods.forEach(p => {
             const cat = allInventoryCategoriesMap[p.id_categoria] || 'General';
             if (!porCategoria.has(cat)) porCategoria.set(cat, []);
             porCategoria.get(cat).push(p);
@@ -5985,7 +6902,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ops.push(H.op(H.divider(w)));
         });
 
-        ops.push(H.op('Total de productos: ' + allInventoryProducts.length));
+        ops.push(H.op('Productos listados: ' + prods.length + ' de ' + allInventoryProducts.length));
         ops.push(H.op('Con stock bajo (<= 15): ' + bajos));
         ops.push(H.op(''));
         ops.push(H.op('* Indica stock bajo', { align: 'center' }));
@@ -6351,22 +7268,26 @@ document.addEventListener('DOMContentLoaded', () => {
         promosAdmin.forEach(pr => {
             const dentro = (pr.contenido || [])
                 .map(c => c.cantidad + ' × ' + c.nombre).join('  +  ');
+            const estaActiva = Boolean(pr.activa);
             const fila = filaLista({
                 titulo: pr.nombre,
                 detalle: Number(pr.precio).toFixed(2) + ' Bs.',
                 insignia: pr.ahorro > 0 ? 'ahorra ' + Number(pr.ahorro).toFixed(2) : null,
                 nota: dentro,
-                inactivo: !pr.activa,
+                inactivo: false, // Una promoción apagada NO es "retirada": se puede volver a encender en cualquier momento
                 foto: urlFotoPromo(pr),
                 onFoto: () => pedirFotoParaPromo(pr.id_promocion),
                 onEditar: () => editarPromocion(pr),
                 marcas: [{
-                    texto: pr.activa ? 'Encendida' : 'Apagada',
-                    activa: !!pr.activa,
+                    texto: estaActiva ? 'Encendida' : 'Apagada',
+                    activa: estaActiva,
                     onTocar: () => alternarPromocion(pr)
                 }],
                 onBorrar: () => borrarPromocion(pr)
             });
+            if (!estaActiva) {
+                fila.classList.add('promo-apagada');
+            }
             lista.appendChild(fila);
         });
     }
@@ -6414,6 +7335,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function alternarPromocion(pr) {
         try {
+            const nuevaActiva = pr.activa ? 0 : 1;
             const res = await fetch('/api/admin/promociones/' + pr.id_promocion, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -6421,16 +7343,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     nombre: pr.nombre,
                     descripcion: pr.descripcion,
                     precio: pr.precio,
-                    activa: !pr.activa,
+                    activa: nuevaActiva,
                     id_admin: currentUser ? currentUser.id_admin : 1
                 })
             });
             const data = await res.json();
             if (!res.ok || !data.success) {
-                notify(data.message || 'No se pudo cambiar.', 'error');
+                notify(data.message || 'No se pudo cambiar el estado.', 'error');
                 return;
             }
-            notify(pr.activa ? '"' + pr.nombre + '" apagada.' : '"' + pr.nombre + '" encendida.', 'ok');
+            notify(nuevaActiva ? `"${pr.nombre}" encendida.` : `"${pr.nombre}" apagada.`, 'ok');
             cargarPromociones();
             fetchProductsAndMenu();
         } catch (err) {
@@ -6439,7 +7361,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function borrarPromocion(pr) {
-        if (!confirm('¿Eliminar la promoción "' + pr.nombre + '"?\n\nLos productos que lleva dentro no se tocan.')) return;
+        const si = await pedirConfirmacion({
+            titulo: '¿Eliminar promoción?',
+            mensaje: `¿Deseas eliminar la promoción "${pr.nombre}"?`,
+            detalle: 'Los productos que lleva dentro no se tocan.',
+            textoAceptar: 'Eliminar',
+            textoCancelar: 'Cancelar',
+            tipo: 'peligro',
+            icono: '🗑️'
+        });
+        if (!si) return;
         try {
             const res = await fetch('/api/admin/promociones/' + pr.id_promocion, {
                 method: 'DELETE',
@@ -6451,7 +7382,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 notify(data.message || 'No se pudo eliminar.', 'error');
                 return;
             }
-            notify(data.message, data.retirada ? 'warn' : 'ok', data.retirada ? 7000 : 4000);
+            notify(data.message, 'ok');
             if (promoEditando === pr.id_promocion) limpiarFormularioPromo();
             cargarPromociones();
             fetchProductsAndMenu();
@@ -6502,8 +7433,37 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const btnFullscreen = document.getElementById('btn-toggle-fullscreen');
+    function actualizarBotonFullscreen() {
+        if (!btnFullscreen) return;
+        const textEl = btnFullscreen.querySelector('.fs-text');
+        const iconEl = btnFullscreen.querySelector('.fs-icon');
+        const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+        if (textEl) textEl.textContent = isFs ? 'Salir de Pantalla Completa' : 'Pantalla Completa';
+        if (iconEl) iconEl.textContent = isFs ? '✕' : '⛶';
+    }
+
     if (btnFullscreen) {
         btnFullscreen.addEventListener('click', () => {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                localStorage.setItem('pwa_fullscreen', '1');
+                const docEl = document.documentElement;
+                if (docEl.requestFullscreen) docEl.requestFullscreen().catch(() => {});
+                else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
+            } else {
+                localStorage.setItem('pwa_fullscreen', '0');
+                if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+                else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+            }
+        });
+
+        document.addEventListener('fullscreenchange', actualizarBotonFullscreen);
+        document.addEventListener('webkitfullscreenchange', actualizarBotonFullscreen);
+        actualizarBotonFullscreen();
+    }
+
+    const adminFsBtn = document.getElementById('admin-fullscreen-btn');
+    if (adminFsBtn) {
+        adminFsBtn.addEventListener('click', () => {
             if (!document.fullscreenElement && !document.webkitFullscreenElement) {
                 localStorage.setItem('pwa_fullscreen', '1');
                 const docEl = document.documentElement;

@@ -23,7 +23,7 @@
     <link rel="icon" type="image/png" href="icons/icon-192.png">
 
     <!-- Main Stylesheet -->
-    <link rel="stylesheet" href="style.css?v=40">
+    <link rel="stylesheet" href="style.css?v=79">
 </head>
 
 <body>
@@ -34,11 +34,16 @@
 
     <!-- 1. GENERAL LOGIN VIEW -->
     <main id="login-view" class="auth-container">
+        <!-- Botón de Pantalla Completa en la parte superior izquierda -->
+        <button type="button" id="btn-toggle-fullscreen" class="btn-fullscreen-topleft" title="Pantalla Completa">
+            <span class="fs-icon">⛶</span>
+            <span class="fs-text">Pantalla Completa</span>
+        </button>
+
         <div class="glass-card auth-card">
             <header class="auth-header">
                 <div class="logo-container">🍹</div>
                 <h1 class="gradient-text">MasterDrinks POS</h1>
-                <p class="auth-subtitle">Ingresa tus credenciales para acceder al sistema</p>
                 <span class="instancia-badge hide"></span>
             </header>
             <form id="login-form" class="auth-form">
@@ -54,16 +59,7 @@
                 </div>
                 <button type="submit" class="primary-btn full-btn">Iniciar Sesión</button>
             </form>
-            <button type="button" id="btn-pwa-install" class="pwa-install-btn">
-                <span>📥 Instalar aplicación en este equipo</span>
-            </button>
-            <button type="button" id="btn-toggle-fullscreen" class="secondary-btn full-btn" style="margin-top: 10px; font-weight: 700;">
-                <span>⛶ Activar Pantalla Completa</span>
-            </button>
             <div id="login-error" class="error-msg hide"></div>
-            <!-- Sello de versión. Sirve para saber si esta tablet tiene los
-                 cambios o sigue con los de ayer sin tener que adivinarlo. -->
-            <p class="version-sello">versión <span class="version-num">—</span></p>
         </div>
     </main>
 
@@ -317,9 +313,10 @@
                      encontrarlo, y es de las cosas que se buscan con prisa. -->
                 <div class="admin-user-info">
                     <span class="user-name" id="admin-user-name">Administrador Principal</span>
-                    <button id="admin-logout-btn" class="admin-salir" title="Cerrar sesión">
-                        Salir
-                    </button>
+                    <div style="display: inline-flex; gap: 6px; align-items: center;">
+                        <button type="button" id="admin-fullscreen-btn" class="admin-fs-btn" title="Pantalla Completa">⛶</button>
+                        <button id="admin-logout-btn" class="admin-salir" title="Cerrar sesión">Salir</button>
+                    </div>
                 </div>
                 <nav class="admin-nav">
                     <button class="nav-tab-btn active" data-tab="tab-dashboard"><span class="nav-icono">📊</span><span
@@ -341,9 +338,7 @@
                     <button class="nav-tab-btn" data-tab="tab-auditoria"><span class="nav-icono">🔍</span><span
                             class="nav-texto">Logs &amp; Auditoría</span></button>
                 </nav>
-                <div class="sidebar-footer">
-                    <p class="version-sello">versión <span class="version-num">—</span></p>
-                </div>
+                <div class="sidebar-footer"></div>
             </aside>
 
             <!-- Main Content Area -->
@@ -414,6 +409,29 @@
                                 <label for="cfg-responsable">Responsable</label>
                                 <input type="text" id="cfg-responsable" maxlength="120"
                                     placeholder="Ej. Adrián Frontanilla">
+                            </div>
+                        </div>
+                        <!-- Logo personalizado para tickets térmicos -->
+                        <div class="logo-ticket-card-section" style="margin-top: 18px; padding-top: 16px; border-top: 1px dashed rgba(0,0,0,0.18);">
+                            <label style="display: block; font-weight: 700; margin-bottom: 4px; font-size: 0.95rem;">
+                                🖨️ Logo del ticket térmico
+                            </label>
+                            <p class="campo-nota" style="margin-top: 0; margin-bottom: 12px;">
+                                Logotipo o marca que encabeza cada ticket impreso y la vista previa. Si no subes ninguno, se utiliza el logotipo de Euphoria por defecto.
+                            </p>
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <div class="logo-ticket-preview-box" style="width: 140px; height: 60px; background: #ffffff; border: 2px solid #000000; border-radius: 8px; box-shadow: 2px 2px 0px #000000; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 4px;">
+                                    <img id="logo-ticket-preview-img" src="/api/configuracion/logo" alt="Logo de tickets" style="max-width: 100%; max-height: 100%; object-fit: contain; filter: grayscale(1) contrast(1.2);">
+                                </div>
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                                    <input type="file" id="input-subir-logo-ticket" accept="image/png, image/jpeg, image/webp" class="hide">
+                                    <button type="button" id="btn-subir-logo-ticket" class="secondary-btn">
+                                        📁 Cambiar logo
+                                    </button>
+                                    <button type="button" id="btn-quitar-logo-ticket" class="danger-btn hide">
+                                        🗑️ Restablecer
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <div class="reporte-acciones">
@@ -557,21 +575,59 @@
                     <div class="comandas-top-header">
                         <h1 class="page-title">Comandas</h1>
                         <div class="comandas-summary-pills">
-                            <span class="comanda-pill-badge pill-completadas" id="chip-completadas"><b>0</b> Completadas</span>
-                            <span class="comanda-pill-badge pill-anuladas" id="chip-anuladas"><b>0</b> Anuladas</span>
+                            <button type="button" class="comanda-pill-badge active" data-estado="todos" id="chip-todas"><b>0</b> Todas</button>
+                            <button type="button" class="comanda-pill-badge pill-completadas" data-estado="completadas" id="chip-completadas"><b>0</b> Completadas</button>
+                            <button type="button" class="comanda-pill-badge pill-anuladas" data-estado="anuladas" id="chip-anuladas"><b>0</b> Anuladas</button>
                         </div>
                     </div>
 
                     <!-- Search Filter & Quick Actions -->
                     <div class="comandas-filter-bar">
-                        <div class="comanda-search-wrapper">
-                            <svg class="search-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="11" cy="11" r="8"></circle>
-                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                            </svg>
-                            <input type="text" id="comanda-search-input"
-                                placeholder="Buscar venta (# comanda, mesero, producto)...">
+                        <div class="comandas-filter-controls">
+                            <!-- Buscador SOLO por número de comanda -->
+                            <div class="comanda-search-wrapper" title="Buscar únicamente por número de comanda">
+                                <span class="comanda-search-num-icon">#</span>
+                                <input type="text" id="comanda-search-input" inputmode="numeric"
+                                    placeholder="N° comanda (ej. 1, 14)...">
+                            </div>
+
+                            <!-- Filtro por Mesero -->
+                            <div class="comanda-filter-item">
+                                <select id="comanda-filter-mesero" class="comanda-select-filter" title="Filtrar por mesero">
+                                    <option value="">Todos los meseros</option>
+                                </select>
+                            </div>
+
+                            <!-- Filtro por Método de Pago -->
+                            <div class="comanda-filter-item">
+                                <select id="comanda-filter-pago" class="comanda-select-filter" title="Filtrar por método de pago">
+                                    <option value="">Todos los pagos</option>
+                                    <option value="efectivo">💵 Efectivo</option>
+                                    <option value="qr">📱 QR</option>
+                                    <option value="tarjeta">💳 Tarjeta</option>
+                                    <option value="transfer">🏦 Transferencia</option>
+                                    <option value="mixto">🔀 Mixto</option>
+                                </select>
+                            </div>
+
+                            <!-- Rango de Fechas -->
+                            <div class="comanda-filter-dates">
+                                <div class="comanda-date-field">
+                                    <label for="comanda-filter-desde">Desde</label>
+                                    <input type="date" id="comanda-filter-desde" class="comanda-date-input" title="Fecha inicial">
+                                </div>
+                                <div class="comanda-date-field">
+                                    <label for="comanda-filter-hasta">Hasta</label>
+                                    <input type="date" id="comanda-filter-hasta" class="comanda-date-input" title="Fecha final">
+                                </div>
+                            </div>
+
+                            <!-- Botón Limpiar filtros -->
+                            <button type="button" id="comanda-btn-limpiar" class="comanda-btn-clear hide" title="Limpiar todos los filtros">
+                                ✕ Limpiar
+                            </button>
                         </div>
+
                         <div class="comandas-quick-actions">
                             <button type="button" id="comandas-quick-pdf" class="pill-action-btn btn-pdf" title="Descargar Reporte de Comandas en PDF">
                                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
@@ -589,123 +645,35 @@
                 <!-- Tab: Crear Producto & Categoría -->
                 <section id="tab-crear-producto" class="tab-content hide">
                     <h1 class="page-title">Gestión de Catálogo</h1>
-                    <div class="admin-grid-forms">
-                        <!-- Create Category Form -->
+
+                    <div class="catalogo-grid-2x2">
+                        <!-- Fila 1, Columna 1: Formulario Nueva Categoría -->
                         <div class="glass-card form-card">
                             <h2>Nueva Categoría</h2>
                             <form id="form-create-category">
-                                <div class="form-group">
-                                    <label for="cat-name">Nombre de Categoría</label>
-                                    <input type="text" id="cat-name" placeholder="Ej. Licores" required>
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="cat-name">Nombre de Categoría</label>
+                                        <input type="text" id="cat-name" placeholder="Ej. Licores" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cat-type">Tipo Global</label>
+                                        <select id="cat-type">
+                                            <option value="BEBIDA">Bebida</option>
+                                            <option value="COMIDA">Comida</option>
+                                            <option value="OTRO">Otro</option>
+                                        </select>
+                                    </div>
                                 </div>
                                 <div class="form-group">
                                     <label for="cat-desc">Descripción</label>
                                     <input type="text" id="cat-desc" placeholder="Ej. Medidas y botellas de destilados">
                                 </div>
-                                <div class="form-group">
-                                    <label for="cat-type">Tipo Global</label>
-                                    <select id="cat-type">
-                                        <option value="BEBIDA">Bebida</option>
-                                        <option value="COMIDA">Comida</option>
-                                        <option value="OTRO">Otro</option>
-                                    </select>
-                                </div>
                                 <button type="submit" class="primary-btn">Crear Categoría</button>
                             </form>
                         </div>
 
-                        <!-- Create Product Form -->
-                        <div class="glass-card form-card">
-                            <h2>Nuevo Producto</h2>
-                            <form id="form-create-product">
-                                <div class="form-group">
-                                    <label for="prod-cat">Categoría</label>
-                                    <select id="prod-cat" required>
-                                        <!-- Populated dynamically -->
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="prod-name">Nombre del Producto</label>
-                                    <input type="text" id="prod-name" placeholder="Ej. Ron Flor de Caña 7 Años"
-                                        required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="prod-desc">Descripción</label>
-                                    <input type="text" id="prod-desc" placeholder="Ej. Medida de 50 ml con mezclador">
-                                </div>
-                                <div class="form-group">
-                                    <label for="prod-type">Tipo de Producto</label>
-                                    <select id="prod-type">
-                                        <option value="BEBIDA_ALCOHOLICA">Bebida Alcohólica</option>
-                                        <option value="BEBIDA_NO_ALCOHOLICA">Bebida No Alcohólica</option>
-                                        <option value="COMIDA">Comida</option>
-                                        <option value="OTRO">Otro</option>
-                                    </select>
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label for="prod-price">Precio de Venta (Bs.)</label>
-                                        <input type="number" id="prod-price" min="0" step="0.5" placeholder="0.00"
-                                            required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="prod-stock">Stock Inicial</label>
-                                        <input type="number" id="prod-stock" min="0" placeholder="100" required>
-                                    </div>
-                                </div>
-
-                                <!-- Acompañamiento. Las dos marcas son distintas y no
-                                     se pueden dar a la vez: una botella pide refresco,
-                                     un refresco puede ser el que se ofrece. -->
-                                <div class="form-group">
-                                    <label>Acompañamiento</label>
-                                    <label class="casilla" for="prod-requiere">
-                                        <input type="checkbox" id="prod-requiere">
-                                        <span class="casilla-texto">
-                                            <strong>Se vende con acompañante</strong>
-                                            <small>Al ponerlo en el carrito se pedirá elegir cuál. Va incluido, sin
-                                                coste.</small>
-                                        </span>
-                                    </label>
-                                    <label class="casilla" for="prod-es-acomp">
-                                        <input type="checkbox" id="prod-es-acomp">
-                                        <span class="casilla-texto">
-                                            <strong>Puede ir de acompañante</strong>
-                                            <small>Aparecerá en la lista al elegir. Se sigue vendiendo suelto y
-                                                cobrado.</small>
-                                        </span>
-                                    </label>
-                                </div>
-
-                                <!-- Foto. La imagen se reduce en la propia tablet antes de
-                                     enviarla, así que da igual que venga de la cámara a
-                                     ocho megapíxeles. -->
-                                <div class="form-group">
-                                    <label>Foto del producto <span class="etiqueta-opcional">opcional</span></label>
-                                    <div class="foto-campo">
-                                        <div id="prod-foto-vista" class="foto-vista" aria-hidden="true">
-                                            <span class="foto-vacia">Sin foto</span>
-                                        </div>
-                                        <div class="foto-acciones">
-                                            <label for="prod-foto" class="secondary-btn foto-elegir">Elegir
-                                                imagen</label>
-                                            <input type="file" id="prod-foto" class="foto-input"
-                                                accept="image/png,image/jpeg,image/webp">
-                                            <button type="button" id="prod-foto-quitar"
-                                                class="text-btn hide">Quitar</button>
-                                            <p class="campo-nota">Se guarda reducida, dentro de la base.</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <button type="submit" class="primary-btn">Crear Producto</button>
-                            </form>
-                        </div>
-                    </div>
-
-                    <!-- El catálogo tal como está, para poder revisarlo y
-                         quitar lo que no se vaya a vender esta noche. -->
-                    <div class="listas-par">
+                        <!-- Fila 1, Columna 2: Lista de Categorías Existentes -->
                         <div class="glass-card lista-card">
                             <div class="lista-cabecera">
                                 <h2>Categorías</h2>
@@ -714,12 +682,93 @@
                             <div id="lista-categorias" class="lista"></div>
                         </div>
 
+                        <!-- Fila 2, Columna 1: Formulario Nuevo Producto (Debajo de Nueva Categoría) -->
+                        <div class="glass-card form-card">
+                            <h2>Nuevo Producto</h2>
+                            <form id="form-create-product">
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="prod-cat">Categoría</label>
+                                        <select id="prod-cat" required>
+                                            <!-- Populated dynamically -->
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="prod-type">Tipo de Producto</label>
+                                        <select id="prod-type">
+                                            <option value="BEBIDA_ALCOHOLICA">Bebida Alcohólica</option>
+                                            <option value="BEBIDA_NO_ALCOHOLICA">Bebida No Alcohólica</option>
+                                            <option value="COMIDA">Comida</option>
+                                            <option value="OTRO">Otro</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="prod-name">Nombre del Producto</label>
+                                        <input type="text" id="prod-name" placeholder="Ej. Ron Flor de Caña 7 Años" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="prod-desc">Descripción</label>
+                                        <input type="text" id="prod-desc" placeholder="Ej. Medida de 50 ml con mezclador">
+                                    </div>
+                                </div>
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="prod-price">Precio de Venta (Bs.)</label>
+                                        <input type="number" id="prod-price" min="0" step="0.5" placeholder="0.00" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="prod-stock">Stock Inicial</label>
+                                        <input type="number" id="prod-stock" min="0" placeholder="100" required>
+                                    </div>
+                                </div>
+
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label>Acompañamiento</label>
+                                        <label class="casilla" for="prod-requiere">
+                                            <input type="checkbox" id="prod-requiere">
+                                            <span class="casilla-texto">
+                                                <strong>Con acompañante</strong>
+                                                <small>Se pedirá elegir cuál al cobrar.</small>
+                                            </span>
+                                        </label>
+                                        <label class="casilla" for="prod-es-acomp">
+                                            <input type="checkbox" id="prod-es-acomp">
+                                            <span class="casilla-texto">
+                                                <strong>Es acompañante</strong>
+                                                <small>Aparece como opción elegible.</small>
+                                            </span>
+                                        </label>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Foto del producto <span class="etiqueta-opcional">opcional</span></label>
+                                        <div class="foto-campo">
+                                            <div id="prod-foto-vista" class="foto-vista" aria-hidden="true">
+                                                <span class="foto-vacia">Sin foto</span>
+                                            </div>
+                                            <div class="foto-acciones">
+                                                <label for="prod-foto" class="secondary-btn foto-elegir">Elegir imagen</label>
+                                                <input type="file" id="prod-foto" class="foto-input" accept="image/png,image/jpeg,image/webp">
+                                                <button type="button" id="prod-foto-quitar" class="text-btn hide">Quitar</button>
+                                                <p class="campo-nota">Se guarda reducida.</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button type="submit" class="primary-btn">Crear Producto</button>
+                            </form>
+                        </div>
+
+                        <!-- Fila 2, Columna 2: Lista de Productos (Debajo de Categorías) -->
                         <div class="glass-card lista-card">
                             <div class="lista-cabecera">
                                 <h2>Productos</h2>
                                 <span id="cont-productos" class="lista-cuenta">0</span>
-                                <input type="search" id="buscar-producto-cat" class="lista-buscador"
-                                    placeholder="Buscar producto">
+                                <input type="search" id="buscar-producto-cat" class="lista-buscador" placeholder="Buscar producto">
                             </div>
                             <div id="lista-productos" class="lista"></div>
                         </div>
@@ -737,45 +786,51 @@
                                 nevera los productos que lleva dentro, uno por uno.
                             </p>
 
-                            <div class="form-group">
-                                <label for="promo-nombre">Nombre de la promoción</label>
-                                <input type="text" id="promo-nombre" placeholder="Ej. Promoción Amigos" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="promo-desc">Descripción</label>
-                                <input type="text" id="promo-desc" placeholder="Ej. Para compartir entre tres">
-                            </div>
-
-                            <div class="form-group">
-                                <label>Qué lleva dentro</label>
-                                <div class="promo-anadir">
-                                    <select id="promo-producto"></select>
-                                    <input type="number" id="promo-cantidad" min="1" max="99" value="1"
-                                        aria-label="Cuántas unidades">
-                                    <button type="button" id="promo-anadir" class="secondary-btn">Añadir</button>
-                                </div>
-                                <div id="promo-contenido" class="promo-contenido"></div>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="promo-precio">Precio del paquete (Bs.)</label>
-                                <input type="number" id="promo-precio" min="0" step="0.5" placeholder="0.00">
-                                <p id="promo-cuentas" class="promo-cuentas"></p>
-                            </div>
-
-                            <div class="form-group">
-                                <label>Foto de la promoción <span class="etiqueta-opcional">opcional</span></label>
-                                <div class="foto-campo">
-                                    <div id="promo-foto-vista" class="foto-vista" aria-hidden="true">
-                                        <span class="foto-vacia">Sin foto</span>
+                            <div class="form-scrollable-body">
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="promo-nombre">Nombre de la promoción</label>
+                                        <input type="text" id="promo-nombre" placeholder="Ej. Promoción Amigos" required>
                                     </div>
-                                    <div class="foto-acciones">
-                                        <label for="promo-foto" class="secondary-btn foto-elegir">Elegir imagen</label>
-                                        <input type="file" id="promo-foto" class="foto-input"
-                                            accept="image/png,image/jpeg,image/webp">
-                                        <button type="button" id="promo-foto-quitar"
-                                            class="text-btn hide">Quitar</button>
-                                        <p class="campo-nota">Se guarda reducida, dentro de la base.</p>
+                                    <div class="form-group">
+                                        <label for="promo-desc">Descripción</label>
+                                        <input type="text" id="promo-desc" placeholder="Ej. Para compartir entre tres">
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Qué lleva dentro</label>
+                                    <div class="promo-anadir">
+                                        <select id="promo-producto"></select>
+                                        <input type="number" id="promo-cantidad" min="1" max="99" value="1"
+                                            aria-label="Cuántas unidades">
+                                        <button type="button" id="promo-anadir" class="secondary-btn">Añadir</button>
+                                    </div>
+                                    <div id="promo-contenido" class="promo-contenido"></div>
+                                </div>
+
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="promo-precio">Precio del paquete (Bs.)</label>
+                                        <input type="number" id="promo-precio" min="0" step="0.5" placeholder="0.00">
+                                        <p id="promo-cuentas" class="promo-cuentas"></p>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Foto de la promoción <span class="etiqueta-opcional">opcional</span></label>
+                                        <div class="foto-campo">
+                                            <div id="promo-foto-vista" class="foto-vista" aria-hidden="true">
+                                                <span class="foto-vacia">Sin foto</span>
+                                            </div>
+                                            <div class="foto-acciones">
+                                                <label for="promo-foto" class="secondary-btn foto-elegir">Elegir imagen</label>
+                                                <input type="file" id="promo-foto" class="foto-input"
+                                                    accept="image/png,image/jpeg,image/webp">
+                                                <button type="button" id="promo-foto-quitar"
+                                                    class="text-btn hide">Quitar</button>
+                                                <p class="campo-nota">Se guarda en la base.</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -799,77 +854,78 @@
                 <!-- Tab: Crear Personal -->
                 <section id="tab-crear-personal" class="tab-content hide">
                     <h1 class="page-title">Personal de la barra</h1>
-                    <div class="admin-grid-forms">
-                        <!-- Create Cajero -->
+                    <div class="personal-grid-2x2">
+                        <!-- Fila 1, Columna 1: Formulario Nuevo Cajero -->
                         <div class="glass-card form-card">
                             <h2>Nuevo Cajero</h2>
                             <form id="form-create-cajero">
-                                <!-- La barra no se elige: este servidor es una
-                                     barra, y su nombre sale de Datos del evento. -->
-                                <div class="form-group">
-                                    <label for="caj-barra">Barra</label>
-                                    <input type="text" id="caj-barra" class="campo-fijo" readonly tabindex="-1"
-                                        value="—">
-                                    <p class="campo-nota">
-                                        Se cambia en <strong>Dashboard → Datos del evento</strong>.
-                                    </p>
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="caj-name">Nombre Completo</label>
+                                        <input type="text" id="caj-name" placeholder="Ej. Sofía Méndez" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="caj-barra">Barra</label>
+                                        <input type="text" id="caj-barra" class="campo-fijo" readonly tabindex="-1"
+                                            value="—">
+                                    </div>
                                 </div>
-                                <div class="form-group">
-                                    <label for="caj-name">Nombre Completo</label>
-                                    <input type="text" id="caj-name" placeholder="Ej. Sofía Méndez" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="caj-user">Usuario de Acceso</label>
-                                    <input type="text" id="caj-user" placeholder="Ej. cajero_vip_1" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="caj-pass">Contraseña</label>
-                                    <input type="password" id="caj-pass" placeholder="••••••••" required>
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="caj-user">Usuario de Acceso</label>
+                                        <input type="text" id="caj-user" placeholder="Ej. cajero_vip_1" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="caj-pass">Contraseña</label>
+                                        <input type="password" id="caj-pass" placeholder="••••••••" required>
+                                    </div>
                                 </div>
                                 <button type="submit" class="primary-btn">Registrar Cajero</button>
                             </form>
                         </div>
 
-                        <!-- Create Mesero -->
-                        <div class="glass-card form-card">
-                            <h2>Nuevo Mesero</h2>
-                            <form id="form-create-mesero">
-                                <div class="form-group">
-                                    <label for="mes-cajero">Cajero a Rendir Cuentas</label>
-                                    <select id="mes-cajero" required>
-                                        <!-- Populated dynamically -->
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="mes-name">Nombre Completo</label>
-                                    <input type="text" id="mes-name" placeholder="Ej. Daniel Rojas" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="mes-user">Usuario de Acceso</label>
-                                    <input type="text" id="mes-user" placeholder="Ej. mesero_vip_1" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="mes-pass">Contraseña (PIN)</label>
-                                    <input type="password" id="mes-pass" placeholder="Ej. 1234" required>
-                                </div>
-                                <button type="submit" class="primary-btn">Registrar Mesero</button>
-                            </form>
-                        </div>
-                    </div>
-
-                    <div class="listas-par">
-                        <!-- Quién hay dado de alta.
-                         Antes sólo se podía crear, y a ciegas: se daba de alta
-                         dos veces a la misma persona sin saberlo, y un PIN
-                         olvidado a mitad de evento no había forma de mirarlo. -->
+                        <!-- Fila 1, Columna 2: Lista Cajeros (Al lado de Registrar Cajero) -->
                         <div class="glass-card lista-card">
                             <div class="lista-cabecera">
                                 <h2>Cajeros</h2>
                                 <span id="cont-cajeros" class="lista-cuenta">0</span>
+                                <input type="search" id="buscar-cajero" class="lista-buscador"
+                                    placeholder="Buscar por nombre o usuario">
                             </div>
                             <div id="lista-cajeros" class="lista"></div>
                         </div>
 
+                        <!-- Fila 2, Columna 1: Formulario Nuevo Mesero -->
+                        <div class="glass-card form-card">
+                            <h2>Nuevo Mesero</h2>
+                            <form id="form-create-mesero">
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="mes-name">Nombre Completo</label>
+                                        <input type="text" id="mes-name" placeholder="Ej. Daniel Rojas" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="mes-cajero">Cajero a Rendir Cuentas</label>
+                                        <select id="mes-cajero" required>
+                                            <!-- Populated dynamically -->
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="mes-user">Usuario de Acceso</label>
+                                        <input type="text" id="mes-user" placeholder="Ej. mesero_vip_1" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="mes-pass">Contraseña (PIN)</label>
+                                        <input type="password" id="mes-pass" placeholder="Ej. 1234" required>
+                                    </div>
+                                </div>
+                                <button type="submit" class="primary-btn">Registrar Mesero</button>
+                            </form>
+                        </div>
+
+                        <!-- Fila 2, Columna 2: Lista Meseros (Al lado de Registrar Mesero) -->
                         <div class="glass-card lista-card">
                             <div class="lista-cabecera">
                                 <h2>Meseros</h2>
@@ -915,6 +971,7 @@
                     <div id="admin-stock-cards-grid" class="admin-stock-grid">
                         <!-- Rendered dynamically -->
                     </div>
+                    <div id="admin-stock-pagination" class="comandas-pagination-bar" style="margin-top: 14px; margin-bottom: 12px;"></div>
 
                     <!-- Collapsible Albarán Section -->
                     <div id="albaran-collapsible-section" class="hide" style="margin-top: 24px;">
@@ -1072,43 +1129,94 @@
                 <!-- Tab: Inventario General -->
                 <section id="tab-inventario" class="tab-content hide">
                     <div
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h1 class="page-title" style="margin: 0;">Reporte de Stock de Productos</h1>
-                        <div style="display: flex; gap: 8px;">
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                        <div>
+                            <h1 class="page-title" style="margin: 0 0 2px 0;">Reporte de Stock de Productos</h1>
+                            <p id="inv-summary-count" class="reporte-hint" style="margin: 0;">Cargando inventario...</p>
+                        </div>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                             <button id="print-inventory-btn" class="primary-btn">🖨️ Imprimir (RawBT)</button>
                             <button id="print-inventory-browser-btn" class="secondary-btn">Por navegador</button>
                         </div>
                     </div>
 
-                    <div class="glass-card table-section">
-                        <div class="table-container">
-                            <table class="admin-table">
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Categoría</th>
-                                        <th>Producto</th>
-                                        <th>Stock Actual</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="inventory-table-body">
-                                    <!-- Populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
+                    <!-- Barra de Filtros (Desde - Hasta, Categoría, Estado, Búsqueda) -->
+                    <div class="glass-card" style="padding: 12px 14px; margin-bottom: 12px;">
+                        <div class="inv-filters-toolbar">
+                            <!-- Buscador -->
+                            <div class="inv-filter-item inv-filter-search">
+                                <label for="inv-search">Buscar producto</label>
+                                <input type="text" id="inv-search" placeholder="🔍 Nombre o #ID...">
+                            </div>
 
-                        <!-- Pagination controls -->
-                        <div class="pagination-container"
-                            style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
-                            <span id="inventory-page-info"
-                                style="font-size: 0.9rem; color: var(--text-secondary);">Mostrando página 1 de 1</span>
-                            <div class="pagination-buttons" style="display: flex; gap: 8px;">
-                                <button id="inventory-prev-btn" class="secondary-btn"
-                                    style="padding: 6px 12px; font-size: 0.85rem;">Anterior</button>
-                                <button id="inventory-next-btn" class="secondary-btn"
-                                    style="padding: 6px 12px; font-size: 0.85rem;">Siguiente</button>
+                            <!-- Categoría -->
+                            <div class="inv-filter-item">
+                                <label for="inv-filter-cat">Categoría</label>
+                                <select id="inv-filter-cat">
+                                    <option value="all">Todas las categorías</option>
+                                </select>
+                            </div>
+
+                            <!-- Estado de Stock -->
+                            <div class="inv-filter-item">
+                                <label for="inv-filter-status">Estado</label>
+                                <select id="inv-filter-status">
+                                    <option value="all">Todos los estados</option>
+                                    <option value="out">⚠️ Agotados (0 uds)</option>
+                                    <option value="low">🟡 Stock Bajo (≤ 15)</option>
+                                    <option value="ok">🟢 Con Stock (> 0)</option>
+                                </select>
+                            </div>
+
+                            <!-- Ordenar por -->
+                            <div class="inv-filter-item">
+                                <label for="inv-filter-sort">Ordenar por</label>
+                                <select id="inv-filter-sort">
+                                    <option value="id_asc">ID (# menor primero)</option>
+                                    <option value="id_desc">ID (# mayor primero)</option>
+                                    <option value="nombre_asc">Nombre (A → Z)</option>
+                                    <option value="stock_asc">Menor stock primero</option>
+                                    <option value="stock_desc">Mayor stock primero</option>
+                                </select>
+                            </div>
+
+                            <!-- Botón Limpiar -->
+                            <div class="inv-filter-item inv-filter-actions">
+                                <button type="button" id="inv-clear-filters-btn" class="secondary-btn" title="Restablecer filtros">
+                                    ✕ Limpiar
+                                </button>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Tabla de Inventario (sin borde externo duplicado) -->
+                    <div class="table-container inv-table-container">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Categoría</th>
+                                    <th>Producto</th>
+                                    <th>Stock Actual</th>
+                                </tr>
+                            </thead>
+                            <tbody id="inventory-table-body">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Pagination controls -->
+                    <div id="inventory-pagination" class="comandas-pagination-bar" style="margin-top: 14px; margin-bottom: 6px;">
+                        <button type="button" class="comanda-pag-btn" id="inventory-prev-btn" disabled>
+                            ◀ Anterior
+                        </button>
+                        <span class="comanda-pag-info" id="inventory-page-info">
+                            Página <strong>1</strong> de <strong>1</strong> (0 productos)
+                        </span>
+                        <button type="button" class="comanda-pag-btn" id="inventory-next-btn" disabled>
+                            Siguiente ▶
+                        </button>
                     </div>
                 </section>
             </main>
@@ -1119,6 +1227,39 @@
          Una sola pantalla para cobrar: el total arriba, la forma de pago en
          pestañas y un único botón que confirma. Nada de ir sumando pagos de
          uno en uno mientras hay cola en la barra. -->
+
+    <!-- 5. VISTA PREVIA DE TICKETS (COMANDA) -->
+    <!-- Los dos tickets se generan desde el mismo modelo que se envía a la
+         impresora, así que esta vista previa es carácter por carácter lo que
+         saldrá por el papel. -->
+    <div id="print-modal" class="modal-overlay hide">
+        <div class="print-container">
+            <div class="print-header">
+                <h2 class="print-title" style="margin: 0;">🧾 Vista previa de Comanda</h2>
+                <button type="button" id="close-print-modal-btn" class="modal-close-btn" style="position: static; font-size: 1.1rem; cursor: pointer; flex-shrink: 0;" title="Cerrar">✕</button>
+            </div>
+
+            <div class="tickets-row">
+                <!-- Copia del Cajero -->
+                <div class="thermal-ticket">
+                    <div class="ticket-body" id="ticket-cajero-body"></div>
+                </div>
+
+                <!-- Copia del Mesero / Preparación -->
+                <div class="thermal-ticket">
+                    <div class="ticket-body" id="ticket-mesero-body"></div>
+                </div>
+            </div>
+
+            <div id="modal-print-status" class="print-status hide"></div>
+
+            <div class="print-actions">
+                <button type="button" id="print-rawbt-btn" class="primary-btn" style="min-width: 150px; font-weight: 700;">🖨️ Imprimir</button>
+                <button type="button" id="print-browser-btn" class="secondary-btn">📄 Por navegador</button>
+                <button type="button" id="dismiss-print-btn" class="secondary-btn" style="min-width: 120px; font-weight: 700;">Continuar</button>
+            </div>
+        </div>
+    </div>
 
     <!-- La comanda del traspaso, ya impresa. Misma vista previa que los
          tickets de venta: el bartender ve siempre el mismo papel. -->
@@ -1166,12 +1307,54 @@
                 <input type="text" id="editar-descripcion" maxlength="250">
             </div>
 
+            <!-- Foto del producto -->
+            <div class="form-group editar-foto-grupo">
+                <label>Foto del producto <small style="font-weight:400;text-transform:none">opcional</small></label>
+                <div class="editar-foto-row">
+                    <div id="editar-foto-vista" class="foto-vista"><span class="foto-vacia">Sin foto</span></div>
+                    <button type="button" id="editar-foto-btn" class="secondary-btn">📷 Cambiar foto</button>
+                </div>
+            </div>
+
             <p class="campo-nota">
                 El stock no se cambia aquí: se mueve en <strong>Inventario</strong>,
                 para que quede el apunte de cuántas unidades entraron o salieron.
             </p>
 
             <button type="button" id="editar-guardar" class="primary-btn full-btn">
+                Guardar cambios
+            </button>
+        </div>
+    </div>
+
+    <!-- Editar categoría existente -->
+    <div id="editar-categoria-modal" class="modal-overlay hide">
+        <div class="glass-card modal-card editar-card">
+            <button type="button" id="editar-categoria-cerrar" class="modal-close-btn" title="Cancelar">←</button>
+
+            <div class="modal-header">
+                <h2>Editar categoría</h2>
+                <p id="editar-categoria-cual">—</p>
+            </div>
+
+            <div class="form-group">
+                <label for="editar-categoria-nombre">Nombre</label>
+                <input type="text" id="editar-categoria-nombre" maxlength="60" placeholder="Ej: Whiskys">
+            </div>
+            <div class="form-group">
+                <label for="editar-categoria-tipo">Tipo</label>
+                <select id="editar-categoria-tipo">
+                    <option value="BEBIDA">Bebida</option>
+                    <option value="COMIDA">Comida</option>
+                    <option value="OTRO">Otro</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="editar-categoria-descripcion">Descripción</label>
+                <input type="text" id="editar-categoria-descripcion" maxlength="200" placeholder="Breve descripción">
+            </div>
+
+            <button type="button" id="editar-categoria-guardar" class="primary-btn full-btn">
                 Guardar cambios
             </button>
         </div>
@@ -1457,64 +1640,48 @@
         </div>
     </div>
 
+    <!-- Modal de confirmación estilizado (sustituye a window.confirm / localhost dice...) -->
+    <div id="confirm-modal" class="modal-overlay hide" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-titulo">
+        <div class="glass-card modal-card confirm-modal-card">
+            <button type="button" id="confirm-modal-cerrar" class="modal-close-btn" title="Cerrar">✕</button>
+            <div class="confirm-modal-badge" id="confirm-modal-badge">
+                <span id="confirm-modal-icono" class="confirm-modal-icon">🗑️</span>
+            </div>
+            <div class="confirm-modal-body">
+                <h3 id="confirm-modal-titulo" class="confirm-modal-title">¿Eliminar promoción?</h3>
+                <p id="confirm-modal-mensaje" class="confirm-modal-message"></p>
+                <div id="confirm-modal-nota-box" class="confirm-modal-nota-box hide">
+                    <p id="confirm-modal-nota" class="confirm-modal-nota"></p>
+                </div>
+            </div>
+            <div class="confirm-modal-actions">
+                <button type="button" id="confirm-modal-btn-cancelar" class="btn-confirm-cancelar">Cancelar</button>
+                <button type="button" id="confirm-modal-btn-aceptar" class="btn-confirm-aceptar">Eliminar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Avisos flotantes. Sustituyen a alert(), que en Android abre un diálogo
          del sistema: bloquea la caja y tapa la pantalla en plena venta. -->
     <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
     <!-- Impresión térmica (ESC/POS + RawBT) -->
-    <script src="rawbt.js?v=40"></script>
+    <script src="rawbt.js?v=70"></script>
     <!-- Main Client-side logic script -->
-    <script src="app.js?v=40"></script>
+    <script src="app.js?v=70"></script>
 
-    <!-- PWA Service Worker Registration & Install Prompt -->
+    <!-- PWA Service Worker Registration -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js')
-                    .then(reg => console.log('✔ PWA Service Worker registrado correctamente:', reg.scope))
+                    .then(reg => {
+                        console.log('✔ PWA Service Worker registrado correctamente:', reg.scope);
+                        reg.update();
+                    })
                     .catch(err => console.warn('⚠ Fallo al registrar PWA Service Worker:', err));
             });
         }
-
-        let deferredInstallPrompt = null;
-        const installBtn = document.getElementById('btn-pwa-install');
-        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-
-        if (isStandalone && installBtn) {
-            installBtn.classList.add('hide');
-        }
-
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredInstallPrompt = e;
-            if (installBtn && !isStandalone) {
-                installBtn.classList.remove('hide');
-            }
-        });
-
-        if (installBtn) {
-            installBtn.addEventListener('click', async () => {
-                if (deferredInstallPrompt) {
-                    deferredInstallPrompt.prompt();
-                    const choice = await deferredInstallPrompt.userChoice;
-                    if (choice.outcome === 'accepted') {
-                        installBtn.classList.add('hide');
-                    }
-                    deferredInstallPrompt = null;
-                } else {
-                    if (typeof window.notify === 'function') {
-                        window.notify('📱 Para instalar en esta tablet: pulsa en menú (⋮) de Chrome → "Agregar a la pantalla principal" o "Instalar aplicación"', 'info', 8000);
-                    } else {
-                        alert('📱 Para instalar en esta tablet:\n\n1. Toca los 3 puntos (⋮) arriba a la derecha en Chrome.\n2. Selecciona "Agregar a la pantalla principal" o "Instalar aplicación".\n3. ¡Listo! Se creará el acceso directo de pantalla completa.');
-                    }
-                }
-            });
-        }
-
-        window.addEventListener('appinstalled', () => {
-            if (installBtn) installBtn.classList.add('hide');
-            console.log('✔ MasterDrinks POS instalado como PWA.');
-        });
     </script>
 </body>
 

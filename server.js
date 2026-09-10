@@ -893,9 +893,11 @@ function initializeDatabase() {
       descripcion TEXT,
       precio REAL,
       activa INTEGER DEFAULT 1,
+      eliminada INTEGER DEFAULT 0,
       creada_por_admin INTEGER,
       fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
+    db.run('ALTER TABLE promocion ADD COLUMN eliminada INTEGER DEFAULT 0', () => {});
 
     db.run(`CREATE TABLE IF NOT EXISTS promocion_detalle (
       id_detalle_promocion INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -980,8 +982,10 @@ function initializeDatabase() {
       fecha TEXT,
       lugar TEXT,
       barra TEXT,
-      responsable TEXT
+      responsable TEXT,
+      logo_ticket TEXT
     )`);
+    db.run(`ALTER TABLE configuracion ADD COLUMN logo_ticket TEXT`, () => {});
 
     db.get('SELECT COUNT(*) AS n FROM configuracion', (errCfg, filaCfg) => {
       if (errCfg || (filaCfg && filaCfg.n > 0)) return;
@@ -1227,8 +1231,8 @@ app.get('/api/instancia', (req, res) => {
 const CAMPOS_CONFIG = ['evento', 'fecha', 'lugar', 'barra', 'responsable'];
 
 function leerConfiguracion() {
-  return dbGet('SELECT evento, fecha, lugar, barra, responsable FROM configuracion WHERE id_configuracion = 1')
-    .then(fila => fila || { evento: '', fecha: '', lugar: '', barra: INSTANCIA.nombre, responsable: '' });
+  return dbGet('SELECT evento, fecha, lugar, barra, responsable, CASE WHEN logo_ticket IS NOT NULL AND length(logo_ticket) > 0 THEN 1 ELSE 0 END AS tiene_logo_ticket FROM configuracion WHERE id_configuracion = 1')
+    .then(fila => fila || { evento: '', fecha: '', lugar: '', barra: INSTANCIA.nombre, responsable: '', tiene_logo_ticket: 0 });
 }
 
 app.get('/api/configuracion', (req, res) => {
@@ -1237,6 +1241,72 @@ app.get('/api/configuracion', (req, res) => {
     .catch(err => {
       console.error('Error al leer la configuración:', err);
       res.status(500).json({ success: false, message: 'No se pudo leer la configuración.' });
+    });
+});
+
+app.get('/api/configuracion/logo', (req, res) => {
+  dbGet('SELECT logo_ticket FROM configuracion WHERE id_configuracion = 1')
+    .then(fila => {
+      const dato = fila && fila.logo_ticket;
+      if (!dato) {
+        const defaultLogo = path.join(__dirname, 'public', 'logo_euphoria.png');
+        if (fs.existsSync(defaultLogo)) return res.sendFile(defaultLogo);
+        return res.status(404).end();
+      }
+
+      const corte = dato.indexOf(';base64,');
+      if (corte === -1) return res.status(404).end();
+      const tipo = dato.slice(5, corte);
+      const bytes = Buffer.from(dato.slice(corte + 8), 'base64');
+
+      res.set('Content-Type', tipo);
+      res.set('Cache-Control', 'no-cache');
+      res.send(bytes);
+    })
+    .catch(err => {
+      console.error('Error al servir logo de ticket:', err);
+      res.status(500).end();
+    });
+});
+
+app.put('/api/admin/configuracion/logo', (req, res) => {
+  const foto = validarFoto(req.body ? req.body.logo : undefined);
+  if (foto === false) {
+    return res.status(400).json({
+      success: false,
+      message: 'La imagen no es válida. Usa una imagen PNG, JPG o WEBP (máx. 500 KB).'
+    });
+  }
+
+  dbRun('UPDATE configuracion SET logo_ticket = ? WHERE id_configuracion = 1', [foto || null])
+    .then(() => registrarAuditoria(
+      req.body && req.body.id_admin, foto ? 'CAMBIAR_LOGO_TICKET' : 'QUITAR_LOGO_TICKET',
+      'configuracion', 1, foto ? 'Nuevo logo para tickets' : 'Se quitó el logo de tickets'
+    ))
+    .then(() => res.json({
+      success: true,
+      tiene_logo_ticket: !!foto,
+      message: foto ? 'Logo del ticket actualizado correctamente.' : 'Logo del ticket restablecido.'
+    }))
+    .catch(err => {
+      console.error('Error al guardar logo de ticket:', err);
+      res.status(500).json({ success: false, message: 'No se pudo guardar el logo.' });
+    });
+});
+
+app.delete('/api/admin/configuracion/logo', (req, res) => {
+  dbRun('UPDATE configuracion SET logo_ticket = NULL WHERE id_configuracion = 1')
+    .then(() => registrarAuditoria(
+      req.body && req.body.id_admin, 'QUITAR_LOGO_TICKET', 'configuracion', 1, 'Logo de tickets restablecido al predeterminado'
+    ))
+    .then(() => res.json({
+      success: true,
+      tiene_logo_ticket: 0,
+      message: 'Logo del ticket restablecido al predeterminado.'
+    }))
+    .catch(err => {
+      console.error('Error al eliminar logo de ticket:', err);
+      res.status(500).json({ success: false, message: 'No se pudo restablecer el logo.' });
     });
 });
 
@@ -1295,7 +1365,7 @@ app.get('/api/stock', (req, res) => {
 app.get('/api/productos', (req, res) => {
   const queryCats = `SELECT * FROM categoria_producto WHERE activo = 1`;
   const queryProds = `SELECT id_producto, id_categoria, nombre, descripcion, tipo_producto,
-                             precio_venta, stock_actual, activo,
+                             precio_venta, stock_actual, activo, fecha_creacion,
                              MAX(stock_actual,
                                  COALESCE((SELECT MAX(MAX(ms.stock_anterior), MAX(ms.stock_nuevo))
                                              FROM movimiento_stock ms
@@ -1305,11 +1375,13 @@ app.get('/api/productos', (req, res) => {
                              COALESCE(es_acompanante, 0) AS es_acompanante,
                              CASE WHEN foto IS NULL OR foto = '' THEN 0 ELSE 1 END AS tiene_foto,
                              LENGTH(COALESCE(foto, '')) AS foto_v
-                        FROM producto WHERE activo = 1`;
+                        FROM producto 
+                       WHERE activo = 1 
+                         AND (id_categoria IS NULL OR id_categoria IN (SELECT id_categoria FROM categoria_producto WHERE activo = 1))`;
   const queryPromos = `SELECT id_promocion, nombre, descripcion, precio,
                               CASE WHEN foto IS NULL OR foto = '' THEN 0 ELSE 1 END AS tiene_foto,
                               LENGTH(COALESCE(foto, '')) AS foto_v
-                         FROM promocion WHERE activa = 1 ORDER BY nombre`;
+                         FROM promocion WHERE activa = 1 AND COALESCE(eliminada, 0) = 0 ORDER BY nombre`;
   const queryPromoDet = `SELECT pd.id_promocion, pd.id_producto, pd.cantidad
                            FROM promocion_detalle pd
                            JOIN producto p ON p.id_producto = pd.id_producto
@@ -2005,6 +2077,7 @@ app.get('/api/admin/promociones', (req, res) => {
                 CASE WHEN foto IS NULL OR foto = '' THEN 0 ELSE 1 END AS tiene_foto,
                 LENGTH(COALESCE(foto, '')) AS foto_v
          FROM promocion
+         WHERE COALESCE(eliminada, 0) = 0
          ORDER BY activa DESC, nombre`)
     .then(async promos => {
       const detalles = await dbAll(`
@@ -2048,8 +2121,8 @@ app.post('/api/admin/promociones', (req, res) => {
 
       const id = await withTransaction(async () => {
         const r = await dbRun(
-          `INSERT INTO promocion (nombre, descripcion, precio, activa, creada_por_admin, foto)
-           VALUES (?, ?, ?, 1, ?, ?)`,
+          `INSERT INTO promocion (nombre, descripcion, precio, activa, eliminada, creada_por_admin, foto)
+           VALUES (?, ?, ?, 1, 0, ?, ?)`,
           [datos.nombre, datos.descripcion, datos.precio, req.body.id_admin || null, foto || null]
         );
         for (const l of lineas) {
@@ -2088,17 +2161,20 @@ app.put('/api/admin/promociones/:id', (req, res) => {
 
   Promise.resolve()
     .then(async () => {
-      const antes = await dbGet('SELECT nombre, precio FROM promocion WHERE id_promocion = ?', [id]);
+      const antes = await dbGet('SELECT nombre, descripcion, precio, activa FROM promocion WHERE id_promocion = ? AND COALESCE(eliminada, 0) = 0', [id]);
       if (!antes) {
         return res.status(404).json({ success: false, message: 'Esa promoción ya no existe.' });
       }
 
-      const datos = validarDatosPromocion(req.body || {});
+      const nombre = req.body && req.body.nombre !== undefined ? req.body.nombre : antes.nombre;
+      const descripcion = req.body && req.body.descripcion !== undefined ? req.body.descripcion : antes.descripcion;
+      const precio = req.body && req.body.precio !== undefined ? req.body.precio : antes.precio;
+      const datos = validarDatosPromocion({ ...req.body, nombre, descripcion, precio });
       const cambiaContenido = Array.isArray((req.body || {}).contenido);
       const lineas = cambiaContenido
         ? await validarContenidoPromocion(req.body.contenido)
         : null;
-      const activa = req.body.activa === undefined ? 1 : (req.body.activa ? 1 : 0);
+      const activa = req.body.activa === undefined ? antes.activa : (req.body.activa ? 1 : 0);
       const actualizaFoto = req.body && req.body.foto !== undefined;
       const foto = actualizaFoto ? (req.body.foto ? validarFoto(req.body.foto) : null) : null;
       if (actualizaFoto && req.body.foto && foto === false) {
@@ -2159,25 +2235,17 @@ app.delete('/api/admin/promociones/:id', (req, res) => {
         return res.status(404).json({ success: false, message: 'Esa promoción ya no existe.' });
       }
 
-      const vendida = await dbGet(
-        'SELECT COUNT(*) AS n FROM detalle_comanda WHERE id_promocion = ?', [id]);
-      if (vendida && vendida.n > 0) {
-        await dbRun('UPDATE promocion SET activa = 0 WHERE id_promocion = ?', [id]);
-        await registrarAuditoria(req.body && req.body.id_admin, 'APAGAR_PROMOCION',
-          'promocion', id, `"${promo.nombre}" se apagó (ya se había vendido ${vendida.n} veces)`);
-        return res.json({
-          success: true, retirada: true,
-          message: `"${promo.nombre}" se apagó. Como ya se vendió, se conserva para que el historial cuadre.`
-        });
-      }
-
       await withTransaction(async () => {
+        // Desvincular de detalles de comandas históricas para que no rompa el cierre ni el historial
+        await dbRun('UPDATE detalle_comanda SET id_promocion = NULL WHERE id_promocion = ?', [id]);
+        // Eliminación física y completa de la base de datos
         await dbRun('DELETE FROM promocion_detalle WHERE id_promocion = ?', [id]);
         await dbRun('DELETE FROM promocion WHERE id_promocion = ?', [id]);
       });
+
       await registrarAuditoria(req.body && req.body.id_admin, 'ELIMINAR_PROMOCION',
-        'promocion', id, `"${promo.nombre}"`);
-      res.json({ success: true, message: `"${promo.nombre}" eliminada.` });
+        'promocion', id, `"${promo.nombre}" eliminada por completo de la base de datos`);
+      res.json({ success: true, message: `"${promo.nombre}" eliminada correctamente.` });
     })
     .catch(err => {
       console.error('Error al eliminar la promoción:', err);
@@ -2260,6 +2328,71 @@ app.delete('/api/admin/categorias/:id', (req, res) => {
       console.error('Error al eliminar categoría:', err);
       res.status(500).json({ success: false, message: 'No se pudo eliminar la categoría.' });
     });
+});
+
+app.put('/api/admin/categorias/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Categoría no válida.' });
+  }
+
+  withTransaction(async () => {
+    const cat = await dbGet('SELECT id_categoria, nombre, descripcion, tipo, activo FROM categoria_producto WHERE id_categoria = ?', [id]);
+    if (!cat) return { estado: 404, cuerpo: { success: false, message: 'Esa categoría ya no existe.' } };
+
+    const nuevoActivo = req.body.activo !== undefined ? (req.body.activo ? 1 : 0) : cat.activo;
+    const nuevoNombre = req.body.nombre !== undefined ? String(req.body.nombre).trim() : cat.nombre;
+    const nuevaDesc = req.body.descripcion !== undefined ? String(req.body.descripcion).trim() : (cat.descripcion || '');
+    const nuevoTipo = req.body.tipo !== undefined ? String(req.body.tipo).trim() : (cat.tipo || 'BEBIDA');
+
+    if (!nuevoNombre) {
+      return { estado: 400, cuerpo: { success: false, message: 'La categoría necesita un nombre.' } };
+    }
+
+    await dbRun(
+      'UPDATE categoria_producto SET nombre = ?, descripcion = ?, tipo = ?, activo = ? WHERE id_categoria = ?',
+      [nuevoNombre, nuevaDesc, nuevoTipo, nuevoActivo, id]
+    );
+
+    const cambioEstado = cat.activo !== nuevoActivo;
+    const mensaje = cambioEstado
+      ? (nuevoActivo ? `Categoría "${nuevoNombre}" activada.` : `Categoría "${nuevoNombre}" desactivada.`)
+      : `Categoría "${nuevoNombre}" actualizada.`;
+
+    return {
+      estado: 200,
+      cuerpo: {
+        success: true,
+        activo: nuevoActivo,
+        cambioEstado: cambioEstado,
+        message: mensaje
+      }
+    };
+  })
+    .then(r => {
+      if (r.cuerpo && r.cuerpo.success) {
+        const accion = r.cuerpo.cambioEstado
+          ? (r.cuerpo.activo ? 'ACTIVAR_CATEGORIA' : 'DESACTIVAR_CATEGORIA')
+          : 'EDITAR_CATEGORIA';
+        registrarAuditoria(
+          req.body && req.body.id_admin,
+          accion,
+          'categoria_producto',
+          id,
+          r.cuerpo.message
+        );
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al actualizar categoría:', err);
+      res.status(500).json({ success: false, message: 'No se pudo actualizar la categoría.' });
+    });
+});
+
+app.put('/api/admin/categorias/:id/estado', (req, res) => {
+  req.url = `/api/admin/categorias/${req.params.id}`;
+  app._router.handle(req, res);
 });
 
 // ---- Cajero ----------------------------------------------------------------
@@ -2464,10 +2597,55 @@ app.delete('/api/admin/productos/:id', (req, res) => {
     });
 });
 
-app.put('/api/admin/productos/:id', (req, res) => {
+app.put('/api/admin/productos/:id/estado', (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ success: false, message: 'Producto no válido.' });
+  }
+
+  withTransaction(async () => {
+    const prod = await dbGet('SELECT id_producto, nombre, activo FROM producto WHERE id_producto = ?', [id]);
+    if (!prod) return { estado: 404, cuerpo: { success: false, message: 'Ese producto ya no existe.' } };
+
+    const nuevoActivo = req.body.activo !== undefined ? (req.body.activo ? 1 : 0) : (prod.activo ? 0 : 1);
+    await dbRun('UPDATE producto SET activo = ? WHERE id_producto = ?', [nuevoActivo, id]);
+
+    return {
+      estado: 200,
+      cuerpo: {
+        success: true,
+        activo: nuevoActivo,
+        message: nuevoActivo ? `"${prod.nombre}" activado.` : `"${prod.nombre}" desactivado.`
+      }
+    };
+  })
+    .then(r => {
+      if (r.cuerpo.success) {
+        registrarAuditoria(
+          req.body && req.body.id_admin,
+          r.cuerpo.activo ? 'ACTIVAR_PRODUCTO' : 'DESACTIVAR_PRODUCTO',
+          'producto',
+          id,
+          r.cuerpo.message
+        );
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al cambiar estado del producto:', err);
+      res.status(500).json({ success: false, message: 'No se pudo cambiar el estado del producto.' });
+    });
+});
+
+app.put('/api/admin/productos/:id', (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Producto no válido.' });
+  }
+
+  if (req.body.activo !== undefined && req.body.nombre === undefined) {
+    req.url = `/api/admin/productos/${id}/estado`;
+    return app._router.handle(req, res, next);
   }
 
   const nombre = String(req.body.nombre == null ? '' : req.body.nombre).trim().slice(0, 120);
@@ -3133,15 +3311,33 @@ app.get('/api/admin/comandas.pdf', async (req, res) => {
 
     const filtro = (req.query.q || '').trim();
     if (filtro) {
-      const qLower = filtro.toLowerCase();
-      mapped = mapped.filter(c => {
-        const id = c.id_comanda.toString();
-        const mesero = (c.nombre_mesero || '').toLowerCase();
-        const cajero = (c.nombre_cajero || '').toLowerCase();
-        const barra = (c.nombre_barra || '').toLowerCase();
-        const prods = (c.detalles || []).some(d => (d.nombre_producto || '').toLowerCase().includes(qLower));
-        return id.includes(qLower) || mesero.includes(qLower) || cajero.includes(qLower) || barra.includes(qLower) || prods;
-      });
+      const qNum = filtro.replace(/[^0-9]/g, '');
+      if (qNum) {
+        mapped = mapped.filter(c => c.id_comanda.toString().includes(qNum));
+      } else {
+        mapped = [];
+      }
+    }
+
+    const estado = (req.query.estado || '').trim().toLowerCase();
+    if (estado === 'completadas') {
+      mapped = mapped.filter(c => c.estado_pago !== 'ANULADO');
+    } else if (estado === 'anuladas') {
+      mapped = mapped.filter(c => c.estado_pago === 'ANULADO');
+    }
+
+    const mesero = (req.query.mesero || '').trim().toLowerCase();
+    if (mesero) {
+      mapped = mapped.filter(c => (c.nombre_mesero || '').toLowerCase() === mesero);
+    }
+
+    const desde = (req.query.desde || '').trim();
+    const hasta = (req.query.hasta || '').trim();
+    if (desde) {
+      mapped = mapped.filter(c => (c.fecha_hora || '').slice(0, 10) >= desde);
+    }
+    if (hasta) {
+      mapped = mapped.filter(c => (c.fecha_hora || '').slice(0, 10) <= hasta);
     }
 
     const datos = {

@@ -81,6 +81,7 @@ const check = (nombre, ok, extra) => {
               VALUES (1, 'Combo Amigos', 'Un whisky y dos cervezas', 60, 1)`);
     sem.exec(`INSERT INTO promocion_detalle (id_promocion, id_producto, cantidad)
               VALUES (1, 8, 1), (1, 1, 2)`);
+    sem.exec('UPDATE producto SET stock_actual = 20 WHERE id_producto IN (1, 8, 4, 33)');
     sem.close();
   }
   if (!arriba) {

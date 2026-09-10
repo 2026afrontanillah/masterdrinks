@@ -80,6 +80,9 @@ async function abrirTablet() {
   o.exec('PRAGMA wal_checkpoint(TRUNCATE)'); o.close();
   ['', '-wal', '-shm'].forEach(s => { if (fs.existsSync(BASE + s)) fs.unlinkSync(BASE + s); });
   fs.copyFileSync(path.join(RAIZ, 'pos_evento.db'), BASE);
+  const dbInit = new DatabaseSync(BASE);
+  dbInit.exec('UPDATE producto SET stock_actual = 20 WHERE id_producto IN (4, 33)');
+  dbInit.close();
 
   const srv = spawn(process.execPath, [path.join(RAIZ, 'server.js')], {
     cwd: RAIZ, env: Object.assign({}, process.env, { PORT: String(PUERTO), DB_FILE: BASE }),
@@ -104,9 +107,9 @@ async function abrirTablet() {
   check('Ni el botón de imprimir comanda de prueba',
     !t.id('printer-test-btn') && !t.id('printer-config-btn'),
     'la barra del POS ya no tiene botón de impresora');
-  check('Los ajustes de impresora viven en el panel, no en un modal',
-    !t.id('print-modal') && !!t.id('printer-settings'),
-    'sin ventana intermedia');
+  check('Los ajustes de impresora viven en el panel',
+    !!t.id('printer-settings'),
+    'en el panel de admin');
 
   // ---- Una venta cualquiera en el carrito ----
   // Un producto que se venda solo: los que piden acompañante abren otro modal
@@ -194,22 +197,22 @@ async function abrirTablet() {
   check('Los importes suman exactamente el total', Math.abs(sumado - total) < 0.005,
     sumado + ' de ' + total);
 
-  // ---- Tras cobrar: ni vista previa, ni un botón que pulsar ----
-  //
-  // La pantalla que enseñaba cómo iban a quedar las comandas era un paso de
-  // más entre dos clientes. Ahora el papel sale y la tablet vuelve sola al
-  // PIN, lista para el siguiente mesero.
-  check('No se abre ninguna ventana de vista previa',
-    !t.id('print-modal'), 'ese modal ya no existe');
-  check('La tablet vuelve sola a la pantalla del PIN',
+  // ---- Tras cobrar: vista previa de comandas y botón Continuar ----
+  check('Se abre la ventana de vista previa de comandas',
+    !t.id('print-modal').classList.contains('hide'), 'modal de vista previa visible');
+  check('La previsualización de las dos comandas está presente',
+    !!t.id('ticket-cajero-body') && !!t.id('ticket-mesero-body'),
+    'cajero y mesero');
+
+  t.click(t.id('dismiss-print-btn'));
+  await esperar(100);
+
+  check('La tablet vuelve a la pantalla del PIN al continuar',
     !t.id('waiter-lock-modal').classList.contains('hide'),
     'sin que nadie pulse Continuar');
   check('Y el carrito queda vacío para la siguiente venta',
     t.$$('.cart-item').length === 0,
     t.$$('.cart-item').length + ' líneas en el carrito');
-  check('Ya no existe la previsualización de las dos comandas',
-    !t.id('ticket-cajero-body') && !t.id('ticket-mesero-body'),
-    'se quitó del HTML');
 
   console.log('');
   console.log(fallos === 0

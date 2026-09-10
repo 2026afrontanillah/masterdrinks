@@ -25,18 +25,20 @@ window.ThermalPrinter = (function () {
   // ---------------------------------------------------------------------
   const SETTINGS_KEY = 'masterdrinks.printer.v1';
 
-  // Preparar el bitmap del logo Euphoria para impresoras térmicas ESC/POS
+  // Preparar el bitmap del logo del evento para impresoras térmicas ESC/POS
+  let logoTicketUrl = '/api/configuracion/logo';
   let logoRasterEscPos = null;
 
-  function prepararLogoRaster() {
+  function prepararLogoRaster(url) {
     if (typeof Image === 'undefined' || typeof document === 'undefined') return;
+    if (url) logoTicketUrl = url;
     try {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = function () {
         try {
           const targetWidth = 240;
-          const targetHeight = Math.round((img.naturalHeight / img.naturalWidth) * targetWidth);
+          const targetHeight = Math.max(16, Math.round((img.naturalHeight / img.naturalWidth) * targetWidth));
           const canvas = document.createElement('canvas');
           canvas.width = targetWidth;
           canvas.height = targetHeight;
@@ -82,18 +84,32 @@ window.ThermalPrinter = (function () {
             data: rasterData
           };
         } catch (e) {
-          console.warn('No se pudo procesar el raster del logo Euphoria:', e);
+          console.warn('No se pudo procesar el raster del logo:', e);
         }
       };
-      img.src = 'logo_euphoria.png';
+      img.onerror = function () {
+        if (img.src !== 'logo_euphoria.png' && !img.src.endsWith('/logo_euphoria.png')) {
+          img.src = 'logo_euphoria.png';
+        }
+      };
+      img.src = logoTicketUrl;
     } catch (err) {
-      console.warn('Error al cargar imagen del logo Euphoria:', err);
+      console.warn('Error al cargar imagen del logo:', err);
     }
+  }
+
+  function setLogoUrl(url) {
+    logoTicketUrl = url || '/api/configuracion/logo';
+    prepararLogoRaster(logoTicketUrl);
+  }
+
+  function getLogoUrl() {
+    return logoTicketUrl;
   }
 
   if (typeof window !== 'undefined') {
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', prepararLogoRaster);
+      document.addEventListener('DOMContentLoaded', () => prepararLogoRaster());
     } else {
       prepararLogoRaster();
     }
@@ -681,12 +697,13 @@ window.ThermalPrinter = (function () {
   // Salida 3: HTML (respaldo por el diálogo del navegador)
   // ---------------------------------------------------------------------
   function opsToHtml(ops, settings) {
+    settings = settings || getSettings();
     const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     return ops.map(o => {
       if (o.isLogo) {
-        return `<div class="thermal-logo-box" style="text-align:center; padding: 4px 0;"><img src="logo_euphoria.png" alt="Euphoria" style="max-width: 140px; max-height: 40px; object-fit: contain; margin: 0 auto; display: block; filter: grayscale(1) contrast(1.3);"></div>`;
+        return `<div class="thermal-logo-box" style="text-align:center; padding: 4px 0;"><img src="${escapeHtml(logoTicketUrl)}" alt="Logo" style="max-width: 140px; max-height: 40px; object-fit: contain; margin: 0 auto; display: block; filter: grayscale(1) contrast(1.3);"><span style="display:none;">${escapeHtml(o.text || 'MASTERDRINKS')}</span></div>`;
       }
       // Alto y ancho se estiran por separado, nunca con font-size.
       //
@@ -928,6 +945,9 @@ window.ThermalPrinter = (function () {
     renderText: renderText,
     printToRawBT: printToRawBT,
     printViaBrowser: printViaBrowser,
+    setLogoUrl: setLogoUrl,
+    getLogoUrl: getLogoUrl,
+    prepararLogoRaster: prepararLogoRaster,
     // Expuesto para el reporte de inventario, que usa el mismo maquetado.
     helpers: {
       wrap: wrap,
