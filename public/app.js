@@ -310,8 +310,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.rol === 'CAJERO') {
                     // Show waiter security modal
                     showWaiterModal();
-                } else if (data.rol === 'ADMINISTRADOR' || data.rol === 'SUPERVISOR') {
-                    // Show admin dashboard
+                } else if (data.rol === 'ADMINISTRADOR' || data.rol === 'SUPERVISOR' || data.rol === 'ENCARGADO' || data.rol === 'ENCARGADO_STOCK' || data.rol === 'ENCARGADO_INVENTARIO' || data.rol === 'ENCARGA') {
+                    // Show admin / inventory dashboard
                     showAdminView();
                 }
             } else {
@@ -3476,19 +3476,59 @@ document.addEventListener('DOMContentLoaded', () => {
         posView.classList.add('hide');
         adminView.classList.remove('hide');
 
-        document.getElementById('admin-role-badge').textContent = currentUser.rol;
-        document.getElementById('admin-user-name').textContent = currentUser.nombre;
+        const esEncargado = (
+            currentUser.rol === 'ENCARGADO' ||
+            currentUser.rol === 'ENCARGADO_STOCK' ||
+            currentUser.rol === 'ENCARGADO_INVENTARIO' ||
+            currentUser.rol === 'ENCARGA'
+        );
 
-        // Reset and show default Dashboard Tab
-        document.querySelectorAll('.nav-tab-btn').forEach(btn => btn.classList.remove('active'));
-        document.querySelector('[data-tab="tab-dashboard"]').classList.add('active');
+        const badgeEl = document.getElementById('admin-role-badge');
+        if (badgeEl) badgeEl.textContent = esEncargado ? 'ENCARGADO' : currentUser.rol;
+
+        const brandingH2 = document.querySelector('#admin-view .admin-branding h2');
+        if (brandingH2) brandingH2.textContent = esEncargado ? 'Inventario' : 'Panel Admin';
+
+        const userNameEl = document.getElementById('admin-user-name');
+        if (userNameEl) userNameEl.textContent = currentUser.nombre;
+
+        // Filtrar y mostrar SOLO el módulo de Inventario si es Encargado
+        document.querySelectorAll('.nav-tab-btn').forEach(btn => {
+            const t = btn.getAttribute('data-tab');
+            if (esEncargado) {
+                // El encargado SOLO ve el módulo de Inventario (tab-stock)
+                if (t === 'tab-stock') {
+                    btn.style.display = '';
+                } else {
+                    btn.style.display = 'none';
+                }
+            } else {
+                btn.style.display = '';
+            }
+            btn.classList.remove('active');
+        });
+
         document.querySelectorAll('.tab-content').forEach(tc => tc.classList.add('hide'));
-        document.getElementById('tab-dashboard').classList.remove('hide');
-        loadDashboardData();
-        loadPersonalSetup();
-        cargarPersonalAdmin();
-        loadCatalogSetup();
-        cargarCatalogoAdmin();
+
+        if (esEncargado) {
+            // Mostrar directamente la pestaña de Inventario
+            const stockBtn = document.querySelector('[data-tab="tab-stock"]');
+            if (stockBtn) stockBtn.classList.add('active');
+            const stockContent = document.getElementById('tab-stock');
+            if (stockContent) stockContent.classList.remove('hide');
+            loadStockSetup();
+        } else {
+            // Admin normal
+            const dashBtn = document.querySelector('[data-tab="tab-dashboard"]');
+            if (dashBtn) dashBtn.classList.add('active');
+            const dashContent = document.getElementById('tab-dashboard');
+            if (dashContent) dashContent.classList.remove('hide');
+            loadDashboardData();
+            loadPersonalSetup();
+            cargarPersonalAdmin();
+            loadCatalogSetup();
+            cargarCatalogoAdmin();
+        }
     }
 
     // Setup Admin Navigation Tab listeners
@@ -7090,9 +7130,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button type="button" class="stock-action-btn salida" data-id="${p.id_producto}" title="Registrar salida o merma">
                         <span>−</span> Salida
                     </button>
-                    <button type="button" class="stock-action-btn ajuste" data-id="${p.id_producto}" title="Ajuste manual de stock">
-                        <span>🔄</span> Ajuste
-                    </button>
                     <button type="button" class="stock-action-btn historial" data-id="${p.id_producto}" title="Ver historial de movimientos">
                         <span>🕒</span> Historial
                     </button>
@@ -7101,7 +7138,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             card.querySelector('.stock-action-btn.entrada').addEventListener('click', () => openStockActionModal(p, 'ENTRADA'));
             card.querySelector('.stock-action-btn.salida').addEventListener('click', () => openStockActionModal(p, 'SALIDA'));
-            card.querySelector('.stock-action-btn.ajuste').addEventListener('click', () => openStockActionModal(p, 'AJUSTE'));
             card.querySelector('.stock-action-btn.historial').addEventListener('click', () => openStockHistoryModal(p));
 
             grid.appendChild(card);

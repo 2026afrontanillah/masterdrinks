@@ -620,7 +620,8 @@ const mockDb = {
   ],
   administrador_evento: [
     { id_admin: 1, id_evento: 1, nombre: 'Administrador Principal', usuario: 'admin', password: '123', rol: 'ADMINISTRADOR', activo: 1 },
-    { id_admin: 2, id_evento: 1, nombre: 'Supervisor Operativo', usuario: 'supervisor_evento', password: 'demo123', rol: 'SUPERVISOR', activo: 1 }
+    { id_admin: 2, id_evento: 1, nombre: 'Supervisor Operativo', usuario: 'supervisor_evento', password: 'demo123', rol: 'SUPERVISOR', activo: 1 },
+    { id_admin: 3, id_evento: 1, nombre: 'Encargado de Inventario', usuario: 'encargado', password: '123', rol: 'ENCARGADO', activo: 1 }
   ],
   mesero: [],
   categoria_producto: [
@@ -1112,6 +1113,18 @@ function initializeDatabase() {
         db.run(`UPDATE administrador_evento SET usuario = 'admin', password = '123' WHERE id_admin = 1 OR usuario = 'admin_evento'`);
       } catch (e) {
         // Ignorar si la tabla aún no existe en paso previo
+      }
+
+      // Asegurar existencia del usuario Encargado de Inventario (rol: ENCARGADO)
+      try {
+        const enc = db.prepare("SELECT id_admin FROM administrador_evento WHERE rol = 'ENCARGADO' OR usuario = 'encargado'").get();
+        if (!enc) {
+          db.run(
+            `INSERT INTO administrador_evento (id_evento, nombre, usuario, password, rol, activo) VALUES (1, 'Encargado de Inventario', 'encargado', '123', 'ENCARGADO', 1)`
+          );
+        }
+      } catch (e) {
+        // Ignorar
       }
     });
   });

@@ -6020,14 +6020,10 @@ select option {
     color: #881337 !important;
 }
 
-.stock-action-btn.ajuste {
-    background: #fef08a !important;
-    color: #713f12 !important;
-}
-
 .stock-action-btn.historial {
     background: #f1f5f9 !important;
     color: #0f172a !important;
+    grid-column: span 2 !important;
 }
 
 /* Modals for Quick Stock Action */
@@ -9480,14 +9476,10 @@ select option {
     color: #881337 !important;
 }
 
-#admin-view .stock-action-btn.ajuste {
-    background: #fef08a !important;
-    color: #713f12 !important;
-}
-
 #admin-view .stock-action-btn.historial {
     background: #f1f5f9 !important;
     color: #0f172a !important;
+    grid-column: span 2 !important;
 }
 
 /* Config Grid & Details in Dashboard */
