@@ -3328,10 +3328,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function sendToPrinter() {
         if (!currentTicket) return;
-        const esCopia = currentTicket.reimpresion;
+        const esCopia = Boolean(currentTicket.reimpresion);
 
-        // El registro va ANTES de mandar el papel, y fuera del try.
-        logPrint(currentTicket.id);
+        // El registro de reimpresión solo se hace si es una copia extra (reimpresión).
+        // La copia original (#1) ya queda registrada en el backend al crear la comanda.
+        if (esCopia) {
+            logPrint(currentTicket.id);
+        }
 
         try {
             ThermalPrinter.printToRawBT(currentTicket);
@@ -3408,8 +3411,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (printBrowserBtn) {
         printBrowserBtn.addEventListener('click', () => {
             if (!currentTicket) return;
+            if (currentTicket.reimpresion) {
+                logPrint(currentTicket.id);
+            }
             ThermalPrinter.printViaBrowser(currentTicket);
-            logPrint(currentTicket.id);
             marcarSiguienteComoReimpresion();
         });
     }
