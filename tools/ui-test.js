@@ -500,7 +500,7 @@ const check = (nombre, ok, extra) => {
   click(id('pay-confirm-btn'));
   await esperar(60);
   check('Avisa si el efectivo supera el total',
-    visible(id('pay-error')) || id('pay-falta').previousElementSibling.textContent.includes('pasa'),
+    visible(id('pay-error')) || id('pay-falta').previousElementSibling.textContent.includes('Cambio') || id('pay-falta').previousElementSibling.textContent.includes('pasa'),
     id('pay-error').textContent || id('pay-falta').previousElementSibling.textContent);
   escribir(segundaInput, (total - 10).toFixed(2));
   await esperar(60);

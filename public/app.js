@@ -668,7 +668,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const rankA = catRank.has(a.id_categoria) ? catRank.get(a.id_categoria) : 999;
                 const rankB = catRank.has(b.id_categoria) ? catRank.get(b.id_categoria) : 999;
                 if (rankA !== rankB) return rankA - rankB;
-                return (a.requiere_acompanante || 0) - (b.requiere_acompanante || 0) || a.id_producto - b.id_producto;
+                const ordA = Number(a.orden != null ? a.orden : 0);
+                const ordB = Number(b.orden != null ? b.orden : 0);
+                if (ordA !== ordB) return ordA - ordB;
+                return (a.id_producto || 0) - (b.id_producto || 0);
             });
             promociones = data.promociones || [];
 
@@ -693,16 +696,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // hay mucha interferencia y una conexión abierta se corta a cada rato. Cada
     // consulta es independiente, así que un corte no deja nada colgado: la
     // siguiente vuelve a cuadrar sola. Son dos SELECT, no pesa nada.
-    const INTERVALO_STOCK = 12000;
+    const INTERVALO_STOCK = 5000;
     let temporizadorStock = null;
 
     function iniciarSondeoStock() {
         detenerSondeoStock();
         temporizadorStock = setInterval(() => {
-            // Con la pantalla apagada o la app en segundo plano no hay nadie
-            // mirando: no se gasta batería ni se molesta al servidor.
             if (document.hidden) return;
-            if (posView.classList.contains('hide')) return;
+            if (posView && posView.classList.contains('hide')) return;
             refrescarStock();
         }, INTERVALO_STOCK);
     }
@@ -712,57 +713,45 @@ document.addEventListener('DOMContentLoaded', () => {
         temporizadorStock = null;
     }
 
-    // Al volver a la app puede haber pasado un buen rato: se refresca ya, sin
-    // esperar al siguiente turno del temporizador.
+    // Al volver a la app se refresca silenciosamente
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && !posView.classList.contains('hide')) refrescarStock();
+        if (!document.hidden && posView && !posView.classList.contains('hide')) {
+            refrescarStock();
+        }
     });
 
     /**
-     * Relee las existencias y actualiza SOLO las tarjetas que cambiaron, sin
-     * repintar la rejilla: un repintado completo cada pocos segundos cortaría
-     * el desplazamiento y el toque del cajero a mitad de venta.
+     * Sincronización silenciosa e invisible de existencias:
+     * Actualiza directamente los números y el sello de agotado sobre las tarjetas
+     * sin repintar la rejilla, sin animaciones de carga y sin mover el scroll.
      */
     async function refrescarStock() {
+        if (!products || products.length === 0) return;
         let data;
         try {
-            // Sólo las existencias, no el catálogo entero. Con una foto por
-            // producto, pedir /api/productos cada doce segundos son 600 KB por
-            // tablet y por sondeo: sobre el WiFi de un teléfono eso deja sin
-            // antena a las ventas, que es lo único que no puede esperar.
             const response = await fetch('/api/stock');
             if (!response.ok) return;
             data = await response.json();
         } catch (err) {
-            // Sin conexión momentánea: se reintenta en el siguiente turno.
-            console.warn('No se pudo refrescar el stock:', err);
             return;
         }
 
-        const llegado = new Map((data.stock || []).map(p => [p.id, p.s]));
+        if (!data || !Array.isArray(data.stock)) return;
+        const llegado = new Map(data.stock.map(p => [p.id, p.s]));
 
-        // Un alta o una baja de producto cambia la lista de ids: eso sí obliga a
-        // recargar el catálogo entero, pero pasa una vez cada muchas horas.
-        const mismosProductos = llegado.size === products.length &&
-            products.every(p => llegado.has(p.id_producto));
-
-        if (!mismosProductos) {
-            await fetchProductsAndMenu();
-            avisarSiFaltaStock();
-            return;
-        }
-
-        // Sólo se tocan las tarjetas cuyo número cambió. Repintar la rejilla
-        // entera cada pocos segundos cortaría el desplazamiento y el toque del
-        // cajero a mitad de venta.
+        let algunCambio = false;
         products.forEach(p => {
             const nuevo = llegado.get(p.id_producto);
-            if (nuevo === undefined || nuevo === p.stock_actual) return;
-            p.stock_actual = nuevo;
-            actualizarTarjeta(p.id_producto);
+            if (nuevo !== undefined && nuevo !== p.stock_actual) {
+                p.stock_actual = nuevo;
+                actualizarTarjeta(p.id_producto, false);
+                algunCambio = true;
+            }
         });
 
-        avisarSiFaltaStock();
+        if (algunCambio && cart.length > 0) {
+            avisarSiFaltaStock();
+        }
     }
 
     /**
@@ -836,24 +825,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function ordenarCategorias(lista) {
-        // Orden solicitado: Botellas -> Cervezas -> Sodas -> Agua -> Comida -> resto
-        const prioridades = [
-            /^botella/i,
-            /^cerveza/i,
-            /^soda/i,
-            /^agua/i,
-            /^comida/i
-        ];
-
         return [...lista].sort((a, b) => {
-            const nomA = (a.nombre || '').trim();
-            const nomB = (b.nombre || '').trim();
-            const idxA = prioridades.findIndex(rx => rx.test(nomA));
-            const idxB = prioridades.findIndex(rx => rx.test(nomB));
-            const prioA = idxA !== -1 ? idxA : 999;
-            const prioB = idxB !== -1 ? idxB : 999;
-            if (prioA !== prioB) return prioA - prioB;
-            return nomA.localeCompare(nomB);
+            const ordA = Number(a.orden != null ? a.orden : 0);
+            const ordB = Number(b.orden != null ? b.orden : 0);
+            if (ordA !== ordB) return ordA - ordB;
+            return (a.id_categoria || 0) - (b.id_categoria || 0);
         });
     }
 
@@ -1062,21 +1038,87 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function actualizarTarjeta(id_producto, conRebote) {
         const grid = document.getElementById('product-grid');
-        const card = grid.querySelector(`.product-card[data-id="${id_producto}"]`);
+        const card = grid ? grid.querySelector(`.product-card[data-id="${id_producto}"]`) : null;
+        if (card) {
+            const p = products.find(x => x.id_producto === id_producto);
+            if (p) {
+                const unidades = unidadesEnCarrito(id_producto);
+                const restante = p.stock_actual - unidades;
+                const displayStock = Math.max(0, restante);
+                const tope = p.stock_tope || p.stock_actual || 10;
+                const pct = tope > 0 ? Math.min(100, Math.max(0, Math.round((displayStock / tope) * 100))) : (displayStock > 0 ? 100 : 0);
+                const isOut = restante <= 0;
+                const statusClass = isOut ? 'out' : (pct <= 40 ? 'low' : 'normal');
+                const strokeColor = isOut ? '#e5e7eb' : (pct <= 40 ? '#ef4444' : '#facc15');
+
+                card.classList.toggle('out-of-stock', isOut);
+
+                const gaugeBar = card.querySelector('.gauge-bar');
+                if (gaugeBar) {
+                    const pathLen = 216.77;
+                    const offset = pathLen * (1 - (isOut ? 0 : pct / 100));
+                    gaugeBar.style.strokeDashoffset = offset;
+                    gaugeBar.style.stroke = strokeColor;
+                }
+
+                const stamp = card.querySelector('.stamp-agotado');
+                const foto = card.querySelector('.product-foto, .emoji');
+                if (stamp) stamp.classList.toggle('hide', !isOut);
+                if (foto) foto.classList.toggle('foto-agotada', isOut);
+
+                const footer = card.querySelector('.stock-footer');
+                if (footer) {
+                    footer.className = `stock-footer ${statusClass}`;
+                    const labelLine = footer.querySelector('.stock-label-line');
+                    if (labelLine) labelLine.textContent = `Stock: ${pct}%`;
+                    const unitsLine = footer.querySelector('.stock-units-line');
+                    if (unitsLine) {
+                        unitsLine.className = `stock-units-line stock ${isOut ? 'out' : ''}`;
+                        unitsLine.innerHTML = isOut ? '0 UNIDADES<span class="sr-only"> (Agotado)</span>' : `${displayStock} UDS`;
+                    }
+                }
+
+                let badge = card.querySelector('.cart-badge');
+                if (unidades > 0) {
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.className = 'cart-badge';
+                        card.appendChild(badge);
+                    }
+                    badge.textContent = unidades;
+                    if (conRebote) {
+                        badge.classList.remove('bump');
+                        void badge.offsetWidth;
+                        badge.classList.add('bump');
+                    }
+                } else if (badge) {
+                    badge.remove();
+                }
+            }
+        }
+
+        // Actualizar también las tarjetas de combos que incluyan este producto
+        promociones.forEach(pr => {
+            if ((pr.contenido || []).some(c => c.id_producto === id_producto)) {
+                actualizarTarjetaPromo(pr.id_promocion, conRebote);
+            }
+        });
+    }
+
+    function actualizarTarjetaPromo(id_promocion, conRebote) {
+        const grid = document.getElementById('product-grid');
+        if (!grid) return;
+        const card = grid.querySelector(`.product-card.promo-card[data-promo="${id_promocion}"]`);
         if (!card) return;
 
-        const p = products.find(x => x.id_producto === id_producto);
-        if (!p) return;
+        const pr = promociones.find(x => x.id_promocion === id_promocion);
+        if (!pr) return;
 
-        // Todas las unidades comprometidas: las que van sueltas y las que van
-        // de acompañante dentro de otra línea. La insignia de la tarjeta tiene
-        // que contarlas todas, porque todas salen del mismo almacén.
-        const unidades = unidadesEnCarrito(id_producto);
-        const restante = p.stock_actual - unidades;
-        const displayStock = Math.max(0, restante);
-        const tope = p.stock_tope || p.stock_actual || 10;
-        const pct = tope > 0 ? Math.min(100, Math.max(0, Math.round((displayStock / tope) * 100))) : (displayStock > 0 ? 100 : 0);
-        const isOut = restante <= 0;
+        const caben = paquetesQueCaben(pr);
+        const puestos = (cart.find(c => c.tipo === 'promo' && c.id_promocion === pr.id_promocion) || {}).cantidad || 0;
+        const restante = Math.max(0, caben - puestos);
+        const isOut = caben <= 0 || restante <= 0;
+        const pct = caben > 0 ? Math.min(100, Math.max(0, Math.round((caben / 10) * 100))) : 0;
         const statusClass = isOut ? 'out' : (pct <= 40 ? 'low' : 'normal');
         const strokeColor = isOut ? '#e5e7eb' : (pct <= 40 ? '#ef4444' : '#facc15');
 
@@ -1091,35 +1133,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const stamp = card.querySelector('.stamp-agotado');
-        const cloud = card.querySelector('.gauge-cloud-bg');
-        const foto = card.querySelector('.product-foto, .emoji');
+        const foto = card.querySelector('.product-foto, .promo-foto, .emoji');
         if (stamp) stamp.classList.toggle('hide', !isOut);
-        if (cloud) cloud.classList.toggle('hide', !isOut);
         if (foto) foto.classList.toggle('foto-agotada', isOut);
 
         const footer = card.querySelector('.stock-footer');
         if (footer) {
             footer.className = `stock-footer ${statusClass}`;
-            const labelLine = footer.querySelector('.stock-label-line');
-            if (labelLine) labelLine.textContent = `Stock: ${pct}%`;
             const unitsLine = footer.querySelector('.stock-units-line');
             if (unitsLine) {
                 unitsLine.className = `stock-units-line stock ${isOut ? 'out' : ''}`;
-                unitsLine.innerHTML = isOut ? '0 UNIDADES<span class="sr-only"> (Agotado)</span>' : `${displayStock} UDS`;
+                unitsLine.innerHTML = isOut ? '0 COMBOS<span class="sr-only"> (Agotado)</span>' : `${caben} ${caben === 1 ? 'COMBO' : 'COMBOS'}`;
             }
         }
 
         let badge = card.querySelector('.cart-badge');
-        if (unidades > 0) {
+        if (puestos > 0) {
             if (!badge) {
                 badge = document.createElement('span');
                 badge.className = 'cart-badge';
                 card.appendChild(badge);
             }
-            badge.textContent = unidades;
+            badge.textContent = puestos;
             if (conRebote) {
                 badge.classList.remove('bump');
-                void badge.offsetWidth;   // reinicia la animación si se repite
+                void badge.offsetWidth;
                 badge.classList.add('bump');
             }
         } else if (badge) {
@@ -1127,9 +1165,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Dirección de la foto de un producto. Lleva el tamaño dentro: al cambiar
-    // la foto cambia la dirección, y el navegador —que la tiene cacheada un
-    // año— se entera de que hay una nueva.
+    // Dirección de la foto de un producto.
     const urlFoto = p => (p && p.tiene_foto)
         ? '/api/producto/' + p.id_producto + '/foto?v=' + (p.foto_v || 0)
         : '';
@@ -1138,9 +1174,6 @@ document.addEventListener('DOMContentLoaded', () => {
         ? '/api/promocion/' + pr.id_promocion + '/foto?v=' + (pr.foto_v || 0)
         : '';
 
-    // La cascada de entrada sólo se justifica al cargar el catálogo. Si se
-    // repitiera al filtrar o al teclear en el buscador —decenas de veces por
-    // turno— la rejilla parpadearía en cada letra.
     let animarRejilla = false;
 
     function renderProducts() {
@@ -1179,35 +1212,69 @@ document.addEventListener('DOMContentLoaded', () => {
         promosVisibles.forEach((pr, i) => {
             const caben = paquetesQueCaben(pr);
             const puestos = (cart.find(c => c.tipo === 'promo' && c.id_promocion === pr.id_promocion) || {}).cantidad || 0;
+            const restante = Math.max(0, caben - puestos);
+            const isOut = caben <= 0 || restante <= 0;
             const suelto = precioSuelto(pr);
             const ahorro = Math.round((suelto - Number(pr.precio)) * 100) / 100;
+            const tope = 10;
+            const pct = caben > 0 ? Math.min(100, Math.max(0, Math.round((caben / tope) * 100))) : 0;
+            const statusClass = isOut ? 'out' : (pct <= 40 ? 'low' : 'normal');
+            const strokeColor = isOut ? '#e5e7eb' : (pct <= 40 ? '#ef4444' : '#facc15');
+            const pathLen = 216.77;
+            const offset = pathLen * (1 - (isOut ? 0 : pct / 100));
 
             const card = document.createElement('div');
-            card.className = `product-card promo-card ${animar ? 'enter' : ''} ${caben <= 0 ? 'out-of-stock' : ''}`;
+            card.className = `product-card promo-card ${animar ? 'enter' : ''} ${isOut ? 'out-of-stock' : ''}`;
             card.dataset.promo = pr.id_promocion;
             if (animar) card.style.animationDelay = Math.min(i, 11) * 25 + 'ms';
 
-            const dentro = (pr.contenido || []).map(c => {
+            const dentroItems = (pr.contenido || []).map(c => {
                 const prod = products.find(p => p.id_producto === c.id_producto);
-                return `<li>${c.cantidad} × ${escapeHtml(prod ? prod.nombre : 'producto')}</li>`;
-            }).join('');
+                return `${c.cantidad}× ${prod ? prod.nombre : 'prod'}`;
+            }).join(' + ');
 
             const foto = urlFotoPromo(pr);
             const visual = foto
-                ? `<div class="promo-foto-wrap"><img class="promo-foto ${caben <= 0 ? 'foto-agotada' : ''}" src="${foto}" alt="${escapeHtml(pr.nombre)}" loading="lazy" decoding="async"></div>`
-                : '';
+                ? `<img class="product-foto promo-foto ${isOut ? 'foto-agotada' : ''}" src="${foto}" alt="${escapeHtml(pr.nombre)}" loading="lazy" decoding="async">`
+                : `<span class="emoji ${isOut ? 'foto-agotada' : ''}">🎁</span>`;
+
+            const precioTexto = Number(pr.precio) % 1 === 0 ? 'BS ' + Math.round(pr.precio) : 'BS ' + Number(pr.precio).toFixed(2);
 
             card.innerHTML = `
-                <span class="promo-sello">Promoción</span>
-                ${visual}
-                <h3 class="promo-titulo">${escapeHtml(pr.nombre)}</h3>
-                <ul class="promo-dentro">${dentro}</ul>
-                <div class="card-foot">
-                    <div class="price">${Number(pr.precio).toFixed(2)} Bs.</div>
-                    ${ahorro > 0 ? `<div class="promo-ahorro">antes ${suelto.toFixed(2)}</div>` : ''}
+                <span class="promo-badge-tag">PROMO</span>
+                <div class="gauge-wrapper">
+                    <svg class="gauge-svg" viewBox="0 0 120 120" width="130" height="130" aria-hidden="true">
+                        <path class="gauge-track" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="#e5e7eb" stroke-width="11" stroke-linecap="round" />
+                        <path class="gauge-bar" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="${strokeColor}" stroke-width="11" stroke-linecap="round" stroke-dasharray="${pathLen}" stroke-dashoffset="${offset}" />
+                    </svg>
+                    <div class="gauge-inner">
+                        <svg class="gauge-cloud-bg" viewBox="0 0 100 100" aria-hidden="true">
+                            <path d="M 50 12 C 63 12, 75 18, 81 28 C 88 39, 88 52, 83 63 C 86 74, 79 84, 69 88 C 58 91, 44 90, 34 85 C 23 88, 14 79, 13 68 C 11 56, 15 45, 20 36 C 16 26, 25 15, 36 13 C 41 12, 46 12, 50 12 Z" fill="#374151" />
+                        </svg>
+                        ${visual}
+                        <div class="stamp-agotado ${isOut ? '' : 'hide'}">AGOTADO</div>
+                    </div>
+                    <div class="card-price-pill price"><span class="price-val">${precioTexto}</span></div>
+                </div>
+                <div class="card-lower-zone">
+                    <svg class="card-mid-wave" viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden="true">
+                        <path d="M 0 20 L 0 10 C 60 2, 130 16, 200 8 L 200 20 Z" fill="#f1f5f9" />
+                    </svg>
+                    <div class="card-mid-body">
+                        <h3 class="product-card-title">${escapeHtml(pr.nombre)}</h3>
+                        ${dentroItems ? `<div class="promo-items-text" title="${escapeHtml(dentroItems)}">${escapeHtml(dentroItems)}</div>` : ''}
+                    </div>
+                    <div class="stock-footer ${statusClass}">
+                        <svg class="stock-footer-wave" viewBox="0 0 200 30" preserveAspectRatio="none" aria-hidden="true">
+                            <path d="M 0 30 L 0 14 C 40 26, 75 4, 130 12 C 160 16, 185 8, 200 12 L 200 30 Z" fill="currentColor"></path>
+                        </svg>
+                        <div class="stock-footer-content">
+                            <div class="stock-label-line">Combo disponible</div>
+                            <div class="stock-units-line stock ${isOut ? 'out' : ''}">${isOut ? '0 COMBOS<span class="sr-only"> (Agotado)</span>' : `${caben} ${caben === 1 ? 'COMBO' : 'COMBOS'}`}</div>
+                        </div>
+                    </div>
                 </div>
                 ${puestos > 0 ? `<span class="cart-badge">${puestos}</span>` : ''}
-                ${caben <= 0 ? '<div class="out-of-stock-overlay"><span>Sin stock</span></div>' : ''}
             `;
             card.addEventListener('click', () => agregarPromocion(pr));
             grid.appendChild(card);
@@ -1246,8 +1313,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         <path class="gauge-bar" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="${strokeColor}" stroke-width="11" stroke-linecap="round" stroke-dasharray="${pathLen}" stroke-dashoffset="${offset}" />
                     </svg>
                     <div class="gauge-inner">
-                        <svg class="gauge-cloud-bg ${isOut ? '' : 'hide'}" viewBox="0 0 100 100" aria-hidden="true">
-                            <path d="M 86.0 50.0 Q 98.9 63.1 81.2 68.0 Q 85.8 85.8 68.0 81.2 Q 63.1 98.9 50.0 86.0 Q 36.9 98.9 32.0 81.2 Q 14.2 85.8 18.8 68.0 Q 1.1 63.1 14.0 50.0 Q 1.1 36.9 18.8 32.0 Q 14.2 14.2 32.0 18.8 Q 36.9 1.1 50.0 14.0 Q 63.1 1.1 68.0 18.8 Q 85.8 14.2 81.2 32.0 Q 98.9 36.9 86.0 50.0 Z" fill="#374151" />
+                        <svg class="gauge-cloud-bg" viewBox="0 0 100 100" aria-hidden="true">
+                            <path d="M 50 12 C 63 12, 75 18, 81 28 C 88 39, 88 52, 83 63 C 86 74, 79 84, 69 88 C 58 91, 44 90, 34 85 C 23 88, 14 79, 13 68 C 11 56, 15 45, 20 36 C 16 26, 25 15, 36 13 C 41 12, 46 12, 50 12 Z" fill="#374151" />
                         </svg>
                         ${visual}
                         <div class="stamp-agotado ${isOut ? '' : 'hide'}">AGOTADO</div>
@@ -1518,7 +1585,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         renderCart();
-        renderProducts();
+        actualizarTarjetaPromo(promo.id_promocion, true);
+        (promo.contenido || []).forEach(c => actualizarTarjeta(c.id_producto, false));
         mostrarLinea(null, clave);
     }
 
@@ -1846,7 +1914,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function confirmarTraspaso() {
-        if (!apuntarLoElegido()) return;
+        const uInput = document.getElementById('mover-unidades');
+        const n = uInput ? parseInt(uInput.value, 10) : 0;
+        if (moverProducto && Number.isInteger(n) && n > 0) {
+            apuntarLoElegido();
+        }
+
+        if (!moverPendientes || moverPendientes.length === 0) {
+            notify('Añade al menos un producto a la lista.', 'warn');
+            return;
+        }
 
         const boton = document.getElementById('mover-confirmar');
         boton.disabled = true;
@@ -2107,8 +2184,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         <path class="gauge-bar" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="${strokeColor}" stroke-width="11" stroke-linecap="round" stroke-dasharray="${pathLen}" stroke-dashoffset="${offset}" />
                     </svg>
                     <div class="gauge-inner">
-                        <svg class="gauge-cloud-bg ${agotado ? '' : 'hide'}" viewBox="0 0 100 100" aria-hidden="true">
-                            <path d="M 86.0 50.0 Q 98.9 63.1 81.2 68.0 Q 85.8 85.8 68.0 81.2 Q 63.1 98.9 50.0 86.0 Q 36.9 98.9 32.0 81.2 Q 14.2 85.8 18.8 68.0 Q 1.1 63.1 14.0 50.0 Q 1.1 36.9 18.8 32.0 Q 14.2 14.2 32.0 18.8 Q 36.9 1.1 50.0 14.0 Q 63.1 1.1 68.0 18.8 Q 85.8 14.2 81.2 32.0 Q 98.9 36.9 86.0 50.0 Z" fill="#374151" />
+                        <svg class="gauge-cloud-bg" viewBox="0 0 100 100" aria-hidden="true">
+                            <path d="M 50 12 C 63 12, 75 18, 81 28 C 88 39, 88 52, 83 63 C 86 74, 79 84, 69 88 C 58 91, 44 90, 34 85 C 23 88, 14 79, 13 68 C 11 56, 15 45, 20 36 C 16 26, 25 15, 36 13 C 41 12, 46 12, 50 12 Z" fill="#374151" />
                         </svg>
                         ${visual}
                         <div class="stamp-agotado ${agotado ? '' : 'hide'}">AGOTADO</div>
@@ -2663,7 +2740,37 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // El "falta" se calcula en vivo para que el cajero no reste de cabeza.
+    function actualizarColorTotalPago() {
+        const el = document.getElementById('pay-total');
+        if (!el) return;
+
+        el.classList.remove('status-rojo', 'status-verde', 'status-amarillo');
+
+        if (metodoActivo === EFECTIVO) {
+            if (!payRecibidoInput || payRecibidoInput.value === '' || efectivoRecibido <= 0) {
+                el.classList.add('status-rojo');
+            } else if (Math.abs(efectivoRecibido - orderTotal) < 0.005) {
+                el.classList.add('status-verde');
+            } else if (efectivoRecibido > orderTotal) {
+                el.classList.add('status-amarillo');
+            } else {
+                el.classList.add('status-rojo');
+            }
+        } else if (metodoActivo === 'mixto') {
+            const suma = sumaLineas();
+            if (Math.abs(suma - orderTotal) < 0.005) {
+                el.classList.add('status-verde');
+            } else if (suma > orderTotal) {
+                el.classList.add('status-amarillo');
+            } else {
+                el.classList.add('status-rojo');
+            }
+        } else {
+            // Pagos exactos directos (QR, Tarjeta, Transferencia)
+            el.classList.add('status-verde');
+        }
+    }
+
     function refrescarMixto() {
         const falta = round2(orderTotal - sumaLineas());
         const caja = document.getElementById('pay-falta');
@@ -2671,9 +2778,10 @@ document.addEventListener('DOMContentLoaded', () => {
         caja.textContent = Math.abs(falta).toFixed(2) + ' Bs.';
         caja.classList.toggle('pay-falta-ok', Math.abs(falta) < 0.005);
         caja.previousElementSibling.textContent =
-            falta < -0.005 ? 'Se pasa por' : 'Falta por cubrir';
+            falta < -0.005 ? 'Cambio a devolver' : 'Falta por cubrir';
 
         mostrarErrorPago('');
+        actualizarColorTotalPago();
     }
 
     function reiniciarLineasPago() {
@@ -2691,6 +2799,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const caja = document.getElementById('pay-change-box');
         const valor = document.getElementById('pay-change-amount');
         const cambio = round2(efectivoRecibido - orderTotal);
+
+        actualizarColorTotalPago();
 
         if (efectivoRecibido > 0 && cambio > 0) {
             valor.textContent = `${cambio.toFixed(2)} Bs.`;
@@ -2730,6 +2840,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('pay-total').textContent = `${orderTotal.toFixed(2)} Bs.`;
         seleccionarMetodo(EFECTIVO);
         renderCambio();
+        actualizarColorTotalPago();
         payModal.classList.remove('hide');
     }
 
@@ -2814,6 +2925,7 @@ document.addEventListener('DOMContentLoaded', () => {
             reiniciarLineasPago();
         }
         if (metodo === QR) prepararPanelQr();
+        actualizarColorTotalPago();
     }
 
     // Traduce lo elegido en el modal a la lista de pagos que espera el servidor.
@@ -3385,7 +3497,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (adminMain) adminMain.scrollTop = 0;
 
             // Load data according to tab
-            if (targetTab === 'tab-dashboard') { loadDashboardData(); cargarInfoAficheAdmin(); }
+            if (targetTab === 'tab-dashboard') loadDashboardData();
             else if (targetTab === 'tab-comandas') loadComandasData();
             else if (targetTab === 'tab-crear-producto') { loadCatalogSetup(); cargarCatalogoAdmin(); }
             else if (targetTab === 'tab-promociones') { cargarCatalogoAdmin().then(pintarSelectorProductos); cargarPromociones(); }
@@ -3394,39 +3506,281 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (targetTab === 'tab-inventario') loadInventoryData();
             else if (targetTab === 'tab-reimpresiones') loadReimpresionesData();
             else if (targetTab === 'tab-auditoria') loadAuditsData();
+            else if (targetTab === 'tab-configuracion') { cargarConfiguracion().then(pintarConfiguracion); cargarInfoAficheAdmin(); loadPrinterSettingsIntoForm(); }
         });
     });
 
     // TAB: REIMPRESIONES
+    let allReimpresiones = [];
+    let filteredReimpresiones = [];
+    let reimpresionesPage = 1;
+    const reimpresionesLimit = 14;
+    let reimpresionesFilterSearch = '';
+    let reimpresionesFilterCajero = 'all';
+    let reimpresionesFilterCopia = 'all';
+    let reimpresionesFilterSort = 'fecha_desc';
+    let reimpresionesFiltersInitialized = false;
+
     async function loadReimpresionesData() {
         const cuerpo = document.getElementById('reimpresiones-table-body');
-        cuerpo.innerHTML = '<tr><td colspan="6">Cargando...</td></tr>';
+        if (cuerpo) cuerpo.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px; color: #71717a; font-weight: 600;">Cargando reimpresiones...</td></tr>';
+        
         try {
             const res = await fetch('/api/admin/reimpresiones');
             const data = await res.json();
-            const filas = data.reimpresiones || [];
+            allReimpresiones = data.reimpresiones || [];
 
-            if (filas.length === 0) {
-                // Que no haya ninguna es la noticia buena, y conviene decirlo
-                // así: una tabla vacía sin más parece que no cargó.
-                cuerpo.innerHTML = '<tr><td colspan="6">' +
-                    'Ninguna comanda se ha reimpreso.</td></tr>';
-                return;
+            // Llenar selector de cajeros únicos
+            const cajeroSelect = document.getElementById('reimpresiones-filter-cajero');
+            if (cajeroSelect) {
+                const currentVal = cajeroSelect.value || 'all';
+                const cajerosUnicos = [...new Set(allReimpresiones.map(r => r.cajero).filter(Boolean))].sort();
+                cajeroSelect.innerHTML = '<option value="all">Todos los cajeros</option>';
+                cajerosUnicos.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c;
+                    opt.textContent = c;
+                    cajeroSelect.appendChild(opt);
+                });
+                cajeroSelect.value = currentVal;
             }
 
-            cuerpo.innerHTML = filas.map(r => `
-                <tr>
-                    <td>#${r.id_comanda}</td>
-                    <td>${r.numero_reimpresion}ª</td>
-                    <td>${r.cajero}</td>
-                    <td>${r.mesero}</td>
-                    <td>${Number(r.total).toFixed(2)} Bs.</td>
-                    <td>${r.fecha || ''}</td>
-                </tr>`).join('');
+            initReimpresionesFilterListeners();
+            applyReimpresionesFilters();
         } catch (err) {
             console.error('Error al cargar las reimpresiones:', err);
-            cuerpo.innerHTML = '<tr><td colspan="6">No se pudieron cargar.</td></tr>';
+            if (cuerpo) cuerpo.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 24px; color: #ef4444; font-weight: 600;">No se pudieron cargar las reimpresiones.</td></tr>';
         }
+    }
+
+    function initReimpresionesFilterListeners() {
+        if (reimpresionesFiltersInitialized) return;
+        reimpresionesFiltersInitialized = true;
+
+        const searchInput = document.getElementById('reimpresiones-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                reimpresionesFilterSearch = e.target.value;
+                reimpresionesPage = 1;
+                applyReimpresionesFilters();
+            });
+        }
+
+        const cajeroSelect = document.getElementById('reimpresiones-filter-cajero');
+        if (cajeroSelect) {
+            cajeroSelect.addEventListener('change', (e) => {
+                reimpresionesFilterCajero = e.target.value;
+                reimpresionesPage = 1;
+                applyReimpresionesFilters();
+            });
+        }
+
+        const copiaSelect = document.getElementById('reimpresiones-filter-copia');
+        if (copiaSelect) {
+            copiaSelect.addEventListener('change', (e) => {
+                reimpresionesFilterCopia = e.target.value;
+                reimpresionesPage = 1;
+                applyReimpresionesFilters();
+            });
+        }
+
+        const sortSelect = document.getElementById('reimpresiones-filter-sort');
+        if (sortSelect) {
+            sortSelect.addEventListener('change', (e) => {
+                reimpresionesFilterSort = e.target.value;
+                reimpresionesPage = 1;
+                applyReimpresionesFilters();
+            });
+        }
+
+        const clearBtn = document.getElementById('reimpresiones-clear-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                reimpresionesFilterSearch = '';
+                reimpresionesFilterCajero = 'all';
+                reimpresionesFilterCopia = 'all';
+                reimpresionesFilterSort = 'fecha_desc';
+
+                if (searchInput) searchInput.value = '';
+                if (cajeroSelect) cajeroSelect.value = 'all';
+                if (copiaSelect) copiaSelect.value = 'all';
+                if (sortSelect) sortSelect.value = 'fecha_desc';
+
+                reimpresionesPage = 1;
+                applyReimpresionesFilters();
+            });
+        }
+    }
+
+    function applyReimpresionesFilters() {
+        const query = (reimpresionesFilterSearch || '').toLowerCase().trim();
+
+        filteredReimpresiones = allReimpresiones.filter(r => {
+            const comandaStr = '#' + r.id_comanda;
+            const cajeroStr = (r.cajero || '').toLowerCase();
+            const meseroStr = (r.mesero || '').toLowerCase();
+            const matchSearch = !query || comandaStr.includes(query) || cajeroStr.includes(query) || meseroStr.includes(query);
+
+            const matchCajero = (reimpresionesFilterCajero === 'all') || (r.cajero === reimpresionesFilterCajero);
+
+            let matchCopia = true;
+            if (reimpresionesFilterCopia === '1') {
+                matchCopia = (Number(r.numero_reimpresion) === 1);
+            } else if (reimpresionesFilterCopia === 'multi') {
+                matchCopia = (Number(r.numero_reimpresion) > 1);
+            }
+
+            return matchSearch && matchCajero && matchCopia;
+        });
+
+        // Ordenamiento
+        filteredReimpresiones.sort((a, b) => {
+            if (reimpresionesFilterSort === 'fecha_asc') return (a.fecha || '').localeCompare(b.fecha || '');
+            if (reimpresionesFilterSort === 'total_desc') return Number(b.total) - Number(a.total);
+            if (reimpresionesFilterSort === 'total_asc') return Number(a.total) - Number(b.total);
+            if (reimpresionesFilterSort === 'comanda_desc') return b.id_comanda - a.id_comanda;
+            if (reimpresionesFilterSort === 'comanda_asc') return a.id_comanda - b.id_comanda;
+            return (b.fecha || '').localeCompare(a.fecha || ''); // default fecha_desc
+        });
+
+        const summaryCount = document.getElementById('reimpresiones-summary-count');
+        if (summaryCount) {
+            summaryCount.innerHTML = `<strong>${allReimpresiones.length}</strong> reimpresiones en total · Mostrando <strong>${filteredReimpresiones.length}</strong> con filtros aplicados`;
+        }
+
+        renderReimpresionesPage();
+    }
+
+    function renderReimpresionesPage() {
+        const cuerpo = document.getElementById('reimpresiones-table-body');
+        if (!cuerpo) return;
+        cuerpo.innerHTML = '';
+
+        const totalItems = filteredReimpresiones.length;
+
+        if (totalItems === 0) {
+            if (allReimpresiones.length === 0) {
+                cuerpo.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 28px; color: #10b981; font-weight: 700;">🟢 Ninguna comanda se ha reimpreso hasta ahora.</td></tr>';
+            } else {
+                cuerpo.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 28px; color: #71717a; font-weight: 600;">No se encontraron reimpresiones con los filtros aplicados.</td></tr>';
+            }
+            renderReimpresionesPagination(0, 0);
+            return;
+        }
+
+        const totalPages = Math.ceil(totalItems / reimpresionesLimit) || 1;
+        if (reimpresionesPage > totalPages) reimpresionesPage = totalPages;
+        if (reimpresionesPage < 1) reimpresionesPage = 1;
+
+        const start = (reimpresionesPage - 1) * reimpresionesLimit;
+        const end = start + reimpresionesLimit;
+        const pageItems = filteredReimpresiones.slice(start, end);
+
+        pageItems.forEach(r => {
+            const tr = document.createElement('tr');
+            const num = Number(r.numero_reimpresion) || 1;
+            const badgeClass = num > 1 ? 'badge-stock agotado' : 'badge-stock bajo';
+            const badgeText = `${num}ª copia`;
+
+            tr.innerHTML = `
+                <td><strong>#${r.id_comanda}</strong></td>
+                <td><span class="${badgeClass}">${badgeText}</span></td>
+                <td><strong>${escapeHtml(r.cajero || '—')}</strong></td>
+                <td>${escapeHtml(r.mesero || '—')}</td>
+                <td style="font-weight: 800; color: #000000;">${Number(r.total || 0).toFixed(2)} Bs.</td>
+                <td style="color: #52525b; font-size: 0.78rem;">${r.fecha || '—'}</td>
+            `;
+            cuerpo.appendChild(tr);
+        });
+
+        renderReimpresionesPagination(totalPages, totalItems);
+    }
+
+    function renderReimpresionesPagination(totalPages, totalItems) {
+        const pagContainer = document.getElementById('reimpresiones-pagination');
+        if (!pagContainer) return;
+
+        if (totalItems === 0) {
+            pagContainer.innerHTML = '<span class="comanda-pag-info">0 reimpresiones encontradas</span>';
+            return;
+        }
+
+        if (totalPages <= 1) {
+            pagContainer.innerHTML = `<span class="comanda-pag-info">Mostrando las <strong>${totalItems}</strong> reimpresiones</span>`;
+            return;
+        }
+
+        let html = `
+            <button type="button" class="comanda-pag-btn btn-prev" ${reimpresionesPage <= 1 ? 'disabled' : ''}>
+                ◀ Anterior
+            </button>
+        `;
+
+        const maxBotones = 5;
+        let startPage = Math.max(1, reimpresionesPage - Math.floor(maxBotones / 2));
+        let endPage = Math.min(totalPages, startPage + maxBotones - 1);
+        if (endPage - startPage + 1 < maxBotones) {
+            startPage = Math.max(1, endPage - maxBotones + 1);
+        }
+
+        if (startPage > 1) {
+            html += `<button type="button" class="comanda-pag-btn btn-num" data-page="1">1</button>`;
+            if (startPage > 2) html += `<span class="comanda-pag-info">...</span>`;
+        }
+
+        for (let p = startPage; p <= endPage; p++) {
+            html += `<button type="button" class="comanda-pag-btn btn-num ${p === reimpresionesPage ? 'active' : ''}" data-page="${p}">${p}</button>`;
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) html += `<span class="comanda-pag-info">...</span>`;
+            html += `<button type="button" class="comanda-pag-btn btn-num" data-page="${totalPages}">${totalPages}</button>`;
+        }
+
+        html += `
+            <button type="button" class="comanda-pag-btn btn-next" ${reimpresionesPage >= totalPages ? 'disabled' : ''}>
+                Siguiente ▶
+            </button>
+            <span class="comanda-pag-info">(${totalItems} reimpresiones · Pág. ${reimpresionesPage}/${totalPages})</span>
+        `;
+
+        pagContainer.innerHTML = html;
+
+        const prev = pagContainer.querySelector('.btn-prev');
+        if (prev) {
+            prev.addEventListener('click', () => {
+                if (reimpresionesPage > 1) {
+                    reimpresionesPage--;
+                    renderReimpresionesPage();
+                    const container = document.querySelector('#tab-reimpresiones .table-container');
+                    if (container) container.scrollTop = 0;
+                }
+            });
+        }
+
+        const next = pagContainer.querySelector('.btn-next');
+        if (next) {
+            next.addEventListener('click', () => {
+                if (reimpresionesPage < totalPages) {
+                    reimpresionesPage++;
+                    renderReimpresionesPage();
+                    const container = document.querySelector('#tab-reimpresiones .table-container');
+                    if (container) container.scrollTop = 0;
+                }
+            });
+        }
+
+        pagContainer.querySelectorAll('.btn-num').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const p = parseInt(btn.dataset.page, 10);
+                if (p && p !== reimpresionesPage) {
+                    reimpresionesPage = p;
+                    renderReimpresionesPage();
+                    const container = document.querySelector('#tab-reimpresiones .table-container');
+                    if (container) container.scrollTop = 0;
+                }
+            });
+        });
     }
 
     // TAB: DASHBOARD DATA
@@ -3438,56 +3792,134 @@ document.addEventListener('DOMContentLoaded', () => {
             const activeComandas = comandas.filter(c => c.estado_pago !== 'ANULADO');
             const voidedComandas = comandas.filter(c => c.estado_pago === 'ANULADO');
 
-            const totalRecaudado = activeComandas.reduce((sum, c) => sum + parseFloat(c.total), 0);
+            const totalRecaudado = activeComandas.reduce((sum, c) => sum + parseFloat(c.total || 0), 0);
 
-            document.getElementById('kpi-total-sales').textContent = `${totalRecaudado.toFixed(2)} Bs.`;
-            document.getElementById('kpi-total-orders').textContent = comandas.length;
-            document.getElementById('kpi-voided-orders').textContent = voidedComandas.length;
+            const kpiSales = document.getElementById('kpi-total-sales');
+            if (kpiSales) kpiSales.textContent = `${totalRecaudado.toFixed(2)} Bs.`;
+            
+            const kpiOrders = document.getElementById('kpi-total-orders');
+            if (kpiOrders) kpiOrders.textContent = activeComandas.length;
 
-            // Group sales by bar for progress list
-            const salesByBar = {};
+            const kpiVoids = document.getElementById('kpi-voided-orders');
+            if (kpiVoids) kpiVoids.textContent = voidedComandas.length;
+
+            // 1. Group sales by cashier for progress list
+            const salesByCajero = {};
             activeComandas.forEach(c => {
-                salesByBar[c.nombre_barra] = (salesByBar[c.nombre_barra] || 0) + parseFloat(c.total);
+                const cName = (c.nombre_cajero && c.nombre_cajero.trim()) ? c.nombre_cajero : 'Cajero General';
+                salesByCajero[cName] = (salesByCajero[cName] || 0) + parseFloat(c.total || 0);
             });
 
-            const chartContainer = document.getElementById('barras-sales-chart');
-            chartContainer.innerHTML = '';
+            const chartContainer = document.getElementById('cajeros-sales-chart') || document.getElementById('barras-sales-chart');
+            if (chartContainer) {
+                chartContainer.innerHTML = '';
+                const cajeroNames = Object.keys(salesByCajero).sort((a, b) => salesByCajero[b] - salesByCajero[a]);
+                if (cajeroNames.length === 0) {
+                    chartContainer.innerHTML = '<div class="empty-cart-msg">Sin ventas registradas</div>';
+                } else {
+                    const cajeroColors = ['#10b981', '#6366f1', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6'];
+                    cajeroNames.forEach((name, idx) => {
+                        const amount = salesByCajero[name];
+                        const pct = totalRecaudado > 0 ? (amount / totalRecaudado) * 100 : 0;
+                        const color = cajeroColors[idx % cajeroColors.length];
 
-            const barNames = Object.keys(salesByBar);
-            if (barNames.length === 0) {
-                chartContainer.innerHTML = '<div class="empty-cart-msg">Sin datos de venta todavía</div>';
-                return;
+                        const div = document.createElement('div');
+                        div.className = 'sales-bar-item';
+                        div.innerHTML = `
+                            <div class="sales-bar-info">
+                                <span class="sales-bar-label"><span class="chart-bullet" style="background:${color}"></span>${escapeHtml(name)}</span>
+                                <strong class="sales-bar-val">${amount.toFixed(2)} Bs. <span class="sales-bar-pct">(${pct.toFixed(1)}%)</span></strong>
+                            </div>
+                            <div class="sales-bar-track">
+                                <div class="sales-bar-fill" style="width: ${pct}%; background: ${color};"></div>
+                            </div>
+                        `;
+                        chartContainer.appendChild(div);
+                    });
+                }
             }
 
-            // Con una sola barra no hay reparto que enseñar: la barra de
-            // progreso estaría siempre al 100 % y el porcentaje sobra. Se
-            // enseña el nombre y lo recaudado, que es lo único que informa.
-            const unaSola = barNames.length === 1;
-
-            barNames.forEach(name => {
-                const amount = salesByBar[name];
-                const pct = totalRecaudado > 0 ? (amount / totalRecaudado) * 100 : 0;
-
-                const div = document.createElement('div');
-                div.className = 'sales-bar-item';
-                div.innerHTML = unaSola
-                    ? `
-                    <div class="sales-bar-info">
-                        <span>${escapeHtml(name)}</span>
-                        <strong>${amount.toFixed(2)} Bs.</strong>
-                    </div>
-                `
-                    : `
-                    <div class="sales-bar-info">
-                        <span>${escapeHtml(name)}</span>
-                        <strong>${amount.toFixed(2)} Bs. (${pct.toFixed(1)}%)</strong>
-                    </div>
-                    <div class="sales-bar-track">
-                        <div class="sales-bar-fill" style="width: ${pct}%"></div>
-                    </div>
-                `;
-                chartContainer.appendChild(div);
+            // 2. Group sales by payment method
+            const salesByMethod = {};
+            let totalPagadoMetodos = 0;
+            activeComandas.forEach(c => {
+                if (Array.isArray(c.pagos) && c.pagos.length > 0) {
+                    c.pagos.forEach(p => {
+                        const mName = (p.nombre_metodo && p.nombre_metodo.trim()) ? p.nombre_metodo : 'Otro';
+                        const monto = parseFloat(p.monto || 0);
+                        salesByMethod[mName] = (salesByMethod[mName] || 0) + monto;
+                        totalPagadoMetodos += monto;
+                    });
+                } else {
+                    const mName = (c.forma_pago && c.forma_pago.trim()) ? c.forma_pago : 'Efectivo';
+                    const monto = parseFloat(c.total || 0);
+                    salesByMethod[mName] = (salesByMethod[mName] || 0) + monto;
+                    totalPagadoMetodos += monto;
+                }
             });
+
+            const methodChartContainer = document.getElementById('metodos-sales-chart');
+            if (methodChartContainer) {
+                methodChartContainer.innerHTML = '';
+                const methodNames = Object.keys(salesByMethod).sort((a, b) => salesByMethod[b] - salesByMethod[a]);
+                if (methodNames.length === 0) {
+                    methodChartContainer.innerHTML = '<div class="empty-cart-msg">Sin pagos registrados</div>';
+                } else {
+                    const methodIcons = {
+                        'Efectivo': '💵',
+                        'QR': '📱',
+                        'Tarjeta': '💳',
+                        'Transferencia': '🏦',
+                        'Cortesía': '🎁',
+                        'Otro': '🪙'
+                    };
+                    const methodColors = {
+                        'Efectivo': '#22c55e',
+                        'QR': '#3b82f6',
+                        'Tarjeta': '#a855f7',
+                        'Transferencia': '#f97316',
+                        'Cortesía': '#ec4899',
+                        'Otro': '#64748b'
+                    };
+
+                    // Split visual bar
+                    let splitBarHtml = '<div class="method-split-bar">';
+                    methodNames.forEach((name, idx) => {
+                        const amount = salesByMethod[name];
+                        const pct = totalPagadoMetodos > 0 ? (amount / totalPagadoMetodos) * 100 : 0;
+                        const color = methodColors[name] || ['#10b981', '#6366f1', '#f59e0b', '#ec4899'][idx % 4];
+                        if (pct > 0) {
+                            splitBarHtml += `<div class="method-split-segment" style="width:${pct}%; background:${color};" title="${escapeHtml(name)}: ${pct.toFixed(1)}%"></div>`;
+                        }
+                    });
+                    splitBarHtml += '</div>';
+
+                    const splitDiv = document.createElement('div');
+                    splitDiv.innerHTML = splitBarHtml;
+                    methodChartContainer.appendChild(splitDiv);
+
+                    methodNames.forEach((name, idx) => {
+                        const amount = salesByMethod[name];
+                        const pct = totalPagadoMetodos > 0 ? (amount / totalPagadoMetodos) * 100 : 0;
+                        const icon = methodIcons[name] || '💳';
+                        const color = methodColors[name] || ['#10b981', '#6366f1', '#f59e0b', '#ec4899'][idx % 4];
+
+                        const div = document.createElement('div');
+                        div.className = 'sales-bar-item';
+                        div.innerHTML = `
+                            <div class="sales-bar-info">
+                                <span class="sales-bar-label">${icon} ${escapeHtml(name)}</span>
+                                <strong class="sales-bar-val">${amount.toFixed(2)} Bs. <span class="sales-bar-pct">(${pct.toFixed(1)}%)</span></strong>
+                            </div>
+                            <div class="sales-bar-track">
+                                <div class="sales-bar-fill" style="width: ${pct}%; background: ${color};"></div>
+                            </div>
+                        `;
+                        methodChartContainer.appendChild(div);
+                    });
+                }
+            }
+
         } catch (err) {
             console.error("Error loading dashboard data:", err);
         }
@@ -4119,7 +4551,6 @@ document.addEventListener('DOMContentLoaded', () => {
             caja.innerHTML =
                 fila('Recaudado', d.resumen.recaudado.toFixed(2) + ' Bs.', 'destacada') +
                 fila('Comandas cobradas', String(d.resumen.validas)) +
-                fila('Unidades vendidas', String(d.resumen.unidades)) +
                 fila('Anuladas', d.resumen.anuladas + ' (' + d.resumen.importe_anulado.toFixed(2) + ' Bs.)',
                     d.resumen.anuladas > 0 ? 'alerta' : '') +
                 '<div class="rep-separador"></div>' +
@@ -5003,7 +5434,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // único que tiene garantizada la línea entera.
     function filaLista({ titulo, detalle, insignia, inactivo, onBorrar,
                          foto, onFoto, marcas, onEditar, nota,
-                         onAlternar, alternarActivo, alternarTitulo }) {
+                         onAlternar, alternarActivo, alternarTitulo,
+                         onSubir, onBajar, deshabilitarSubir, deshabilitarBajar }) {
         const fila = document.createElement('div');
         fila.className = 'lista-fila' + (inactivo ? ' inactiva' : '');
 
@@ -5101,6 +5533,50 @@ document.addEventListener('DOMContentLoaded', () => {
         const acciones = document.createElement('div');
         acciones.className = 'lista-acciones';
 
+        // Reordenar (subir / bajar)
+        if (onSubir || onBajar) {
+            const grpOrden = document.createElement('div');
+            grpOrden.className = 'lista-orden-grp';
+
+            if (onSubir) {
+                const btnSubir = document.createElement('button');
+                btnSubir.type = 'button';
+                btnSubir.className = 'lista-orden-btn lista-subir' + (deshabilitarSubir ? ' deshabilitado' : '');
+                btnSubir.title = 'Mover hacia arriba';
+                btnSubir.setAttribute('aria-label', 'Mover hacia arriba ' + titulo);
+                btnSubir.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>`;
+                if (deshabilitarSubir) {
+                    btnSubir.disabled = true;
+                } else {
+                    btnSubir.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        onSubir();
+                    });
+                }
+                grpOrden.appendChild(btnSubir);
+            }
+
+            if (onBajar) {
+                const btnBajar = document.createElement('button');
+                btnBajar.type = 'button';
+                btnBajar.className = 'lista-orden-btn lista-bajar' + (deshabilitarBajar ? ' deshabilitado' : '');
+                btnBajar.title = 'Mover hacia abajo';
+                btnBajar.setAttribute('aria-label', 'Mover hacia abajo ' + titulo);
+                btnBajar.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+                if (deshabilitarBajar) {
+                    btnBajar.disabled = true;
+                } else {
+                    btnBajar.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        onBajar();
+                    });
+                }
+                grpOrden.appendChild(btnBajar);
+            }
+
+            acciones.appendChild(grpOrden);
+        }
+
         if (onEditar && !inactivo) {
             const ed = document.createElement('button');
             ed.type = 'button';
@@ -5191,6 +5667,95 @@ document.addEventListener('DOMContentLoaded', () => {
         pintarProductosAdmin();
     }
 
+    async function reordenarCategoriaPosicion(catId, direccion) {
+        const cats = catalogoAdmin.categorias || [];
+        const idx = cats.findIndex(c => c.id_categoria === catId);
+        if (idx === -1) return;
+        const targetIdx = direccion === 'arriba' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= cats.length) return;
+
+        // Swap en arreglo local
+        const temp = cats[idx];
+        cats[idx] = cats[targetIdx];
+        cats[targetIdx] = temp;
+        cats.forEach((c, i) => c.orden = i);
+
+        // Repintar inmediatamente
+        pintarCategorias();
+        vibrar(20);
+
+        try {
+            const res = await fetch('/api/admin/categorias/reordenar', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ids: cats.map(c => c.id_categoria),
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'Error al guardar el nuevo orden.', 'error');
+                await cargarCatalogoAdmin();
+                return;
+            }
+            await Promise.all([loadCatalogSetup(), fetchProductsAndMenu()]);
+        } catch (err) {
+            console.error('Error reordenando categorías:', err);
+            notify('Error de conexión al reordenar.', 'error');
+            await cargarCatalogoAdmin();
+        }
+    }
+
+    async function reordenarProductoPosicion(prodId, direccion) {
+        const todos = catalogoAdmin.productos || [];
+        const prod = todos.find(p => p.id_producto === prodId);
+        if (!prod) return;
+
+        // Productos de la misma categoría
+        const enMismaCat = todos.filter(p => p.id_categoria === prod.id_categoria);
+        const catIdx = enMismaCat.findIndex(p => p.id_producto === prodId);
+        if (catIdx === -1) return;
+        const targetCatIdx = direccion === 'arriba' ? catIdx - 1 : catIdx + 1;
+        if (targetCatIdx < 0 || targetCatIdx >= enMismaCat.length) return;
+
+        const otroProd = enMismaCat[targetCatIdx];
+        const idxA = todos.findIndex(p => p.id_producto === prod.id_producto);
+        const idxB = todos.findIndex(p => p.id_producto === otroProd.id_producto);
+        if (idxA !== -1 && idxB !== -1) {
+            const temp = todos[idxA];
+            todos[idxA] = todos[idxB];
+            todos[idxB] = temp;
+        }
+        todos.forEach((p, i) => p.orden = i);
+
+        // Repintar inmediatamente
+        pintarProductosAdmin();
+        vibrar(20);
+
+        try {
+            const res = await fetch('/api/admin/productos/reordenar', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ids: todos.map(p => p.id_producto),
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                notify(data.message || 'Error al guardar el nuevo orden.', 'error');
+                await cargarCatalogoAdmin();
+                return;
+            }
+            await fetchProductsAndMenu();
+        } catch (err) {
+            console.error('Error reordenando productos:', err);
+            notify('Error de conexión al reordenar.', 'error');
+            await cargarCatalogoAdmin();
+        }
+    }
+
     function pintarCategorias() {
         const cont = document.getElementById('lista-categorias');
         if (!cont) return;
@@ -5200,13 +5765,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!cats.length) return pintarVacio(cont, 'Todavía no hay categorías.');
 
         cont.innerHTML = '';
-        cats.forEach(c => {
+        cats.forEach((c, idx) => {
             const estaActiva = c.activo !== 0;
             const fila = filaLista({
                 titulo: c.nombre,
                 detalle: c.descripcion || '',
                 insignia: (c.productos + (c.productos === 1 ? ' producto' : ' productos')) + (!estaActiva ? ' · Desactivada' : ''),
                 inactivo: false,
+                onSubir: () => reordenarCategoriaPosicion(c.id_categoria, 'arriba'),
+                onBajar: () => reordenarCategoriaPosicion(c.id_categoria, 'abajo'),
+                deshabilitarSubir: idx === 0,
+                deshabilitarBajar: idx === cats.length - 1,
                 onEditar: () => abrirEditarCategoria(c),
                 onAlternar: () => alternarCategoria(c),
                 alternarActivo: estaActiva,
@@ -5301,7 +5870,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const catObj = (catalogoAdmin.categorias || []).find(c => c.nombre === categoria);
             const estaDesactivada = catObj && catObj.activo === 0;
             cont.appendChild(cabeceraGrupo(categoria + (estaDesactivada ? ' · Desactivada' : ''), productos.length));
-            productos.forEach(p => {
+            productos.forEach((p, pIdx) => {
                 const precio = Number(p.precio_venta).toFixed(2) + ' Bs.';
                 const estaActivo = p.activo !== 0;
                 const fila = filaLista({
@@ -5310,6 +5879,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     insignia: (p.vendido > 0 ? 'vendido ' + p.vendido + '×' : '') + (!estaActivo ? ' · Desactivado' : ''),
                     inactivo: false,
                     foto: urlFoto(p),
+                    onSubir: () => reordenarProductoPosicion(p.id_producto, 'arriba'),
+                    onBajar: () => reordenarProductoPosicion(p.id_producto, 'abajo'),
+                    deshabilitarSubir: pIdx === 0 || !!filtro,
+                    deshabilitarBajar: pIdx === productos.length - 1 || !!filtro,
                     onEditar: () => abrirEditarProducto(p),
                     onAlternar: () => alternarProducto(p),
                     alternarActivo: estaActivo,
@@ -5582,6 +6155,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // ---- Personal -----------------------------------------------------------
+    // ---- Personal: Cajeros & Meseros ----------------------------------------
     let personalAdmin = { cajeros: [], meseros: [] };
 
     async function cargarPersonalAdmin() {
@@ -5595,12 +6169,239 @@ document.addEventListener('DOMContentLoaded', () => {
         pintarMeseros();
     }
 
+    async function alternarCajero(c) {
+        try {
+            const nuevoActivo = c.activo ? 0 : 1;
+            const res = await fetch('/api/admin/cajeros/' + c.id_cajero + '/estado', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activo: nuevoActivo,
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+
+            if (!res.ok || !data.success) {
+                notify(data.message || ('Error del servidor (' + res.status + ').'), 'error');
+                return;
+            }
+            notify(nuevoActivo ? `Cajero "${c.nombre}" activado.` : `Cajero "${c.nombre}" desactivado.`, 'ok');
+            await Promise.all([cargarPersonalAdmin(), loadPersonalSetup()]);
+        } catch (err) {
+            console.error('Error al alternar cajero:', err);
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        }
+    }
+
+    async function alternarMesero(m) {
+        try {
+            const nuevoActivo = m.activo ? 0 : 1;
+            const res = await fetch('/api/admin/meseros/' + m.id_mesero + '/estado', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activo: nuevoActivo,
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+
+            if (!res.ok || !data.success) {
+                notify(data.message || ('Error del servidor (' + res.status + ').'), 'error');
+                return;
+            }
+            notify(nuevoActivo ? `Mesero "${m.nombre}" activado.` : `Mesero "${m.nombre}" desactivado.`, 'ok');
+            await Promise.all([cargarPersonalAdmin(), loadPersonalSetup()]);
+        } catch (err) {
+            console.error('Error al alternar mesero:', err);
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        }
+    }
+
+    // ---- Editar Cajero Modal ------------------------------------------------
+    const editarCajeroModal = document.getElementById('editar-cajero-modal');
+    let cajeroEditando = null;
+
+    function abrirEditarCajero(c) {
+        cajeroEditando = c;
+        const cualEl = document.getElementById('editar-cajero-cual');
+        if (cualEl) cualEl.textContent = `${c.nombre} (@${c.usuario})`;
+        const nombreInput = document.getElementById('editar-cajero-nombre');
+        if (nombreInput) nombreInput.value = c.nombre || '';
+        const userInput = document.getElementById('editar-cajero-usuario');
+        if (userInput) userInput.value = c.usuario || '';
+        const passInput = document.getElementById('editar-cajero-password');
+        if (passInput) passInput.value = '';
+
+        if (editarCajeroModal) editarCajeroModal.classList.remove('hide');
+        if (nombreInput) nombreInput.focus();
+    }
+
+    function cerrarEditarCajero() {
+        if (editarCajeroModal) editarCajeroModal.classList.add('hide');
+        cajeroEditando = null;
+    }
+
+    async function guardarEdicionCajero() {
+        if (!cajeroEditando) return;
+        const idCajero = cajeroEditando.id_cajero;
+        const boton = document.getElementById('editar-cajero-guardar');
+        if (boton) boton.disabled = true;
+
+        const nombre = (document.getElementById('editar-cajero-nombre')?.value || '').trim();
+        const usuario = (document.getElementById('editar-cajero-usuario')?.value || '').trim();
+        const password = (document.getElementById('editar-cajero-password')?.value || '').trim();
+
+        if (!nombre) {
+            notify('El nombre no puede estar vacío.', 'error');
+            if (boton) boton.disabled = false;
+            return;
+        }
+        if (!usuario) {
+            notify('El usuario no puede estar vacío.', 'error');
+            if (boton) boton.disabled = false;
+            return;
+        }
+
+        cerrarEditarCajero();
+        try {
+            const body = {
+                nombre,
+                usuario,
+                id_admin: currentUser ? currentUser.id_admin : 1
+            };
+            if (password) body.password = password;
+
+            const res = await fetch('/api/admin/cajeros/' + idCajero, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo guardar los cambios del cajero.', 'error');
+                return;
+            }
+            notify(data.message || `Cajero "${nombre}" actualizado.`, 'ok');
+            await Promise.all([cargarPersonalAdmin(), loadPersonalSetup()]);
+        } catch (err) {
+            console.error('Error al editar cajero:', err);
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        } finally {
+            if (boton) boton.disabled = false;
+        }
+    }
+
+    document.getElementById('editar-cajero-cerrar')?.addEventListener('click', cerrarEditarCajero);
+    document.getElementById('editar-cajero-guardar')?.addEventListener('click', guardarEdicionCajero);
+    editarCajeroModal?.addEventListener('click', e => {
+        if (e.target === editarCajeroModal) cerrarEditarCajero();
+    });
+
+    // ---- Editar Mesero Modal ------------------------------------------------
+    const editarMeseroModal = document.getElementById('editar-mesero-modal');
+    let meseroEditando = null;
+
+    function abrirEditarMesero(m) {
+        meseroEditando = m;
+        const cualEl = document.getElementById('editar-mesero-cual');
+        if (cualEl) cualEl.textContent = `${m.nombre} (PIN: ${m.pin || '••••'})`;
+
+        // Llenar selector de cajeros
+        const selCajero = document.getElementById('editar-mesero-cajero');
+        if (selCajero) {
+            selCajero.innerHTML = '';
+            (personalAdmin.cajeros || []).filter(c => c.activo !== 0).forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id_cajero;
+                opt.textContent = `${c.nombre} (${c.usuario})`;
+                if (c.id_cajero === m.id_cajero || c.nombre === m.cajero) {
+                    opt.selected = true;
+                }
+                selCajero.appendChild(opt);
+            });
+        }
+
+        const nombreInput = document.getElementById('editar-mesero-nombre');
+        if (nombreInput) nombreInput.value = m.nombre || '';
+        const pinInput = document.getElementById('editar-mesero-pin');
+        if (pinInput) pinInput.value = m.pin || m.password || '';
+
+        if (editarMeseroModal) editarMeseroModal.classList.remove('hide');
+        if (nombreInput) nombreInput.focus();
+    }
+
+    function cerrarEditarMesero() {
+        if (editarMeseroModal) editarMeseroModal.classList.add('hide');
+        meseroEditando = null;
+    }
+
+    async function guardarEdicionMesero() {
+        if (!meseroEditando) return;
+        const idMesero = meseroEditando.id_mesero;
+        const boton = document.getElementById('editar-mesero-guardar');
+        if (boton) boton.disabled = true;
+
+        const id_cajero = document.getElementById('editar-mesero-cajero')?.value;
+        const nombre = (document.getElementById('editar-mesero-nombre')?.value || '').trim();
+        const pin = (document.getElementById('editar-mesero-pin')?.value || '').trim();
+
+        if (!nombre) {
+            notify('El nombre no puede estar vacío.', 'error');
+            if (boton) boton.disabled = false;
+            return;
+        }
+        if (!pin) {
+            notify('El PIN no puede estar vacío.', 'error');
+            if (boton) boton.disabled = false;
+            return;
+        }
+
+        cerrarEditarMesero();
+        try {
+            const res = await fetch('/api/admin/meseros/' + idMesero, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id_cajero: Number(id_cajero),
+                    nombre,
+                    pin,
+                    password: pin,
+                    id_admin: currentUser ? currentUser.id_admin : 1
+                })
+            });
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo guardar los cambios del mesero.', 'error');
+                return;
+            }
+            notify(data.message || `Mesero "${nombre}" actualizado.`, 'ok');
+            await Promise.all([cargarPersonalAdmin(), loadPersonalSetup()]);
+        } catch (err) {
+            console.error('Error al editar mesero:', err);
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        } finally {
+            if (boton) boton.disabled = false;
+        }
+    }
+
+    document.getElementById('editar-mesero-cerrar')?.addEventListener('click', cerrarEditarMesero);
+    document.getElementById('editar-mesero-guardar')?.addEventListener('click', guardarEdicionMesero);
+    editarMeseroModal?.addEventListener('click', e => {
+        if (e.target === editarMeseroModal) cerrarEditarMesero();
+    });
+
     function pintarCajeros() {
         const cont = document.getElementById('lista-cajeros');
         if (!cont) return;
         const inputBuscar = document.getElementById('buscar-cajero');
         const filtro = (inputBuscar ? inputBuscar.value : '').trim().toLowerCase();
-        const todos = personalAdmin.cajeros || [];
+        const todos = (personalAdmin.cajeros || []).filter(c => c.activo !== 0);
         const lista = filtro
             ? todos.filter(c => (c.nombre || '').toLowerCase().includes(filtro) ||
                                 (c.usuario || '').toLowerCase().includes(filtro))
@@ -5619,19 +6420,21 @@ document.addEventListener('DOMContentLoaded', () => {
         lista.forEach(c => {
             const partes = [c.usuario];
             if (c.meseros) partes.push(c.meseros + (c.meseros === 1 ? ' mesero' : ' meseros'));
-            cont.appendChild(filaLista({
+            const fila = filaLista({
                 titulo: c.nombre,
                 detalle: partes.join(' · '),
                 insignia: c.comandas > 0 ? c.comandas + (c.comandas === 1 ? ' comanda' : ' comandas') : '',
-                inactivo: c.activo === 0,
+                inactivo: false,
+                onEditar: () => abrirEditarCajero(c),
                 onBorrar: () => borrar(
                     '/api/admin/cajeros/' + c.id_cajero,
                     c.comandas > 0
-                        ? c.nombre + ' ya cobró comandas.\n\nDejará de poder entrar, pero seguirá ' +
-                          'apareciendo en el cierre. ¿Continuar?'
+                        ? c.nombre + ' ya cobró comandas.\n\nDejará de poder entrar, pero sus ventas seguirán ' +
+                          'en el cierre. ¿Eliminarlo de la lista?'
                         : '¿Eliminar al cajero ' + c.nombre + '?',
                     () => { cargarPersonalAdmin(); loadPersonalSetup(); })
-            }));
+            });
+            cont.appendChild(fila);
         });
     }
 
@@ -5640,7 +6443,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!cont) return;
         const filtro = (document.getElementById('buscar-mesero').value || '')
             .trim().toLowerCase();
-        const todos = personalAdmin.meseros || [];
+        const todos = (personalAdmin.meseros || []).filter(m => m.activo !== 0);
         // Se busca también por PIN: en mitad del evento, lo que se olvida es el
         // número, no el nombre.
         const lista = filtro
@@ -5661,19 +6464,21 @@ document.addEventListener('DOMContentLoaded', () => {
         agrupar(lista, m => m.cajero).forEach((meseros, cajero) => {
             cont.appendChild(cabeceraGrupo(cajero, meseros.length));
             meseros.forEach(m => {
-                cont.appendChild(filaLista({
+                const fila = filaLista({
                     titulo: m.nombre,
-                        detalle: 'PIN ' + m.pin,
+                    detalle: 'PIN ' + (m.pin || m.password || '••••'),
                     insignia: m.comandas > 0 ? m.comandas + (m.comandas === 1 ? ' comanda' : ' comandas') : '',
-                    inactivo: m.activo === 0,
+                    inactivo: false,
+                    onEditar: () => abrirEditarMesero(m),
                     onBorrar: () => borrar(
                         '/api/admin/meseros/' + m.id_mesero,
                         m.comandas > 0
-                            ? m.nombre + ' ya tiene comandas.\n\nSu PIN dejará de funcionar, pero seguirá ' +
-                              'apareciendo en el cierre. ¿Continuar?'
+                            ? m.nombre + ' ya tiene comandas.\n\nSu PIN dejará de funcionar, pero sus ventas seguirán ' +
+                              'en el cierre. ¿Eliminarlo de la lista?'
                             : '¿Eliminar al mesero ' + m.nombre + '?',
                         () => { cargarPersonalAdmin(); loadPersonalSetup(); })
-                }));
+                });
+                cont.appendChild(fila);
             });
         });
     }
@@ -5883,7 +6688,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function guardarIngreso() {
-        if (!apuntarIngreso()) return;
+        const sel = document.getElementById('ingreso-producto');
+        const id = sel ? parseInt(sel.value, 10) : 0;
+        const uInput = document.getElementById('ingreso-unidades');
+        const n = uInput ? parseInt(uInput.value, 10) : 0;
+        if (id && Number.isInteger(n) && n > 0) {
+            apuntarIngreso();
+        }
+
+        if (!ingresoPendientes || ingresoPendientes.length === 0) {
+            notify('Añade al menos un producto a la lista antes de guardar.', 'warn');
+            return;
+        }
 
         const origen = document.getElementById('ingreso-origen').value.trim();
         if (!origen) {
@@ -6118,6 +6934,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function getStockCardsPerPage() {
+        const grid = document.getElementById('admin-stock-cards-grid');
+        const main = document.querySelector('#admin-view .admin-main');
+
+        let width = 0;
+        if (grid && grid.clientWidth > 0) {
+            width = grid.clientWidth;
+        } else if (main && main.clientWidth > 0) {
+            width = main.clientWidth - 48;
+        } else {
+            width = (window.innerWidth || 1024) - 260;
+        }
+
+        // Cada columna en .admin-stock-grid mide min 210px con gap 14px
+        const cols = Math.max(1, Math.floor((width + 14) / 224));
+        // EXACTAMENTE 2 FILAS
+        return Math.max(2, cols * 2);
+    }
+
     function renderAdminStockGrid() {
         const grid = document.getElementById('admin-stock-cards-grid');
         const summaryText = document.getElementById('admin-stock-summary-text');
@@ -6141,12 +6976,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (filtered.length === 0) {
             grid.innerHTML = `<div class="empty-cart-msg" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center;">No se encontraron productos que coincidan con la búsqueda.</div>`;
-            if (paginationContainer) paginationContainer.innerHTML = '';
+            renderAdminStockPagination(0, 0);
             return;
         }
 
-        // Medir cuántas tarjetas entran en 2 filas ANTES de limpiar el grid
-        let perPage = getStockCardsPerPage();
+        // Paginación a exactamente 2 filas de tarjetas
+        const perPage = getStockCardsPerPage();
         const totalItems = filtered.length;
         let totalPages = Math.max(1, Math.ceil(totalItems / perPage));
         if (adminStockPage > totalPages) adminStockPage = totalPages;
@@ -6192,8 +7027,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         <path class="gauge-bar" d="M 27.47 92.53 A 46 46 0 1 1 92.53 92.53" fill="none" stroke="${strokeColor}" stroke-width="11" stroke-linecap="round" stroke-dasharray="${pathLen}" stroke-dashoffset="${offset}" />
                     </svg>
                     <div class="gauge-inner">
-                        <svg class="gauge-cloud-bg ${isOut ? '' : 'hide'}" viewBox="0 0 100 100" aria-hidden="true">
-                            <path d="M 86.0 50.0 Q 98.9 63.1 81.2 68.0 Q 85.8 85.8 68.0 81.2 Q 63.1 98.9 50.0 86.0 Q 36.9 98.9 32.0 81.2 Q 14.2 85.8 18.8 68.0 Q 1.1 63.1 14.0 50.0 Q 1.1 36.9 18.8 32.0 Q 14.2 14.2 32.0 18.8 Q 36.9 1.1 50.0 14.0 Q 63.1 1.1 68.0 18.8 Q 85.8 14.2 81.2 32.0 Q 98.9 36.9 86.0 50.0 Z" fill="#374151" />
+                        <svg class="gauge-cloud-bg" viewBox="0 0 100 100" aria-hidden="true">
+                            <path d="M 50 12 C 63 12, 75 18, 81 28 C 88 39, 88 52, 83 63 C 86 74, 79 84, 69 88 C 58 91, 44 90, 34 85 C 23 88, 14 79, 13 68 C 11 56, 15 45, 20 36 C 16 26, 25 15, 36 13 C 41 12, 46 12, 50 12 Z" fill="#374151" />
                         </svg>
                         ${visual}
                         <div class="stamp-agotado ${isOut ? '' : 'hide'}">AGOTADO</div>
@@ -6237,80 +7072,95 @@ document.addEventListener('DOMContentLoaded', () => {
             grid.appendChild(card);
         });
 
-        // SALVAGUARDA ESTRICTA EN EL DOM: NUNCA MÁS DE 2 FILAS
-        const renderedCards = Array.from(grid.querySelectorAll('.admin-stock-card'));
-        if (renderedCards.length > 0) {
-            const firstTop = renderedCards[0].offsetTop;
-            const row1Cards = renderedCards.filter(c => Math.abs(c.offsetTop - firstTop) < 12);
-            const actualCols = row1Cards.length;
-            if (actualCols > 0) {
-                const maxAllowedCards = actualCols * 2; // EXACTAMENTE 2 FILAS
-                if (renderedCards.length > maxAllowedCards) {
-                    for (let i = maxAllowedCards; i < renderedCards.length; i++) {
-                        renderedCards[i].remove();
-                    }
-                }
-                if (perPage !== maxAllowedCards) {
-                    perPage = maxAllowedCards;
-                    totalPages = Math.max(1, Math.ceil(totalItems / perPage));
-                    if (adminStockPage > totalPages) adminStockPage = totalPages;
-                }
-            }
-        }
-
-        // Render Pagination Controls
-        renderAdminStockPaginationControls(paginationContainer, adminStockPage, totalPages, totalItems);
+        renderAdminStockPagination(totalPages, totalItems);
     }
 
-    function renderAdminStockPaginationControls(container, currentPage, totalPages, totalItems) {
-        if (!container) return;
-        if (totalPages <= 1) {
-            container.innerHTML = '';
+    function renderAdminStockPagination(totalPages, totalItems) {
+        const pagContainer = document.getElementById('admin-stock-pagination');
+        if (!pagContainer) return;
+
+        if (totalItems === 0) {
+            pagContainer.innerHTML = '<span class="comanda-pag-info">0 productos encontrados</span>';
             return;
         }
-        container.innerHTML = `
-            <button type="button" class="comanda-pag-btn" id="admin-stock-prev" ${currentPage <= 1 ? 'disabled' : ''}>
+
+        if (totalPages <= 1) {
+            pagContainer.innerHTML = `<span class="comanda-pag-info">Mostrando <strong>${totalItems}</strong> productos</span>`;
+            return;
+        }
+
+        let html = `
+            <button type="button" class="comanda-pag-btn btn-prev" ${adminStockPage <= 1 ? 'disabled' : ''}>
                 ◀ Anterior
-            </button>
-            <span class="comanda-pag-info">
-                Página <strong>${currentPage}</strong> de <strong>${totalPages}</strong> (${totalItems} productos)
-            </span>
-            <button type="button" class="comanda-pag-btn" id="admin-stock-next" ${currentPage >= totalPages ? 'disabled' : ''}>
-                Siguiente ▶
             </button>
         `;
 
-        const prevBtn = document.getElementById('admin-stock-prev');
-        if (prevBtn && currentPage > 1) {
-            prevBtn.addEventListener('click', () => {
-                adminStockPage--;
-                renderAdminStockGrid();
-                const adminMain = document.querySelector('#admin-view .admin-main');
-                if (adminMain) adminMain.scrollTo({ top: 0, behavior: 'smooth' });
-            });
+        const maxBotones = 5;
+        let startPage = Math.max(1, adminStockPage - Math.floor(maxBotones / 2));
+        let endPage = Math.min(totalPages, startPage + maxBotones - 1);
+        if (endPage - startPage + 1 < maxBotones) {
+            startPage = Math.max(1, endPage - maxBotones + 1);
         }
-        const nextBtn = document.getElementById('admin-stock-next');
-        if (nextBtn && currentPage < totalPages) {
-            nextBtn.addEventListener('click', () => {
-                adminStockPage++;
-                renderAdminStockGrid();
-                const adminMain = document.querySelector('#admin-view .admin-main');
-                if (adminMain) adminMain.scrollTo({ top: 0, behavior: 'smooth' });
-            });
-        }
-    }
 
-    // Auto-ajustar a exactamente 2 filas ante redimensiones de ventana
-    let stockResizeTimer = null;
-    window.addEventListener('resize', () => {
-        const stockTab = document.getElementById('tab-stock');
-        if (stockTab && !stockTab.classList.contains('hide')) {
-            clearTimeout(stockResizeTimer);
-            stockResizeTimer = setTimeout(() => {
-                renderAdminStockGrid();
-            }, 120);
+        if (startPage > 1) {
+            html += `<button type="button" class="comanda-pag-btn btn-num" data-page="1">1</button>`;
+            if (startPage > 2) html += `<span class="comanda-pag-info">...</span>`;
         }
-    });
+
+        for (let p = startPage; p <= endPage; p++) {
+            html += `<button type="button" class="comanda-pag-btn btn-num ${p === adminStockPage ? 'active' : ''}" data-page="${p}">${p}</button>`;
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) html += `<span class="comanda-pag-info">...</span>`;
+            html += `<button type="button" class="comanda-pag-btn btn-num" data-page="${totalPages}">${totalPages}</button>`;
+        }
+
+        html += `
+            <button type="button" class="comanda-pag-btn btn-next" ${adminStockPage >= totalPages ? 'disabled' : ''}>
+                Siguiente ▶
+            </button>
+            <span class="comanda-pag-info">(${totalItems} productos · Pág. ${adminStockPage}/${totalPages})</span>
+        `;
+
+        pagContainer.innerHTML = html;
+
+        const prev = pagContainer.querySelector('.btn-prev');
+        if (prev) {
+            prev.addEventListener('click', () => {
+                if (adminStockPage > 1) {
+                    adminStockPage--;
+                    renderAdminStockGrid();
+                    const grid = document.getElementById('admin-stock-cards-grid');
+                    if (grid) grid.scrollTop = 0;
+                }
+            });
+        }
+
+        const next = pagContainer.querySelector('.btn-next');
+        if (next) {
+            next.addEventListener('click', () => {
+                if (adminStockPage < totalPages) {
+                    adminStockPage++;
+                    renderAdminStockGrid();
+                    const grid = document.getElementById('admin-stock-cards-grid');
+                    if (grid) grid.scrollTop = 0;
+                }
+            });
+        }
+
+        pagContainer.querySelectorAll('.btn-num').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const p = parseInt(btn.dataset.page, 10);
+                if (p && p !== adminStockPage) {
+                    adminStockPage = p;
+                    renderAdminStockGrid();
+                    const grid = document.getElementById('admin-stock-cards-grid');
+                    if (grid) grid.scrollTop = 0;
+                }
+            });
+        });
+    }
 
     // Modal de acción rápida de stock (+ Entrada, - Salida, Ajuste)
     function openStockActionModal(prod, type = 'ENTRADA') {
@@ -6574,28 +7424,37 @@ document.addEventListener('DOMContentLoaded', () => {
             const tbodyMovs = document.getElementById('movs-table-body');
             tbodyMovs.innerHTML = '';
 
-            if (data.movimientos.length === 0) {
-                tbodyMovs.innerHTML = `<tr><td colspan="8" style="text-align: center;">No hay movimientos de stock</td></tr>`;
+            if (!data.movimientos || data.movimientos.length === 0) {
+                tbodyMovs.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 24px; font-weight: 700; color: #71717a;">No hay movimientos de stock registrados</td></tr>`;
             } else {
                 data.movimientos.forEach(m => {
                     const tr = document.createElement('tr');
                     const meseroHtml = m.nombre_mesero
-                        ? `<span class="badge" style="background: rgba(99, 102, 241, 0.18); color: #c7d2fe; border: 1px solid rgba(99, 102, 241, 0.35); font-size: 0.75rem; padding: 2px 7px; white-space: nowrap;">👤 ${escapeHtml(m.nombre_mesero)}</span>`
+                        ? `<span class="badge" style="background: #e0e7ff; color: #3730a3; border: 1.5px solid #000000; font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; box-shadow: 1px 1px 0px #000000; white-space: nowrap;">👤 ${escapeHtml(m.nombre_mesero)}</span>`
                         : (m.nombre_cajero
-                            ? `<span style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap;">Cajero: ${escapeHtml(m.nombre_cajero)}</span>`
+                            ? `<span style="font-size: 0.76rem; font-weight: 700; color: #18181b; white-space: nowrap;">Cajero: ${escapeHtml(m.nombre_cajero)}</span>`
                             : (m.nombre_admin
-                                ? `<span style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap;">${escapeHtml(m.nombre_admin)}</span>`
-                                : '<span style="color: var(--text-secondary); font-size: 0.75rem;">—</span>'));
+                                ? `<span style="font-size: 0.76rem; font-weight: 700; color: #18181b; white-space: nowrap;">Admin: ${escapeHtml(m.nombre_admin)}</span>`
+                                : '<span style="color: #a1a1aa; font-size: 0.75rem;">—</span>'));
+
+                    let tipoBadge = '';
+                    if (m.tipo_movimiento === 'ENTRADA') {
+                        tipoBadge = `<span class="badge" style="background: #dcfce7; color: #15803d; border: 1.5px solid #000000; font-weight: 800; padding: 2px 8px; border-radius: 6px; box-shadow: 1px 1px 0px #000000;">ENTRADA</span>`;
+                    } else if (m.tipo_movimiento === 'SALIDA') {
+                        tipoBadge = `<span class="badge" style="background: #fee2e2; color: #b91c1c; border: 1.5px solid #000000; font-weight: 800; padding: 2px 8px; border-radius: 6px; box-shadow: 1px 1px 0px #000000;">SALIDA</span>`;
+                    } else {
+                        tipoBadge = `<span class="badge" style="background: #fef08a; color: #854d0e; border: 1.5px solid #000000; font-weight: 800; padding: 2px 8px; border-radius: 6px; box-shadow: 1px 1px 0px #000000;">${escapeHtml(m.tipo_movimiento || 'AJUSTE')}</span>`;
+                    }
 
                     tr.innerHTML = `
                         <td><strong>${escapeHtml(m.nombre_producto)}</strong></td>
-                        <td><span class="badge ${m.tipo_movimiento === 'ENTRADA' ? 'badge-entregada' : m.tipo_movimiento === 'SALIDA' ? 'badge-anulado' : 'badge-pendiente'}">${m.tipo_movimiento}</span></td>
-                        <td>${m.cantidad}</td>
-                        <td>${m.stock_anterior}</td>
-                        <td style="font-weight: bold; color: #34d399;">${m.stock_nuevo}</td>
+                        <td>${tipoBadge}</td>
+                        <td style="font-weight: 800; font-size: 0.88rem; color: #000000;">${m.cantidad}</td>
+                        <td style="color: #71717a; font-weight: 700;">${m.stock_anterior}</td>
+                        <td style="font-weight: 900; color: #059669; font-size: 0.90rem;">${m.stock_nuevo}</td>
                         <td>${meseroHtml}</td>
-                        <td style="font-size: 0.75rem; white-space: nowrap;">${new Date(m.fecha_hora).toLocaleString()}</td>
-                        <td style="font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(m.motivo || '-')}</td>
+                        <td style="font-size: 0.76rem; font-weight: 600; color: #3f3f46; white-space: nowrap;">${new Date(m.fecha_hora).toLocaleString()}</td>
+                        <td style="font-size: 0.78rem; font-weight: 600; color: #52525b;">${escapeHtml(m.motivo || '-')}</td>
                     `;
                     tbodyMovs.appendChild(tr);
                 });
@@ -6605,16 +7464,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const tbodyAudits = document.getElementById('audits-table-body');
             tbodyAudits.innerHTML = '';
 
-            if (data.auditoria.length === 0) {
-                tbodyAudits.innerHTML = `<tr><td colspan="4" style="text-align: center;">No hay registros de auditoría</td></tr>`;
+            if (!data.auditoria || data.auditoria.length === 0) {
+                tbodyAudits.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 24px; font-weight: 700; color: #71717a;">No hay registros de auditoría registrados</td></tr>`;
             } else {
                 data.auditoria.forEach(a => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td><strong>${escapeHtml(a.nombre_admin)}</strong></td>
-                        <td><span class="badge badge-proceso">${escapeHtml(a.accion)}</span></td>
-                        <td style="font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(a.detalle)}</td>
-                        <td style="font-size: 0.75rem;">${new Date(a.fecha_hora).toLocaleString()}</td>
+                        <td><span class="badge" style="background: #f3e8ff; color: #6b21a8; border: 1.5px solid #000000; font-weight: 800; padding: 2px 8px; border-radius: 6px; box-shadow: 1px 1px 0px #000000;">${escapeHtml(a.accion)}</span></td>
+                        <td style="font-size: 0.82rem; font-weight: 600; color: #18181b;">${escapeHtml(a.detalle)}</td>
+                        <td style="font-size: 0.76rem; font-weight: 600; color: #52525b; white-space: nowrap;">${new Date(a.fecha_hora).toLocaleString()}</td>
                     `;
                     tbodyAudits.appendChild(tr);
                 });
@@ -6626,7 +7485,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // TAB: INVENTARIO / STOCK REPORT
     let inventoryPage = 1;
-    const inventoryLimit = 12;
+    const inventoryLimit = 14;
     let allInventoryProducts = [];
     let allInventoryCategoriesMap = {};
     let filteredInventoryProducts = [];
@@ -6728,32 +7587,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 applyInventoryFilters();
             });
         }
-
-        // Listeners de paginación
-        const prevBtn = document.getElementById('inventory-prev-btn');
-        if (prevBtn) {
-            prevBtn.addEventListener('click', () => {
-                if (inventoryPage > 1) {
-                    inventoryPage--;
-                    renderInventoryPage();
-                    const container = document.querySelector('#tab-inventario .table-container');
-                    if (container) container.scrollTop = 0;
-                }
-            });
-        }
-
-        const nextBtn = document.getElementById('inventory-next-btn');
-        if (nextBtn) {
-            nextBtn.addEventListener('click', () => {
-                const totalPages = Math.ceil(filteredInventoryProducts.length / inventoryLimit) || 1;
-                if (inventoryPage < totalPages) {
-                    inventoryPage++;
-                    renderInventoryPage();
-                    const container = document.querySelector('#tab-inventario .table-container');
-                    if (container) container.scrollTop = 0;
-                }
-            });
-        }
     }
 
     function applyInventoryFilters() {
@@ -6816,21 +7649,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderInventoryPage() {
         const tbody = document.getElementById('inventory-table-body');
-        const pageInfo = document.getElementById('inventory-page-info');
-        const prevBtn = document.getElementById('inventory-prev-btn');
-        const nextBtn = document.getElementById('inventory-next-btn');
         if (!tbody) return;
         tbody.innerHTML = '';
 
-        if (filteredInventoryProducts.length === 0) {
+        const totalItems = filteredInventoryProducts.length;
+
+        if (totalItems === 0) {
             tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 28px; color: #71717a; font-weight: 600;">No se encontraron productos con los filtros aplicados.</td></tr>';
-            if (pageInfo) pageInfo.innerHTML = 'Página <strong>0</strong> de <strong>0</strong> (0 productos)';
-            if (prevBtn) prevBtn.disabled = true;
-            if (nextBtn) nextBtn.disabled = true;
+            renderInventoryPagination(0, 0);
             return;
         }
 
-        const totalPages = Math.ceil(filteredInventoryProducts.length / inventoryLimit) || 1;
+        const totalPages = Math.ceil(totalItems / inventoryLimit) || 1;
         if (inventoryPage > totalPages) inventoryPage = totalPages;
         if (inventoryPage < 1) inventoryPage = 1;
 
@@ -6859,12 +7689,94 @@ document.addEventListener('DOMContentLoaded', () => {
             tbody.appendChild(tr);
         });
 
-        if (pageInfo) {
-            pageInfo.innerHTML = `Página <strong>${inventoryPage}</strong> de <strong>${totalPages}</strong> (${filteredInventoryProducts.length} productos)`;
+        renderInventoryPagination(totalPages, totalItems);
+    }
+
+    function renderInventoryPagination(totalPages, totalItems) {
+        const pagContainer = document.getElementById('inventory-pagination');
+        if (!pagContainer) return;
+
+        if (totalItems === 0) {
+            pagContainer.innerHTML = '<span class="comanda-pag-info">0 productos encontrados</span>';
+            return;
         }
-        
-        if (prevBtn) prevBtn.disabled = (inventoryPage <= 1);
-        if (nextBtn) nextBtn.disabled = (inventoryPage >= totalPages);
+
+        if (totalPages <= 1) {
+            pagContainer.innerHTML = `<span class="comanda-pag-info">Mostrando los <strong>${totalItems}</strong> productos</span>`;
+            return;
+        }
+
+        let html = `
+            <button type="button" class="comanda-pag-btn btn-prev" ${inventoryPage <= 1 ? 'disabled' : ''}>
+                ◀ Anterior
+            </button>
+        `;
+
+        const maxBotones = 5;
+        let startPage = Math.max(1, inventoryPage - Math.floor(maxBotones / 2));
+        let endPage = Math.min(totalPages, startPage + maxBotones - 1);
+        if (endPage - startPage + 1 < maxBotones) {
+            startPage = Math.max(1, endPage - maxBotones + 1);
+        }
+
+        if (startPage > 1) {
+            html += `<button type="button" class="comanda-pag-btn btn-num" data-page="1">1</button>`;
+            if (startPage > 2) html += `<span class="comanda-pag-info">...</span>`;
+        }
+
+        for (let p = startPage; p <= endPage; p++) {
+            html += `<button type="button" class="comanda-pag-btn btn-num ${p === inventoryPage ? 'active' : ''}" data-page="${p}">${p}</button>`;
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) html += `<span class="comanda-pag-info">...</span>`;
+            html += `<button type="button" class="comanda-pag-btn btn-num" data-page="${totalPages}">${totalPages}</button>`;
+        }
+
+        html += `
+            <button type="button" class="comanda-pag-btn btn-next" ${inventoryPage >= totalPages ? 'disabled' : ''}>
+                Siguiente ▶
+            </button>
+            <span class="comanda-pag-info">(${totalItems} productos · Pág. ${inventoryPage}/${totalPages})</span>
+        `;
+
+        pagContainer.innerHTML = html;
+
+        const prev = pagContainer.querySelector('.btn-prev');
+        if (prev) {
+            prev.addEventListener('click', () => {
+                if (inventoryPage > 1) {
+                    inventoryPage--;
+                    renderInventoryPage();
+                    const container = document.querySelector('#tab-inventario .table-container');
+                    if (container) container.scrollTop = 0;
+                }
+            });
+        }
+
+        const next = pagContainer.querySelector('.btn-next');
+        if (next) {
+            next.addEventListener('click', () => {
+                if (inventoryPage < totalPages) {
+                    inventoryPage++;
+                    renderInventoryPage();
+                    const container = document.querySelector('#tab-inventario .table-container');
+                    if (container) container.scrollTop = 0;
+                }
+            });
+        }
+
+        pagContainer.querySelectorAll('.btn-num').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const p = parseInt(btn.dataset.page, 10);
+                if (p && p !== inventoryPage) {
+                    inventoryPage = p;
+                    renderInventoryPage();
+                    const container = document.querySelector('#tab-inventario .table-container');
+                    if (container) container.scrollTop = 0;
+                }
+            });
+        });
     }
 
     // Reporte de inventario en papel térmico, con el mismo maquetado en columnas

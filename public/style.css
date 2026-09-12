@@ -1185,33 +1185,45 @@ select option {
     position: absolute;
     top: 14px;
     left: 14px;
-    background: rgba(0, 0, 0, 0.035);
-    border: 1px solid rgba(0, 0, 0, 0.07);
+    background: rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.09);
     color: var(--text-secondary);
-    font-size: 1.15rem;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
     cursor: pointer;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    line-height: 1 !important;
+    box-sizing: border-box !important;
     transition: background 200ms ease, border-color 200ms ease,
                 color 200ms ease, transform 160ms var(--ease-out);
     z-index: 10;
 }
 
+.modal-close-btn svg {
+    width: 19px;
+    height: 19px;
+    display: block;
+    pointer-events: none;
+    flex-shrink: 0;
+    margin: 0 auto;
+}
+
 @media (hover: hover) and (pointer: fine) {
     .modal-close-btn:hover {
         background: rgba(0, 0, 0, 0.1);
-        border-color: rgba(0, 0, 0, 0.16);
+        border-color: rgba(0, 0, 0, 0.18);
         color: var(--text-primary);
-        transform: scale(1.05);
+        transform: scale(1.06);
     }
 }
 
 .modal-close-btn:active {
-    transform: scale(0.95);
+    transform: scale(0.94);
 }
 
 /* 3. MAIN POS VIEW */
@@ -2294,14 +2306,27 @@ select option {
 
 .pay-total {
     text-align: center;
-    font-family: var(--font-heading);
+    font-family: var(--font-heading, 'Outfit', sans-serif);
     font-size: 3rem;
     margin-top: 4px;
-    font-weight: 700;
+    font-weight: 800;
     line-height: 1.1;
     letter-spacing: -0.035em;
     margin-bottom: 24px;
-    color: var(--text-primary);
+    color: #dc2626; /* Default rojo al abrir */
+    transition: color 0.25s ease, transform 0.2s ease;
+}
+
+.pay-total.status-rojo {
+    color: #dc2626 !important; /* Rojo: pendiente / insuficiente */
+}
+
+.pay-total.status-verde {
+    color: #16a34a !important; /* Verde: monto exacto */
+}
+
+.pay-total.status-amarillo {
+    color: #d97706 !important; /* Amarillo/Ámbar: paga de más / con cambio */
 }
 
 /* Pestañas de forma de pago. En 5 columnas caben las cuatro formas simples
@@ -3856,6 +3881,58 @@ select option {
     border-color: rgba(0, 0, 0, 0.07);
 }
 
+/* ---- Controles para reordenar (subir / bajar) ---- */
+.lista-orden-grp {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-right: 6px;
+    background: #f4f4f5;
+    border: 1.5px solid #000000;
+    border-radius: 12px;
+    padding: 2px 3px;
+    box-shadow: 1.5px 1.5px 0px #000000;
+    flex-shrink: 0;
+}
+
+.lista-orden-btn {
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    border: 1px solid #000000;
+    border-radius: 7px;
+    color: #18181b;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    padding: 0;
+    line-height: 1;
+}
+
+.lista-orden-btn:hover:not(:disabled):not(.deshabilitado) {
+    background: #fde047;
+    transform: translateY(-1px);
+    box-shadow: 1px 1px 0px #000000;
+}
+
+.lista-orden-btn:active:not(:disabled):not(.deshabilitado) {
+    transform: translateY(1px);
+    background: #facc15;
+    box-shadow: none;
+}
+
+.lista-orden-btn:disabled,
+.lista-orden-btn.deshabilitado {
+    opacity: 0.22;
+    cursor: not-allowed;
+    background: #f4f4f5;
+    border-color: #d4d4d8;
+    color: #a1a1aa;
+    box-shadow: none;
+}
+
 /* Botón para encender/apagar o activar/desactivar estado, colocado al lado del botón de eliminar */
 .lista-alternar {
     flex-shrink: 0;
@@ -4927,18 +5004,41 @@ select option {
 .mover-lista {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+    max-height: 240px;
+    overflow-y: auto;
+    padding-right: 6px;
+    margin: 10px 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+
+.mover-lista::-webkit-scrollbar {
+    width: 6px;
+}
+
+.mover-lista::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.04);
+    border-radius: 4px;
+}
+
+.mover-lista::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.22);
+    border-radius: 4px;
 }
 
 .mover-pendiente {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
-    padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.03);
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 10px;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
+    font-size: 0.90rem;
+    font-weight: 600;
+    color: var(--text-primary);
 }
 
 .mover-pendiente span:first-child {
@@ -5201,46 +5301,56 @@ select option {
    creyendo que es una cerveza— pero sin gritar: sigue siendo una tarjeta más
    entre veinte y compite por el mismo dedo. */
 
-.promo-card {
-    border-color: var(--accent-borde);
-    /* Un fondo ámbar apenas insinuado, al 4 %. Con más, la fila de combos se
-       convierte en una barra de color que se lleva la vista cada vez que el
-       cajero busca una cerveza. */
-    background:
-        linear-gradient(180deg, rgba(224, 163, 62, 0.05), rgba(224, 163, 62, 0.02)),
-        var(--bg-elev-1);
+/* Tarjetas de Promoción / Combos en el POS */
+#pos-view .product-card.promo-card {
+    position: relative;
+    border-color: #000000 !important;
+    background: #ffffff !important;
 }
 
-.promo-sello {
-    align-self: flex-start;
+.promo-badge-tag {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 10;
     font-size: 0.62rem;
-    font-weight: 800;
-    letter-spacing: 0.1em;
+    font-weight: 900;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--accent-ink);
-    background: var(--accent-color);
-    border-radius: 5px;
-    padding: 2px 7px;
-}
-
-.promo-foto-wrap {
-    width: 100%;
-    height: 84px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 4px 0 6px 0;
-    background: rgba(0, 0, 0, 0.035);
-    border-radius: 8px;
-    overflow: hidden;
-}
-
-.promo-foto {
-    max-height: 80px;
-    max-width: 90%;
-    object-fit: contain;
+    color: #ffffff;
+    background: #f59e0b;
+    border: 1.5px solid #000000;
     border-radius: 6px;
-    transition: transform 0.2s ease, filter 0.2s ease;
+    padding: 2px 6px;
+    box-shadow: 1.5px 1.5px 0px #000000;
+    pointer-events: none;
+}
+
+.promo-items-text {
+    font-size: 0.70rem;
+    font-weight: 700;
+    color: #64748b;
+    margin-top: 2px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    max-height: 2.4em;
+    word-break: break-word;
+}
+
+.promo-card .promo-foto {
+    max-height: 88px;
+    max-width: 76px;
+    object-fit: contain;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    z-index: 2;
+    transition: filter 0.2s ease, opacity 0.2s ease;
 }
 
 .promo-card.out-of-stock .promo-foto,
@@ -5249,45 +5359,13 @@ select option {
     opacity: 0.75;
 }
 
-.promo-card .promo-titulo {
-    font-size: 0.95rem;
-    font-weight: 800;
-    margin: 2px 0 4px 0;
-    line-height: 1.2;
-}
-
-/* Lo que lleva dentro, en pequeño. El cajero necesita poder comprobarlo sin
-   abrir nada: la mitad de las veces el cliente pregunta "¿y qué trae?". */
-.promo-dentro {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: 0.76rem;
-    line-height: 1.25;
-    color: var(--text-secondary);
-    /* Tres renglones como mucho: un balde de seis cosas no puede estirar su
-       tarjeta al doble que las de al lado y descuadrar la rejilla. */
-    max-height: 3.9em;
-    overflow: hidden;
-}
-
-/* El precio de antes, tachado. Es lo que convierte un número en una oferta. */
+/* El precio de antes, tachado */
 .promo-ahorro {
     flex-shrink: 0;
     font-size: 0.72rem;
     color: var(--text-muted);
     text-decoration: line-through;
     white-space: nowrap;
-}
-
-/* El pie de la tarjeta de combo salta de línea si no caben las dos cifras: el
-   precio de antes se quedaba en "antes 71.C", que no es un número. */
-.promo-card .card-foot {
-    flex-wrap: wrap;
-    gap: 4px 8px;
 }
 
 /* La misma marca en el carrito, para que la línea se lea como paquete y no
@@ -5949,17 +6027,22 @@ select option {
 .stock-modal-card {
     max-width: 440px;
     width: 92%;
-    padding: 24px;
+    padding: 22px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
+    background: #ffffff !important;
+    border: 3px solid #000000 !important;
+    border-radius: 22px !important;
+    box-shadow: 6px 6px 0px #000000 !important;
+    color: #18181b !important;
 }
 
 .stock-modal-header {
     display: flex;
     align-items: center;
     gap: 14px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+    border-bottom: 2px solid #000000;
     padding-bottom: 12px;
 }
 
@@ -5967,128 +6050,194 @@ select option {
     width: 54px;
     height: 54px;
     object-fit: contain;
-    background: rgba(0, 0, 0, 0.035);
-    border-radius: 8px;
+    background: #f8fafc;
+    border: 2px solid #000000;
+    border-radius: 12px;
     padding: 4px;
+    box-shadow: 2px 2px 0px #000000;
 }
 
 .stock-modal-title-box h3 {
     margin: 0;
-    font-size: 1.05rem;
-    color: #fff;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 900;
+    color: #000000 !important;
 }
 
 .stock-modal-title-box p {
     margin: 2px 0 0;
     font-size: 0.85rem;
-    color: var(--text-secondary, #94a3b8);
+    font-weight: 700;
+    color: #52525b;
 }
 
 .stock-type-selector {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 6px;
+    gap: 8px;
 }
 
 .stock-type-btn {
-    padding: 8px 4px;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    background: rgba(0, 0, 0, 0.04);
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    color: #52525b;
+    padding: 10px 6px;
+    border-radius: 12px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.86rem;
+    font-weight: 800;
+    background: #f4f4f5;
+    border: 2px solid #000000;
+    color: #18181b;
+    box-shadow: 2.5px 2.5px 0px #000000;
     cursor: pointer;
-    transition: all 150ms ease;
+    transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
     text-align: center;
 }
 
+.stock-type-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 3.5px 3.5px 0px #000000;
+}
+
+.stock-type-btn:active {
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0px #000000;
+}
+
 .stock-type-btn.active.tipo-entrada {
-    background: rgba(16, 185, 129, 0.25);
-    border-color: #10b981;
-    color: #157f3d;
+    background: #dcfce7 !important;
+    border-color: #000000 !important;
+    color: #064e3b !important;
+    box-shadow: 3.5px 3.5px 0px #000000 !important;
 }
 
 .stock-type-btn.active.tipo-salida {
-    background: rgba(244, 63, 94, 0.25);
-    border-color: #f43f5e;
-    color: #be123c;
+    background: #fee2e2 !important;
+    border-color: #000000 !important;
+    color: #7f1d1d !important;
+    box-shadow: 3.5px 3.5px 0px #000000 !important;
 }
 
 .stock-type-btn.active.tipo-ajuste {
-    background: rgba(245, 158, 11, 0.25);
-    border-color: #f59e0b;
-    color: #92600b;
+    background: #fef08a !important;
+    border-color: #000000 !important;
+    color: #713f12 !important;
+    box-shadow: 3.5px 3.5px 0px #000000 !important;
+}
+
+.stock-modal-card label {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #18181b !important;
+    margin-bottom: 4px;
+    display: block;
 }
 
 .stock-qty-stepper {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
 
 .stock-qty-stepper button {
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.07);
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    color: #fff;
-    font-size: 1.3rem;
-    font-weight: bold;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: #f4f4f5;
+    border: 2.5px solid #000000;
+    color: #000000 !important;
+    font-size: 1.5rem;
+    font-weight: 900;
+    box-shadow: 3px 3px 0px #000000;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
 .stock-qty-stepper button:hover {
-    background: rgba(0, 0, 0, 0.06);
+    background: #e4e4e7;
+    transform: translateY(-1px);
+    box-shadow: 4px 4px 0px #000000;
+}
+
+.stock-qty-stepper button:active {
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0px #000000;
 }
 
 .stock-qty-stepper input {
     flex: 1;
-    height: 44px;
+    height: 48px;
     text-align: center;
-    font-size: 1.25rem;
-    font-weight: 700;
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.04);
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    color: #fff;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.45rem !important;
+    font-weight: 900 !important;
+    border-radius: 12px;
+    background: #ffffff !important;
+    border: 2.5px solid #000000 !important;
+    color: #000000 !important;
+    box-shadow: 3px 3px 0px #000000 !important;
 }
 
 .stock-preset-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
+    margin-top: 2px;
 }
 
 .stock-preset-chip {
-    padding: 4px 10px;
-    border-radius: 14px;
-    background: rgba(0, 0, 0, 0.05);
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    color: #52525b;
-    font-size: 0.78rem;
-    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: #ffffff;
+    border: 2px solid #000000;
+    color: #000000 !important;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 800;
+    box-shadow: 2px 2px 0px #000000;
     cursor: pointer;
+    transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
 .stock-preset-chip:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: #fff;
+    background: #fef08a;
+    color: #000000 !important;
+    transform: translateY(-2px);
+    box-shadow: 3px 3px 0px #000000;
+}
+
+.stock-preset-chip:active {
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0px #000000;
 }
 
 .stock-calc-preview {
-    background: rgba(0, 0, 0, 0.045);
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    border-radius: 8px;
-    padding: 8px 12px;
+    background: #f8fafc;
+    border: 2px dashed #000000;
+    border-radius: 12px;
+    padding: 10px 14px;
     font-size: 0.88rem;
+    font-weight: 700;
+    color: #18181b;
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+#sam-reason {
+    background: #ffffff !important;
+    border: 2.5px solid #000000 !important;
+    color: #000000 !important;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 700 !important;
+    border-radius: 12px !important;
+    box-shadow: 2.5px 2.5px 0px #000000 !important;
+    padding: 10px 12px !important;
 }
 
 .btn-fullscreen-topleft {
@@ -6379,7 +6528,18 @@ select option {
     height: 88px;
     z-index: 1;
     pointer-events: none;
-    filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.25));
+    opacity: 0.32;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
+    transition: opacity 0.2s ease;
+}
+
+.gauge-cloud-bg path {
+    fill: #64748b !important;
+}
+
+.product-card.out-of-stock .gauge-cloud-bg,
+.admin-stock-card.is-out .gauge-cloud-bg {
+    opacity: 0.50;
 }
 
 #pos-view .product-card .product-foto {
@@ -7086,19 +7246,55 @@ select option {
     background: rgba(0, 0, 0, 0.38);
 }
 
-/* Solo Dashboard lleva scroll exterior en el contenedor porque es de configuración larga */
-#admin-view #tab-dashboard:not(.hide) {
+/* Dashboard, Stock, Auditoría y Configuración llevan scroll exterior en el contenedor porque contienen varios bloques largos */
+#admin-view #tab-dashboard:not(.hide),
+#admin-view #tab-stock:not(.hide),
+#admin-view #tab-configuracion:not(.hide) {
     height: 100% !important;
     max-height: 100% !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
-    padding-right: 4px !important;
+    padding-right: 6px !important;
+    padding-bottom: 40px !important;
     box-sizing: border-box !important;
     display: block !important;
+    -webkit-overflow-scrolling: touch !important;
+}
+
+#admin-view #tab-auditoria:not(.hide) {
+    height: 100% !important;
+    max-height: 100% !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding-right: 6px !important;
+    padding-bottom: 20px !important;
+    box-sizing: border-box !important;
+    display: block !important;
+    -webkit-overflow-scrolling: touch !important;
+}
+
+#admin-view #tab-dashboard::-webkit-scrollbar,
+#admin-view #tab-stock::-webkit-scrollbar,
+#admin-view #tab-auditoria::-webkit-scrollbar,
+#admin-view #tab-configuracion::-webkit-scrollbar {
+    width: 6px;
+}
+#admin-view #tab-dashboard::-webkit-scrollbar-track,
+#admin-view #tab-stock::-webkit-scrollbar-track,
+#admin-view #tab-auditoria::-webkit-scrollbar-track,
+#admin-view #tab-configuracion::-webkit-scrollbar-track {
+    background: transparent;
+}
+#admin-view #tab-dashboard::-webkit-scrollbar-thumb,
+#admin-view #tab-stock::-webkit-scrollbar-thumb,
+#admin-view #tab-auditoria::-webkit-scrollbar-thumb,
+#admin-view #tab-configuracion::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 10px;
 }
 
 /* Todos los demás tabs se ajustan al 100% del alto, igual que el sidebar */
-#admin-view .tab-content:not(#tab-dashboard):not(.hide) {
+#admin-view .tab-content:not(#tab-dashboard):not(#tab-auditoria):not(#tab-configuracion):not(#tab-stock):not(.hide) {
     height: 100% !important;
     max-height: 100% !important;
     display: flex !important;
@@ -7135,37 +7331,58 @@ select option {
 /* KPI Metrics Grid */
 #admin-view .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
-    gap: 10px;
-    margin-bottom: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
     flex-shrink: 0 !important;
 }
 
 #admin-view .kpi-card {
     background: #ffffff !important;
     border: 2.5px solid #000000 !important;
-    border-radius: 16px !important;
-    box-shadow: 2.5px 2.5px 0px #000000 !important;
-    padding: 10px 14px !important;
+    border-radius: 18px !important;
+    box-shadow: 3.5px 3.5px 0px #000000 !important;
+    padding: 12px 14px !important;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
     position: relative;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 #admin-view .kpi-card:hover {
     transform: translateY(-2px);
-    box-shadow: 3.5px 3.5px 0px #000000 !important;
+    box-shadow: 4.5px 4.5px 0px #000000 !important;
+}
+
+#admin-view .kpi-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2px;
+}
+
+#admin-view .kpi-badge-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: #ffffff;
+    border: 2px solid #000000;
+    border-radius: 50%;
+    font-size: 0.95rem;
+    box-shadow: 1.5px 1.5px 0px #000000;
+    flex-shrink: 0;
 }
 
 #admin-view .kpi-card h3 {
     font-family: 'Outfit', sans-serif;
-    font-size: 0.70rem;
+    font-size: 0.72rem;
     font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: #52525b;
+    letter-spacing: 0.5px;
+    color: #3f3f46;
     margin: 0;
 }
 
@@ -7177,15 +7394,52 @@ select option {
     line-height: 1.15;
 }
 
-#admin-view .kpi-card.danger strong {
-    color: #dc2626;
-}
-
 #admin-view .kpi-card .desc {
     font-size: 0.70rem;
-    color: #71717a;
+    color: #52525b;
     font-weight: 600;
     margin: 0;
+}
+
+/* Specific KPI Card Neo-Brutalist Colors */
+#admin-view .kpi-card.kpi-sales {
+    background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%) !important;
+}
+#admin-view .kpi-card.kpi-sales h3 {
+    color: #065f46;
+}
+#admin-view .kpi-card.kpi-sales strong {
+    color: #064e3b;
+}
+
+#admin-view .kpi-card.kpi-orders {
+    background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%) !important;
+}
+#admin-view .kpi-card.kpi-orders h3 {
+    color: #3730a3;
+}
+#admin-view .kpi-card.kpi-orders strong {
+    color: #1e1b4b;
+}
+
+#admin-view .kpi-card.kpi-avg {
+    background: linear-gradient(135deg, #fef9c3 0%, #fef08a 100%) !important;
+}
+#admin-view .kpi-card.kpi-avg h3 {
+    color: #854d0e;
+}
+#admin-view .kpi-card.kpi-avg strong {
+    color: #713f12;
+}
+
+#admin-view .kpi-card.kpi-voids {
+    background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%) !important;
+}
+#admin-view .kpi-card.kpi-voids h3 {
+    color: #991b1b;
+}
+#admin-view .kpi-card.kpi-voids strong {
+    color: #dc2626 !important;
 }
 
 /* Solid Neo-Brutalist Cards & Containers: Cápsula idéntica al sidebar */
@@ -7205,8 +7459,10 @@ select option {
 }
 
 #admin-view #tab-dashboard .glass-card,
-#admin-view #tab-dashboard .reporte-card {
-    margin-bottom: 12px !important;
+#admin-view #tab-dashboard .reporte-card,
+#admin-view #tab-configuracion .glass-card,
+#admin-view #tab-configuracion .reporte-card {
+    margin-bottom: 14px !important;
 }
 
 #admin-view .glass-card h2,
@@ -7294,7 +7550,7 @@ select option {
 #admin-view #tab-promociones .form-scrollable-body {
     flex: 1 1 0 !important;
     min-height: 0 !important;
-    overflow-y: auto !important;
+    overflow: hidden !important;
     overflow-x: hidden !important;
     padding-right: 2px !important;
 }
@@ -7306,9 +7562,9 @@ select option {
 }
 
 #admin-view #tab-promociones .form-pista {
-    font-size: 0.72rem !important;
-    line-height: 1.25 !important;
-    margin: 0 0 6px 0 !important;
+    font-size: 0.70rem !important;
+    line-height: 1.2 !important;
+    margin: 0 0 4px 0 !important;
     color: var(--text-muted);
     flex-shrink: 0 !important;
 }
@@ -7321,7 +7577,7 @@ select option {
 }
 
 #admin-view #tab-promociones .form-group {
-    margin-bottom: 5px !important;
+    margin-bottom: 3px !important;
 }
 
 #admin-view #tab-promociones .form-group label {
@@ -7334,9 +7590,9 @@ select option {
 
 #admin-view #tab-promociones input,
 #admin-view #tab-promociones select {
-    padding: 5px 8px !important;
-    min-height: 34px !important;
-    font-size: 0.84rem !important;
+    padding: 4px 8px !important;
+    min-height: 30px !important;
+    font-size: 0.82rem !important;
 }
 
 #admin-view #tab-promociones .promo-anadir {
@@ -7354,8 +7610,8 @@ select option {
 
 #admin-view #tab-promociones .promo-contenido {
     min-height: 32px !important;
-    max-height: 60px !important;
-    overflow-y: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
     padding: 3px 6px !important;
     gap: 4px !important;
     border: 1.5px dashed rgba(0, 0, 0, 0.15) !important;
@@ -7577,12 +7833,22 @@ select option {
     flex-direction: column !important;
     flex: 1 1 0 !important;
     min-height: 0 !important;
-    overflow: hidden !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
     padding-right: 0 !important;
 }
 
 #admin-view #tab-crear-producto .glass-card form > button[type="submit"] {
     flex-shrink: 0 !important;
+}
+
+/* Botón externo al form: siempre visible, pegado al fondo */
+#admin-view #tab-crear-producto .prod-submit-btn {
+    flex-shrink: 0 !important;
+    margin-top: 6px !important;
+    width: 100% !important;
+    padding: 7px 14px !important;
+    font-size: 0.88rem !important;
 }
 
 #admin-view #tab-crear-producto .form-row-2col {
@@ -7635,29 +7901,41 @@ select option {
 }
 
 /* --- TAB: REIMPRESIONES --- */
+#admin-view #tab-reimpresiones:not(.hide) {
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+}
+
+#admin-view #tab-reimpresiones > div:first-child {
+    flex-shrink: 0 !important;
+    margin-bottom: 6px !important;
+}
+
+#admin-view #tab-reimpresiones .reimpresiones-filters-card,
+#admin-view #tab-reimpresiones > .glass-card:first-of-type {
+    flex-shrink: 0 !important;
+    margin-bottom: 8px !important;
+    padding: 8px 12px !important;
+    border: 2.5px solid #000000 !important;
+    border-radius: 18px !important;
+    box-shadow: 3.5px 3.5px 0px #000000 !important;
+}
+
 #admin-view #tab-reimpresiones .table-section {
     flex: 1 1 0 !important;
     min-height: 0 !important;
-    height: 100% !important;
     margin: 0 !important;
     display: flex !important;
     flex-direction: column !important;
     overflow: hidden !important;
-    padding: 12px 16px !important;
+    padding: 10px 14px !important;
+    background: #ffffff !important;
     border: 2.5px solid #000000 !important;
-    border-radius: 22px !important;
+    border-radius: 20px !important;
     box-shadow: 3.5px 3.5px 0px #000000 !important;
-}
-
-#admin-view #tab-reimpresiones .table-section h2 {
-    font-size: 1.05rem !important;
-    margin: 0 0 2px 0 !important;
-    flex-shrink: 0 !important;
-}
-
-#admin-view #tab-reimpresiones .reporte-hint {
-    margin: 0 0 8px 0 !important;
-    flex-shrink: 0 !important;
 }
 
 #admin-view #tab-reimpresiones .table-container {
@@ -7666,44 +7944,85 @@ select option {
     max-height: none !important;
     overflow-y: auto !important;
     overflow-x: auto !important;
+    border: 1.5px solid #000000 !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+#admin-view #reimpresiones-pagination {
+    flex-shrink: 0 !important;
+    margin-top: 8px !important;
+    margin-bottom: 2px !important;
 }
 
 /* --- TAB: AUDITORÍA --- */
-#admin-view #tab-auditoria .admin-grid-forms {
-    flex: 1 1 0 !important;
-    min-height: 0 !important;
+#admin-view #tab-auditoria:not(.hide) {
     height: 100% !important;
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    gap: 12px !important;
-    align-items: stretch !important;
+    max-height: 100% !important;
+    display: block !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding-right: 6px !important;
+    padding-bottom: 24px !important;
+    box-sizing: border-box !important;
+    -webkit-overflow-scrolling: touch !important;
+}
+
+#admin-view #tab-auditoria > h1.page-title {
+    margin-bottom: 10px !important;
+}
+
+#admin-view #tab-auditoria .admin-grid-forms {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 14px !important;
     margin: 0 !important;
+    padding: 0 0 16px 0 !important;
+    width: 100% !important;
 }
 
 #admin-view #tab-auditoria .table-section {
-    height: 100% !important;
+    width: 100% !important;
     margin: 0 !important;
     display: flex !important;
     flex-direction: column !important;
-    overflow: hidden !important;
     padding: 12px 16px !important;
     border: 2.5px solid #000000 !important;
-    border-radius: 22px !important;
+    border-radius: 20px !important;
     box-shadow: 3.5px 3.5px 0px #000000 !important;
+    background: #ffffff !important;
+    box-sizing: border-box !important;
 }
 
 #admin-view #tab-auditoria .table-section h2 {
     font-size: 1.05rem !important;
-    margin: 0 0 6px 0 !important;
+    font-family: 'Outfit', sans-serif !important;
+    font-weight: 800 !important;
+    margin: 0 0 8px 0 !important;
     flex-shrink: 0 !important;
+    color: #000000 !important;
 }
 
-#admin-view #tab-auditoria .table-container {
-    flex: 1 1 0 !important;
+#admin-view #tab-auditoria .table-container,
+#admin-view #tab-auditoria .table-section .table-container,
+#admin-view #tab-auditoria .table-section .table-container.max-h-96 {
+    flex: none !important;
+    width: 100% !important;
     min-height: 0 !important;
-    max-height: none !important;
+    height: auto !important;
+    max-height: 380px !important;
     overflow-y: auto !important;
     overflow-x: auto !important;
+    border: 1.5px solid #000000 !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    box-sizing: border-box !important;
+    -webkit-overflow-scrolling: touch !important;
 }
 
 /* Stock Qty Pill in grey section ("parte ploma") of admin stock card */
@@ -7852,13 +8171,12 @@ select option {
     padding: 8px 12px !important;
     border: 2.5px solid #000000 !important;
     border-radius: 18px !important;
-    box-shadow: 3px 3px 0px #000000 !important;
+    box-shadow: 3.5px 3.5px 0px #000000 !important;
 }
 
 #admin-view #tab-inventario .table-section {
     flex: 1 1 0 !important;
     min-height: 0 !important;
-    height: 100% !important;
     margin: 0 !important;
     display: flex !important;
     flex-direction: column !important;
@@ -7866,7 +8184,7 @@ select option {
     padding: 10px 14px !important;
     background: #ffffff !important;
     border: 2.5px solid #000000 !important;
-    border-radius: 22px !important;
+    border-radius: 20px !important;
     box-shadow: 3.5px 3.5px 0px #000000 !important;
 }
 
@@ -7877,9 +8195,17 @@ select option {
     max-height: none !important;
     overflow-y: auto !important;
     overflow-x: auto !important;
-    border: none !important;
+    border: 1.5px solid #000000 !important;
+    border-radius: 12px !important;
     box-shadow: none !important;
     margin: 0 !important;
+    padding: 0 !important;
+}
+
+#admin-view #inventory-pagination {
+    flex-shrink: 0 !important;
+    margin-top: 8px !important;
+    margin-bottom: 2px !important;
 }
 
 /* Stock Badges in Inventory Table */
@@ -8104,42 +8430,25 @@ select option {
     margin-bottom: 2px !important;
 }
 
-#admin-view #tab-stock:not(.hide) {
-    height: 100% !important;
-    display: flex !important;
-    flex-direction: column !important;
-    min-height: 0 !important;
-    overflow-y: auto !important;
-    overflow-x: hidden !important;
-}
-
-#admin-view #tab-stock > div:first-child {
-    flex-shrink: 0 !important;
-    margin-bottom: 4px !important;
-}
-
 #admin-view #tab-stock .admin-stock-toolbar {
-    flex-shrink: 0 !important;
-    margin-bottom: 4px !important;
-}
-
-#admin-view #admin-stock-category-pills {
-    flex-shrink: 0 !important;
     margin-bottom: 8px !important;
 }
 
+#admin-view #admin-stock-category-pills {
+    margin-bottom: 12px !important;
+}
+
 #admin-view #admin-stock-cards-grid {
-    flex: 1 1 0 !important;
-    min-height: 0 !important;
-    overflow-y: auto !important;
-    padding-right: 4px !important;
-    margin-bottom: 4px !important;
+    overflow: visible !important;
+    padding-right: 0 !important;
+    padding-bottom: 6px !important;
+    margin-bottom: 0 !important;
 }
 
 #admin-view #admin-stock-pagination {
-    flex-shrink: 0 !important;
-    margin-top: 4px !important;
-    margin-bottom: 2px !important;
+    margin-top: 10px !important;
+    margin-bottom: 12px !important;
+    display: flex !important;
 }
 
 .comandas-top-header {
@@ -8685,7 +8994,8 @@ select option {
     overflow-y: auto !important;
 }
 
-#admin-view .table-section .table-container {
+#admin-view #tab-inventario .table-section .table-container,
+#admin-view #tab-reimpresiones .table-section .table-container {
     border: 1.5px solid #000000 !important;
     border-radius: 12px !important;
     box-shadow: none !important;
@@ -8695,7 +9005,8 @@ select option {
     overflow-y: auto !important;
 }
 
-#admin-view .table-section .table-container.max-h-96 {
+#admin-view #tab-inventario .table-section .table-container.max-h-96,
+#admin-view #tab-reimpresiones .table-section .table-container.max-h-96 {
     max-height: none !important;
 }
 
@@ -8731,10 +9042,10 @@ select option {
     color: #000000 !important;
     font-family: 'Outfit', sans-serif !important;
     font-weight: 800 !important;
-    font-size: 0.74rem !important;
+    font-size: 0.76rem !important;
     text-transform: uppercase !important;
     letter-spacing: 0.4px !important;
-    padding: 7px 10px !important;
+    padding: 8px 10px !important;
     border-bottom: 2px solid #000000 !important;
     position: sticky !important;
     top: 0 !important;
@@ -8742,8 +9053,8 @@ select option {
 }
 
 #admin-view .admin-table td {
-    padding: 6px 10px !important;
-    font-size: 0.80rem !important;
+    padding: 7px 10px !important;
+    font-size: 0.82rem !important;
     font-weight: 600 !important;
     color: #18181b !important;
     border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
@@ -8909,56 +9220,56 @@ select option {
 
 #admin-view .admin-stock-grid {
     display: grid !important;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important;
-    gap: 8px !important;
-    margin-bottom: 8px !important;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)) !important;
+    gap: 16px !important;
+    margin-bottom: 24px !important;
     align-content: start !important;
 }
 
 #admin-view .admin-stock-card {
     background: #ffffff !important;
-    border: 2px solid #000000 !important;
-    border-radius: 14px !important;
-    padding: 4px 0 0 0 !important;
+    border: 2.5px solid #000000 !important;
+    border-radius: 20px !important;
+    padding: 10px 0 0 0 !important;
     display: flex !important;
     flex-direction: column !important;
     align-items: center !important;
     justify-content: space-between !important;
     position: relative !important;
-    box-shadow: 2.5px 2.5px 0px #000000 !important;
+    box-shadow: 3.5px 3.5px 0px #000000 !important;
     transition: transform 0.15s ease, box-shadow 0.15s ease !important;
     user-select: none !important;
     overflow: hidden !important;
     box-sizing: border-box !important;
+    min-height: 330px !important;
     height: auto !important;
-    min-height: 0 !important;
 }
 
 #admin-view .admin-stock-card:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 3.5px 3.5px 0px #000000 !important;
+    transform: translateY(-3px) !important;
+    box-shadow: 4.5px 4.5px 0px #000000 !important;
 }
 
 #admin-view .admin-stock-cat-tag {
     position: absolute !important;
-    top: 5px !important;
-    left: 5px !important;
+    top: 8px !important;
+    left: 8px !important;
     background: #ffffff !important;
     color: #000000 !important;
-    border: 1.2px solid #000000 !important;
-    border-radius: 6px !important;
-    box-shadow: 1px 1px 0px #000000 !important;
+    border: 1.5px solid #000000 !important;
+    border-radius: 8px !important;
+    box-shadow: 1.5px 1.5px 0px #000000 !important;
     font-family: 'Outfit', sans-serif !important;
     font-weight: 800 !important;
-    font-size: 0.62rem !important;
-    padding: 1px 5px !important;
+    font-size: 0.70rem !important;
+    padding: 2px 8px !important;
     z-index: 6 !important;
 }
 
 #admin-view .admin-stock-card .gauge-wrapper {
-    width: 110px !important;
-    height: 110px !important;
-    margin: 2px auto 4px auto !important;
+    width: 125px !important;
+    height: 125px !important;
+    margin: 4px auto 6px auto !important;
     position: relative !important;
     display: flex !important;
     align-items: center !important;
@@ -8976,8 +9287,8 @@ select option {
 }
 
 #admin-view .admin-stock-card .gauge-inner {
-    width: 80px !important;
-    height: 80px !important;
+    width: 90px !important;
+    height: 90px !important;
     border-radius: 50% !important;
     display: flex !important;
     align-items: center !important;
@@ -8992,15 +9303,20 @@ select option {
 
 #admin-view .admin-stock-card .gauge-cloud-bg {
     position: absolute !important;
-    width: 75px !important;
-    height: 75px !important;
+    width: 85px !important;
+    height: 85px !important;
     z-index: 1 !important;
     pointer-events: none !important;
+    opacity: 0.32 !important;
+}
+
+#admin-view .admin-stock-card.is-out .gauge-cloud-bg {
+    opacity: 0.50 !important;
 }
 
 #admin-view .admin-stock-card .product-foto {
-    max-height: 52px !important;
-    max-width: 44px !important;
+    max-height: 68px !important;
+    max-width: 58px !important;
     object-fit: contain;
     background: transparent !important;
     border: none !important;
@@ -9010,7 +9326,7 @@ select option {
 }
 
 #admin-view .admin-stock-card .emoji {
-    font-size: 1.6rem !important;
+    font-size: 2.2rem !important;
     background: transparent !important;
     border: none !important;
     border-radius: 0 !important;
@@ -9022,7 +9338,7 @@ select option {
 #admin-view .admin-stock-card .card-price-pill,
 #admin-view .admin-stock-card .card-price-pill.price {
     position: absolute !important;
-    bottom: -3px !important;
+    bottom: -4px !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
     background: #000000 !important;
@@ -9030,14 +9346,14 @@ select option {
     font-family: 'Outfit', sans-serif !important;
     font-weight: 900 !important;
     font-style: italic !important;
-    font-size: 0.74rem !important;
-    padding: 1px 8px !important;
-    border-radius: 10px !important;
+    font-size: 0.88rem !important;
+    padding: 2px 14px !important;
+    border-radius: 14px !important;
     white-space: nowrap !important;
     z-index: 5 !important;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25) !important;
-    line-height: 1.2 !important;
-    letter-spacing: 0.3px !important;
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.35) !important;
+    line-height: 1.25 !important;
+    letter-spacing: 0.5px !important;
     border: none !important;
 }
 
@@ -9056,7 +9372,7 @@ select option {
 }
 
 #admin-view .admin-stock-card .card-mid-wave {
-    height: 10px !important;
+    height: 14px !important;
     width: 100% !important;
     display: block !important;
 }
@@ -9064,28 +9380,27 @@ select option {
 #admin-view .admin-stock-card .card-mid-body {
     width: 100% !important;
     background: #f1f5f9 !important;
-    padding: 2px 4px 4px 4px !important;
+    padding: 4px 6px 6px 6px !important;
     box-sizing: border-box !important;
     display: flex !important;
     flex-direction: column !important;
     align-items: center !important;
     justify-content: center !important;
-    gap: 2px !important;
+    gap: 4px !important;
 }
 
 #admin-view .admin-stock-card .product-card-title {
     font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif !important;
     font-weight: 900 !important;
     font-style: italic !important;
-    font-size: 0.72rem !important;
-    line-height: 1.15 !important;
+    font-size: 0.84rem !important;
+    line-height: 1.2 !important;
     text-transform: uppercase !important;
     color: #000000 !important;
     margin: 0 !important;
-    padding: 0 4px !important;
+    padding: 0 6px !important;
     text-align: center !important;
-    min-height: 20px !important;
-    max-height: 26px !important;
+    min-height: 32px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -9108,10 +9423,10 @@ select option {
     width: 100% !important;
     display: grid !important;
     grid-template-columns: 1fr 1fr !important;
-    gap: 4px !important;
-    padding: 4px 5px !important;
+    gap: 6px !important;
+    padding: 8px 8px 10px 8px !important;
     background: #ffffff !important;
-    border-top: 1.5px solid #000000 !important;
+    border-top: 2px solid #000000 !important;
     box-sizing: border-box !important;
     flex-shrink: 0 !important;
     margin-top: auto !important;
@@ -9120,12 +9435,12 @@ select option {
 #admin-view .stock-action-btn {
     font-family: 'Outfit', sans-serif !important;
     font-weight: 800 !important;
-    font-size: 0.70rem !important;
-    border: 1.5px solid #000000 !important;
-    border-radius: 8px !important;
-    box-shadow: 1.5px 1.5px 0px #000000 !important;
-    padding: 3px 2px !important;
-    height: 27px !important;
+    font-size: 0.78rem !important;
+    border: 2px solid #000000 !important;
+    border-radius: 10px !important;
+    box-shadow: 2px 2px 0px #000000 !important;
+    padding: 5px 3px !important;
+    height: 32px !important;
     cursor: pointer !important;
     display: flex !important;
     align-items: center !important;
@@ -9140,12 +9455,12 @@ select option {
 
 #admin-view .stock-action-btn:hover {
     transform: translateY(-1px) !important;
-    box-shadow: 2px 2px 0px #000000 !important;
+    box-shadow: 2.5px 2.5px 0px #000000 !important;
 }
 
 #admin-view .stock-action-btn:active {
     transform: translate(1px, 1px) !important;
-    box-shadow: 0px 0px 0px #000000 !important;
+    box-shadow: 0.5px 0.5px 0px #000000 !important;
 }
 
 #admin-view .stock-action-btn.entrada {
@@ -9176,11 +9491,36 @@ select option {
     margin-bottom: 4px;
 }
 
+/* Dashboard Details & Charts */
+#admin-view .dashboard-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+#admin-view .dashboard-chart-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+}
+
+#admin-view .chart-bullet {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1.5px solid #000000;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
 #admin-view .sales-bar-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    margin-top: 8px;
+    gap: 10px;
+    margin-top: 10px;
+    flex: 1;
 }
 
 #admin-view .sales-bar-item {
@@ -9192,13 +9532,32 @@ select option {
 #admin-view .sales-bar-info {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     font-size: 0.78rem;
     font-weight: 700;
 }
 
+#admin-view .sales-bar-label {
+    display: flex;
+    align-items: center;
+    color: #18181b;
+}
+
+#admin-view .sales-bar-val {
+    font-family: 'Outfit', sans-serif;
+    color: #000000;
+}
+
+#admin-view .sales-bar-pct {
+    font-size: 0.72rem;
+    color: #71717a;
+    font-weight: 600;
+}
+
 #admin-view .sales-bar-track {
-    height: 8px;
-    background: rgba(0, 0, 0, 0.06);
+    height: 9px;
+    background: #f1f5f9;
+    border: 1.5px solid #000000;
     border-radius: 6px;
     overflow: hidden;
 }
@@ -9206,9 +9565,85 @@ select option {
 #admin-view .sales-bar-fill {
     height: 100%;
     background: #000000;
-    border-radius: 6px;
+    border-radius: 4px;
     width: 0%;
-    transition: width 0.8s ease-in-out;
+    transition: width 0.6s ease-in-out;
+}
+
+/* Method Split Bar */
+#admin-view .method-split-bar {
+    display: flex;
+    height: 12px;
+    border: 1.5px solid #000000;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 8px;
+    background: #f1f5f9;
+}
+
+#admin-view .method-split-segment {
+    height: 100%;
+    transition: width 0.6s ease;
+}
+
+/* Top Products Ranking */
+#admin-view .top-prod-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 2px 0;
+}
+
+#admin-view .top-prod-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#admin-view .top-prod-name-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+}
+
+#admin-view .top-prod-medal {
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+
+#admin-view .top-prod-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #18181b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#admin-view .top-prod-stats {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+#admin-view .top-prod-qty-badge {
+    background: #ffffff;
+    border: 1.5px solid #000000;
+    border-radius: 6px;
+    padding: 1px 6px;
+    font-size: 0.70rem;
+    font-weight: 800;
+    color: #000000;
+}
+
+#admin-view .top-prod-total {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: #000000;
 }
 
 /* Printer Settings in Admin */

@@ -958,9 +958,9 @@ const leer = sql => {
   // sale de la nevera igual, así que tiene que descontar stock: si no, el
   // inventario diría al cerrar que quedan refrescos que ya no están.
   const botella = leer(`SELECT id_producto, nombre, precio_venta FROM producto
-                        WHERE activo = 1 AND stock_actual > 20 ORDER BY precio_venta DESC LIMIT 1`)[0];
+                        WHERE activo = 1 AND stock_actual > 20 AND (id_categoria IS NULL OR id_categoria IN (SELECT id_categoria FROM categoria_producto WHERE activo = 1)) ORDER BY precio_venta DESC LIMIT 1`)[0];
   const refresco = leer(`SELECT id_producto, nombre, precio_venta FROM producto
-                         WHERE activo = 1 AND stock_actual > 20 AND id_producto <> ${botella.id_producto}
+                         WHERE activo = 1 AND stock_actual > 20 AND (id_categoria IS NULL OR id_categoria IN (SELECT id_categoria FROM categoria_producto WHERE activo = 1)) AND id_producto <> ${botella.id_producto}
                          ORDER BY precio_venta ASC LIMIT 1`)[0];
   const marcar = (id, cuerpo) => post('/api/admin/productos/' + id + '/acompanamiento', cuerpo, 'PUT');
 
@@ -1134,10 +1134,10 @@ const leer = sql => {
   // entre ellos para que el reporte de cierre siga sabiendo cuánto se vendió de
   // cada cosa sin enterarse de que existen los combos.
   const caro = leer(`SELECT id_producto, nombre, precio_venta FROM producto
-                     WHERE activo = 1 AND stock_actual > 40
+                     WHERE activo = 1 AND stock_actual > 10
                      ORDER BY precio_venta DESC LIMIT 1`)[0];
   const barato = leer(`SELECT id_producto, nombre, precio_venta FROM producto
-                       WHERE activo = 1 AND stock_actual > 40 AND id_producto <> ${caro.id_producto}
+                       WHERE activo = 1 AND stock_actual > 10 AND id_producto <> ${caro.id_producto}
                        ORDER BY precio_venta ASC LIMIT 1`)[0];
 
   const sueltoPaquete = round2(Number(caro.precio_venta) + Number(barato.precio_venta) * 2);

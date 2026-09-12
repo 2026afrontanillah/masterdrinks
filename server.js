@@ -943,6 +943,8 @@ function initializeDatabase() {
     ensureColumn('producto', 'fecha_creacion', 'TEXT');
     ensureColumn('producto', 'requiere_acompanante', 'INTEGER DEFAULT 0');
     ensureColumn('producto', 'es_acompanante', 'INTEGER DEFAULT 0');
+    ensureColumn('producto', 'orden', 'INTEGER DEFAULT 0');
+    ensureColumn('categoria_producto', 'orden', 'INTEGER DEFAULT 0');
     ensureColumn('detalle_comanda', 'id_detalle_padre', 'INTEGER');
     ensureColumn('detalle_comanda', 'id_promocion', 'INTEGER');
     ensureColumn('promocion', 'foto', 'TEXT');
@@ -1363,9 +1365,9 @@ app.get('/api/stock', (req, res) => {
 });
 
 app.get('/api/productos', (req, res) => {
-  const queryCats = `SELECT * FROM categoria_producto WHERE activo = 1`;
+  const queryCats = `SELECT id_categoria, nombre, descripcion, tipo, activo, COALESCE(orden, 0) AS orden FROM categoria_producto WHERE activo = 1 ORDER BY orden ASC, id_categoria ASC`;
   const queryProds = `SELECT id_producto, id_categoria, nombre, descripcion, tipo_producto,
-                             precio_venta, stock_actual, activo, fecha_creacion,
+                             precio_venta, stock_actual, activo, fecha_creacion, COALESCE(orden, 0) AS orden,
                              MAX(stock_actual,
                                  COALESCE((SELECT MAX(MAX(ms.stock_anterior), MAX(ms.stock_nuevo))
                                              FROM movimiento_stock ms
@@ -1377,7 +1379,8 @@ app.get('/api/productos', (req, res) => {
                              LENGTH(COALESCE(foto, '')) AS foto_v
                         FROM producto 
                        WHERE activo = 1 
-                         AND (id_categoria IS NULL OR id_categoria IN (SELECT id_categoria FROM categoria_producto WHERE activo = 1))`;
+                         AND (id_categoria IS NULL OR id_categoria IN (SELECT id_categoria FROM categoria_producto WHERE activo = 1))
+                       ORDER BY orden ASC, id_producto ASC`;
   const queryPromos = `SELECT id_promocion, nombre, descripcion, precio,
                               CASE WHEN foto IS NULL OR foto = '' THEN 0 ELSE 1 END AS tiene_foto,
                               LENGTH(COALESCE(foto, '')) AS foto_v
@@ -2330,6 +2333,33 @@ app.delete('/api/admin/categorias/:id', (req, res) => {
     });
 });
 
+app.put('/api/admin/categorias/reordenar', (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ success: false, message: 'Lista de categorías no válida.' });
+  }
+
+  withTransaction(async () => {
+    for (let i = 0; i < ids.length; i++) {
+      const id = Number(ids[i]);
+      if (Number.isInteger(id) && id > 0) {
+        await dbRun('UPDATE categoria_producto SET orden = ? WHERE id_categoria = ?', [i, id]);
+      }
+    }
+    return { estado: 200, cuerpo: { success: true, message: 'Orden de categorías guardado.' } };
+  })
+    .then(r => {
+      if (r.cuerpo.success) {
+        registrarAuditoria(req.body && req.body.id_admin, 'REORDENAR_CATEGORIAS', 'categoria_producto', null, 'Se actualizó el orden de visualización de categorías');
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al reordenar categorías:', err);
+      res.status(500).json({ success: false, message: 'No se pudo guardar el nuevo orden.' });
+    });
+});
+
 app.put('/api/admin/categorias/:id', (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
@@ -2395,6 +2425,158 @@ app.put('/api/admin/categorias/:id/estado', (req, res) => {
   app._router.handle(req, res);
 });
 
+// ---- Cajero: Editar y Cambiar Estado (Prendido/Apagado) -------------------
+app.put('/api/admin/cajeros/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Cajero no válido.' });
+  }
+
+  withTransaction(async () => {
+    const caj = await dbGet('SELECT * FROM cajero WHERE id_cajero = ?', [id]);
+    if (!caj) return { estado: 404, cuerpo: { success: false, message: 'Ese cajero ya no existe.' } };
+
+    const nuevoNombre = (req.body.nombre !== undefined ? String(req.body.nombre) : caj.nombre).trim();
+    const nuevoUsuario = (req.body.usuario !== undefined ? String(req.body.usuario) : caj.usuario).trim();
+    const nuevoPass = req.body.password && String(req.body.password).trim() ? String(req.body.password).trim() : caj.password;
+    const nuevoActivo = req.body.activo !== undefined ? (req.body.activo ? 1 : 0) : caj.activo;
+
+    if (!nuevoNombre) return { estado: 400, cuerpo: { success: false, message: 'El nombre no puede estar vacío.' } };
+    if (!nuevoUsuario) return { estado: 400, cuerpo: { success: false, message: 'El usuario no puede estar vacío.' } };
+
+    // Verificar si el nuevo usuario ya existe en otro cajero
+    const dup = await dbGet('SELECT id_cajero FROM cajero WHERE usuario = ? AND id_cajero != ?', [nuevoUsuario, id]);
+    if (dup) {
+      return { estado: 400, cuerpo: { success: false, message: 'Ese nombre de usuario ya está en uso por otro cajero.' } };
+    }
+
+    await dbRun(
+      'UPDATE cajero SET nombre = ?, usuario = ?, password = ?, activo = ? WHERE id_cajero = ?',
+      [nuevoNombre, nuevoUsuario, nuevoPass, nuevoActivo, id]
+    );
+
+    const cambioEstado = caj.activo !== nuevoActivo;
+    const mensaje = cambioEstado
+      ? (nuevoActivo ? `Cajero "${nuevoNombre}" activado.` : `Cajero "${nuevoNombre}" desactivado.`)
+      : `Cajero "${nuevoNombre}" actualizado.`;
+
+    return {
+      estado: 200,
+      cuerpo: {
+        success: true,
+        activo: nuevoActivo,
+        cambioEstado,
+        message: mensaje
+      }
+    };
+  })
+    .then(r => {
+      if (r.cuerpo && r.cuerpo.success) {
+        const accion = r.cuerpo.cambioEstado
+          ? (r.cuerpo.activo ? 'ACTIVAR_CAJERO' : 'DESACTIVAR_CAJERO')
+          : 'EDITAR_CAJERO';
+        registrarAuditoria(
+          req.body && req.body.id_admin,
+          accion,
+          'cajero',
+          id,
+          r.cuerpo.message
+        );
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al actualizar cajero:', err);
+      res.status(500).json({ success: false, message: 'No se pudo actualizar el cajero.' });
+    });
+});
+
+app.put('/api/admin/cajeros/:id/estado', (req, res) => {
+  req.url = `/api/admin/cajeros/${req.params.id}`;
+  app._router.handle(req, res);
+});
+
+// ---- Mesero: Editar y Cambiar Estado (Prendido/Apagado) -------------------
+app.put('/api/admin/meseros/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Mesero no válido.' });
+  }
+
+  withTransaction(async () => {
+    const mes = await dbGet('SELECT * FROM mesero WHERE id_mesero = ?', [id]);
+    if (!mes) return { estado: 404, cuerpo: { success: false, message: 'Ese mesero ya no existe.' } };
+
+    const nuevoNombre = (req.body.nombre !== undefined ? String(req.body.nombre) : mes.nombre).trim();
+    const nuevoUsuario = (req.body.usuario !== undefined ? String(req.body.usuario) : (mes.usuario || '')).trim();
+    const nuevoPin = req.body.password && String(req.body.password).trim()
+      ? String(req.body.password).trim()
+      : (req.body.pin && String(req.body.pin).trim() ? String(req.body.pin).trim() : mes.password);
+    const nuevoCajero = req.body.id_cajero !== undefined ? Number(req.body.id_cajero) : mes.id_cajero;
+    const nuevoActivo = req.body.activo !== undefined ? (req.body.activo ? 1 : 0) : mes.activo;
+
+    if (!nuevoNombre) return { estado: 400, cuerpo: { success: false, message: 'El nombre no puede estar vacío.' } };
+    if (!nuevoPin) return { estado: 400, cuerpo: { success: false, message: 'El PIN no puede estar vacío.' } };
+
+    // Validar duplicidad de PIN si está activo
+    if (nuevoActivo === 1) {
+      let dup;
+      if (MESERO_PIN_SCOPE === 'cajero') {
+        dup = await dbGet('SELECT id_mesero FROM mesero WHERE password = ? AND id_cajero = ? AND activo = 1 AND id_mesero != ?', [nuevoPin, nuevoCajero, id]);
+      } else {
+        dup = await dbGet('SELECT id_mesero FROM mesero WHERE password = ? AND activo = 1 AND id_mesero != ?', [nuevoPin, id]);
+      }
+      if (dup) {
+        return { estado: 400, cuerpo: { success: false, message: 'Ese PIN ya está en uso por otro mesero activo.' } };
+      }
+    }
+
+    await dbRun(
+      'UPDATE mesero SET nombre = ?, usuario = ?, password = ?, id_cajero = ?, activo = ? WHERE id_mesero = ?',
+      [nuevoNombre, nuevoUsuario, nuevoPin, nuevoCajero, nuevoActivo, id]
+    );
+
+    const cambioEstado = mes.activo !== nuevoActivo;
+    const mensaje = cambioEstado
+      ? (nuevoActivo ? `Mesero "${nuevoNombre}" activado.` : `Mesero "${nuevoNombre}" desactivado.`)
+      : `Mesero "${nuevoNombre}" actualizado.`;
+
+    return {
+      estado: 200,
+      cuerpo: {
+        success: true,
+        activo: nuevoActivo,
+        cambioEstado,
+        message: mensaje
+      }
+    };
+  })
+    .then(r => {
+      if (r.cuerpo && r.cuerpo.success) {
+        const accion = r.cuerpo.cambioEstado
+          ? (r.cuerpo.activo ? 'ACTIVAR_MESERO' : 'DESACTIVAR_MESERO')
+          : 'EDITAR_MESERO';
+        registrarAuditoria(
+          req.body && req.body.id_admin,
+          accion,
+          'mesero',
+          id,
+          r.cuerpo.message
+        );
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al actualizar mesero:', err);
+      res.status(500).json({ success: false, message: 'No se pudo actualizar el mesero.' });
+    });
+});
+
+app.put('/api/admin/meseros/:id/estado', (req, res) => {
+  req.url = `/api/admin/meseros/${req.params.id}`;
+  app._router.handle(req, res);
+});
+
 // ---- Cajero ----------------------------------------------------------------
 app.delete('/api/admin/cajeros/:id', (req, res) => {
   const id = Number(req.params.id);
@@ -2410,7 +2592,7 @@ app.delete('/api/admin/cajeros/:id', (req, res) => {
     const susMeseros = await cuantas('mesero', 'id_cajero', id);
 
     if (cobradas > 0) {
-      await dbRun('UPDATE cajero SET activo = 0 WHERE id_cajero = ?', [id]);
+      await dbRun('UPDATE cajero SET activo = 0, usuario = usuario || ? WHERE id_cajero = ?', ['_retirado_' + id + '_' + Date.now(), id]);
       return {
         estado: 200,
         cuerpo: {
@@ -2462,7 +2644,7 @@ app.delete('/api/admin/meseros/:id', (req, res) => {
     const suyas = await cuantas('comanda', 'id_mesero', id);
 
     if (suyas > 0) {
-      await dbRun('UPDATE mesero SET activo = 0 WHERE id_mesero = ?', [id]);
+      await dbRun('UPDATE mesero SET activo = 0, usuario = usuario || ? WHERE id_mesero = ?', ['_retirado_' + id + '_' + Date.now(), id]);
       return {
         estado: 200,
         cuerpo: {
@@ -2495,13 +2677,14 @@ app.get('/api/admin/personal', (req, res) => {
     dbAll(`SELECT c.id_cajero, c.nombre, c.usuario, c.activo,
                   (SELECT COUNT(*) FROM mesero m WHERE m.id_cajero = c.id_cajero AND m.activo = 1) AS meseros,
                   (SELECT COUNT(*) FROM comanda k WHERE k.id_cajero = c.id_cajero) AS comandas
-             FROM cajero c ORDER BY c.activo DESC, c.nombre`),
+             FROM cajero c WHERE c.activo = 1 ORDER BY c.nombre`),
     dbAll(`SELECT m.id_mesero, m.nombre, m.usuario, m.password AS pin, m.activo, m.id_cajero,
                   c.nombre AS cajero,
                   (SELECT COUNT(*) FROM comanda k WHERE k.id_mesero = m.id_mesero) AS comandas
              FROM mesero m
              LEFT JOIN cajero c ON c.id_cajero = m.id_cajero
-            ORDER BY m.activo DESC, m.nombre`)
+            WHERE m.activo = 1
+            ORDER BY m.nombre`)
   ])
     .then(([cajeros, meseros]) => res.json({ cajeros, meseros }))
     .catch(err => {
@@ -2513,11 +2696,11 @@ app.get('/api/admin/personal', (req, res) => {
 // ---- Catálogo Completo -----------------------------------------------------
 app.get('/api/admin/catalogo', (req, res) => {
   Promise.all([
-    dbAll(`SELECT c.id_categoria, c.nombre, c.descripcion, c.tipo, c.activo,
+    dbAll(`SELECT c.id_categoria, c.nombre, c.descripcion, c.tipo, c.activo, COALESCE(c.orden, 0) AS orden,
                   (SELECT COUNT(*) FROM producto p WHERE p.id_categoria = c.id_categoria AND p.activo = 1) AS productos
-             FROM categoria_producto c ORDER BY c.activo DESC, c.nombre`),
-    dbAll(`SELECT p.id_producto, p.nombre, p.precio_venta, p.stock_actual, p.activo,
-                  p.id_categoria, c.nombre AS categoria,
+             FROM categoria_producto c ORDER BY c.orden ASC, c.id_categoria ASC`),
+    dbAll(`SELECT p.id_producto, p.nombre, p.precio_venta, p.stock_actual, p.activo, COALESCE(p.orden, 0) AS orden,
+                  p.id_categoria, c.nombre AS categoria, COALESCE(c.orden, 0) AS cat_orden,
                   COALESCE(p.requiere_acompanante, 0) AS requiere_acompanante,
                   COALESCE(p.es_acompanante, 0) AS es_acompanante,
                   CASE WHEN p.foto IS NULL OR p.foto = '' THEN 0 ELSE 1 END AS tiene_foto,
@@ -2525,12 +2708,41 @@ app.get('/api/admin/catalogo', (req, res) => {
                   (SELECT COUNT(*) FROM detalle_comanda d WHERE d.id_producto = p.id_producto) AS vendido
              FROM producto p
              LEFT JOIN categoria_producto c ON c.id_categoria = p.id_categoria
-            ORDER BY p.activo DESC, c.nombre, p.nombre`)
+            ORDER BY c.orden ASC, c.nombre, p.orden ASC, p.id_producto ASC`)
   ])
     .then(([categorias, productos]) => res.json({ categorias, productos }))
     .catch(err => {
       console.error('Error al leer el catálogo:', err);
       res.status(500).json({ categorias: [], productos: [] });
+    });
+});
+
+// ---- Reordenar Productos ---------------------------------------------------
+
+app.put('/api/admin/productos/reordenar', (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ success: false, message: 'Lista de productos no válida.' });
+  }
+
+  withTransaction(async () => {
+    for (let i = 0; i < ids.length; i++) {
+      const id = Number(ids[i]);
+      if (Number.isInteger(id) && id > 0) {
+        await dbRun('UPDATE producto SET orden = ? WHERE id_producto = ?', [i, id]);
+      }
+    }
+    return { estado: 200, cuerpo: { success: true, message: 'Orden de productos guardado.' } };
+  })
+    .then(r => {
+      if (r.cuerpo.success) {
+        registrarAuditoria(req.body && req.body.id_admin, 'REORDENAR_PRODUCTOS', 'producto', null, 'Se actualizó el orden de visualización de productos');
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al reordenar productos:', err);
+      res.status(500).json({ success: false, message: 'No se pudo guardar el nuevo orden.' });
     });
 });
 
@@ -2900,7 +3112,8 @@ app.post('/api/admin/categorias', (req, res) => {
   const { nombre, descripcion, tipo, id_admin, id_evento } = req.body;
   const nowStr = nowSql();
 
-  const query = `INSERT INTO categoria_producto (nombre, descripcion, tipo, creado_por_admin, fecha_creacion) VALUES (?, ?, ?, ?, ?)`;
+  const query = `INSERT INTO categoria_producto (nombre, descripcion, tipo, orden, creado_por_admin, fecha_creacion)
+                 VALUES (?, ?, ?, (SELECT COALESCE(MAX(orden), 0) + 1 FROM categoria_producto), ?, ?)`;
   dbQuery(query, [nombre, descripcion, tipo, id_admin, nowStr], (err, result) => {
     if (err) return res.status(400).json({ success: false, message: friendlyDbError(err, 'categoría') });
     const newCatId = result.insertId;
@@ -2936,8 +3149,9 @@ app.post('/api/admin/productos', (req, res) => {
     return res.status(400).json({ success: false, message: 'El stock inicial debe ser un número entero de 0 o más.' });
   }
 
-  const query = `INSERT INTO producto (id_categoria, nombre, descripcion, tipo_producto, precio_venta, stock_actual, foto, requiere_acompanante, es_acompanante, creado_por_admin, fecha_creacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-  dbQuery(query, [id_categoria, String(nombre).trim(), descripcion, tipo_producto, round2(precio), stockInicial, fotoNueva || null, requiere, esAcomp, id_admin, nowStr], (err, result) => {
+  const query = `INSERT INTO producto (id_categoria, nombre, descripcion, tipo_producto, precio_venta, stock_actual, foto, requiere_acompanante, es_acompanante, orden, creado_por_admin, fecha_creacion)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(orden), 0) + 1 FROM producto WHERE id_categoria = ?), ?, ?)`;
+  dbQuery(query, [id_categoria, String(nombre).trim(), descripcion, tipo_producto, round2(precio), stockInicial, fotoNueva || null, requiere, esAcomp, id_categoria, id_admin, nowStr], (err, result) => {
     if (err) return res.status(400).json({ success: false, message: friendlyDbError(err, 'producto') });
     const newProdId = result.insertId;
 
@@ -2957,17 +3171,27 @@ app.post('/api/admin/productos', (req, res) => {
 });
 
 // CREATE CAJERO
-app.post('/api/admin/cajeros', (req, res) => {
+app.post('/api/admin/cajeros', async (req, res) => {
   const { nombre, usuario, password, id_admin, id_evento } = req.body;
-  const id_barra = INSTANCIA.id_barra || req.body.id_barra;
+  const nomUser = String(usuario || '').trim();
+  const nomCajero = String(nombre || '').trim();
+  const id_barra = INSTANCIA.id_barra || req.body.id_barra || 1;
+
+  if (!nomCajero) return res.status(400).json({ success: false, message: 'El nombre del cajero no puede estar vacío.' });
+  if (!nomUser) return res.status(400).json({ success: false, message: 'El usuario no puede estar vacío.' });
+
+  // Si existe un cajero inactivo con ese mismo usuario, liberar el usuario para que el nuevo pueda usarlo
+  try {
+    await dbRun("UPDATE cajero SET usuario = usuario || '_retirado_' || id_cajero || '_' || ? WHERE usuario = ? AND activo = 0", [Date.now(), nomUser]);
+  } catch (_) {}
 
   const query = `INSERT INTO cajero (id_barra, nombre, usuario, password) VALUES (?, ?, ?, ?)`;
-  dbQuery(query, [id_barra, nombre, usuario, password], (err, result) => {
+  dbQuery(query, [id_barra, nomCajero, nomUser, password || 'demo123'], (err, result) => {
     if (err) return res.status(400).json({ success: false, message: friendlyDbError(err, 'cajero') });
     const newCajeroId = result.insertId;
 
     const queryAudit = `INSERT INTO auditoria_admin (id_admin, id_evento, accion, entidad, id_registro, detalle) VALUES (?, ?, 'CREAR_CAJERO', 'cajero', ?, ?)`;
-    dbQuery(queryAudit, [id_admin, id_evento || 1, newCajeroId, `Se registró al cajero ${nombre} con usuario ${usuario}`], (errAudit) => {
+    dbQuery(queryAudit, [id_admin, id_evento || 1, newCajeroId, `Se registró al cajero ${nomCajero} con usuario ${nomUser}`], (errAudit) => {
       if (errAudit) console.error(errAudit);
       return res.json({ success: true, id_cajero: newCajeroId });
     });
@@ -2975,8 +3199,18 @@ app.post('/api/admin/cajeros', (req, res) => {
 });
 
 // CREATE MESERO
-app.post('/api/admin/meseros', (req, res) => {
+app.post('/api/admin/meseros', async (req, res) => {
   const { id_evento, id_cajero, nombre, usuario, password, id_admin } = req.body;
+  const nomMesero = String(nombre || '').trim();
+  const nomUser = String(usuario || '').trim() || (`mesero_${Date.now()}`);
+
+  if (!nomMesero) return res.status(400).json({ success: false, message: 'El nombre del mesero no puede estar vacío.' });
+  if (!id_cajero) return res.status(400).json({ success: false, message: 'Debes asignar un cajero al mesero.' });
+
+  // Liberar usuario de meseros inactivos
+  try {
+    await dbRun("UPDATE mesero SET usuario = usuario || '_retirado_' || id_mesero || '_' || ? WHERE usuario = ? AND activo = 0", [Date.now(), nomUser]);
+  } catch (_) {}
 
   let scopeSql;
   let scopeParams;
@@ -2998,12 +3232,12 @@ app.post('/api/admin/meseros', (req, res) => {
     }
 
     const query = `INSERT INTO mesero (id_evento, id_cajero, nombre, usuario, password) VALUES (?, ?, ?, ?, ?)`;
-    dbQuery(query, [id_evento || 1, id_cajero, nombre, usuario, password], (err, result) => {
+    dbQuery(query, [id_evento || 1, id_cajero, nomMesero, nomUser, password], (err, result) => {
       if (err) return res.status(400).json({ success: false, message: friendlyDbError(err, 'mesero') });
       const newMeseroId = result.insertId;
 
       const queryAudit = `INSERT INTO auditoria_admin (id_admin, id_evento, accion, entidad, id_registro, detalle) VALUES (?, ?, 'CREAR_MESERO', 'mesero', ?, ?)`;
-      dbQuery(queryAudit, [id_admin, id_evento || 1, newMeseroId, `Se registró al mesero ${nombre} asignado al cajero ID ${id_cajero}`], (errAudit) => {
+      dbQuery(queryAudit, [id_admin, id_evento || 1, newMeseroId, `Se registró al mesero ${nomMesero} asignado al cajero ID ${id_cajero}`], (errAudit) => {
         if (errAudit) console.error(errAudit);
         return res.json({ success: true, id_mesero: newMeseroId });
       });
