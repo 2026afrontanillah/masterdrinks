@@ -545,6 +545,18 @@ select option {
 }
 
 /* ---- La marca ---------------------------------------------------------- */
+.login-brand-logo {
+    width: 150px;
+    height: 150px;
+    max-width: 100%;
+    object-fit: cover;
+    border-radius: 22px;
+    margin: 0 auto 14px;
+    display: block;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    border: 2px solid #000000;
+}
+
 .logo-container {
     width: 56px;
     height: 56px;
