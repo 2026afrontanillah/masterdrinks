@@ -130,7 +130,14 @@ window.ThermalPrinter = (function () {
 
   function getSettings() {
     try {
-      return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
+      const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      const settings = Object.assign({}, DEFAULTS, stored);
+      // Forzar 48 columnas (80 mm) por defecto en todo el sistema
+      if (!settings.width || Number(settings.width) < 40) {
+        settings.width = 48;
+        try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (err) {}
+      }
+      return settings;
     } catch (e) {
       return Object.assign({}, DEFAULTS);
     }
