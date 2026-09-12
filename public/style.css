@@ -2882,7 +2882,7 @@ select option {
 
 .print-container {
     width: 100%;
-    max-width: 900px;
+    max-width: 1080px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -2909,19 +2909,12 @@ select option {
     gap: 30px;
     justify-content: center;
     width: 100%;
-    /* La sombra de los dos papeles. Va aquí y no en .thermal-ticket: ahí
-       convive con la máscara del dentado y el papel se quedaba en blanco.
-       Sombra de contacto pegada al papel + sombra ambiente amplia; una sola
-       sombra grande deja el papel flotando sin apoyarse en nada. */
     filter:
         drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4))
         drop-shadow(0 14px 28px rgba(0, 0, 0, 0.5));
 }
 
-/* Dos tickets de 32 columnas uno al lado del otro necesitan más de 1000 px.
-   En una tablet no caben: el segundo se salía de la pantalla y el primero
-   quedaba cortado por abajo. Apilados se ven enteros, uno tras otro. */
-@media (max-width: 680px) {
+@media (max-width: 920px) {
     .tickets-row {
         flex-direction: column;
         align-items: center;

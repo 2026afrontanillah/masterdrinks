@@ -116,7 +116,7 @@ window.ThermalPrinter = (function () {
   }
 
   const DEFAULTS = {
-    width: 32,          // 32 columnas = papel 58 mm · 48 columnas = papel 80 mm
+    width: 48,          // 48 columnas = papel 80 mm · 32 columnas = papel 58 mm
     encoding: 'cp850',  // 'cp850' (con acentos) | 'ascii' (sin acentos)
     mode: 'rawbt',      // 'rawbt' (rawbt:base64,…) | 'intent' (intent://…)
     singleJob: true,    // los dos tickets en un solo trabajo de impresión
@@ -521,7 +521,8 @@ window.ThermalPrinter = (function () {
 
     ops.push(op(sectionTitle('PAGOS', w), { bold: true }));
     model.pagos.forEach(pago => {
-      twoCol(pago.etiqueta, money(pago.monto), w, 2).forEach(l => ops.push(op(l)));
+      const etiqueta = pago.etiqueta || pago.nombre_metodo || pago.metodo || 'Pago';
+      twoCol(etiqueta, money(pago.monto), w, 2).forEach(l => ops.push(op(l)));
     });
 
     // El vuelto sólo aparece cuando lo hay: en una comanda pagada justa o con
