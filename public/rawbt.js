@@ -23,7 +23,7 @@ window.ThermalPrinter = (function () {
   // ---------------------------------------------------------------------
   // Configuración persistente (se guarda en la tablet)
   // ---------------------------------------------------------------------
-  const SETTINGS_KEY = 'masterdrinks.printer.v1';
+  const SETTINGS_KEY = 'masterdrinks.printer.v2';
 
   // Preparar el bitmap del logo del evento para impresoras térmicas ESC/POS
   let logoTicketUrl = '/api/configuracion/logo';
@@ -37,7 +37,7 @@ window.ThermalPrinter = (function () {
       img.crossOrigin = 'anonymous';
       img.onload = function () {
         try {
-          const targetWidth = 240;
+          const targetWidth = 336;
           const targetHeight = Math.max(16, Math.round((img.naturalHeight / img.naturalWidth) * targetWidth));
           const canvas = document.createElement('canvas');
           canvas.width = targetWidth;
