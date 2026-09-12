@@ -759,9 +759,10 @@ const check = (nombre, ok, extra) => {
 
   click(id('rep-hoy-btn'));
   await esperar(60);
-  check('El botón "Hoy" rellena el rango con la fecha de hoy',
+  check('El botón "Hoy" rellena el rango con ayer y hoy',
     /^\d{4}-\d{2}-\d{2}$/.test(id('rep-desde').value) &&
-    id('rep-desde').value === id('rep-hasta').value, id('rep-desde').value);
+    /^\d{4}-\d{2}-\d{2}$/.test(id('rep-hasta').value) &&
+    id('rep-desde').value <= id('rep-hasta').value, id('rep-desde').value + ' a ' + id('rep-hasta').value);
 
   // Rango al revés: tiene que avisar sin llamar al servidor.
   id('rep-desde').value = '2026-12-31';
@@ -772,10 +773,7 @@ const check = (nombre, ok, extra) => {
     id('rep-preview').classList.contains('hide') ||
     !id('rep-preview').textContent.includes('Recaudado'));
 
-  click(id('rep-todo-btn'));
-  await esperar(60);
-  check('"Todo el evento" limpia las fechas',
-    id('rep-desde').value === '' && id('rep-hasta').value === '');
+  check('No existe el botón "Todo el evento"', id('rep-todo-btn') === null);
 
   click(id('rep-ver-btn'));
   await esperar(600);
