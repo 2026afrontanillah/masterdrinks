@@ -7834,7 +7834,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (allInventoryProducts.length === 0) return;
         const settings = ThermalPrinter.getSettings();
         const H = ThermalPrinter.helpers;
-        const mm = settings.width >= 48 ? '72mm' : '48mm';
+        const maxMm = settings.width >= 48 ? '78mm' : '58mm';
 
         const printWindow = window.open('', '_blank');
         if (!printWindow) {
@@ -7844,11 +7844,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         printWindow.document.write(
             '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Inventario POS</title><style>' +
-            '@page { size: auto; margin: 0; }' +
-            'body { margin: 0; padding: 4mm; background: #fff; color: #000;' +
-            ' font-family: "Courier New", monospace; font-size: 12px; line-height: 1.25; width: ' + mm + '; }' +
+            '@page { size: auto; margin: 0mm; }' +
+            '* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }' +
+            'html, body { margin: 0; padding: 0; background: #fff; color: #000; width: 100%; }' +
+            'body { display: flex; flex-direction: column; align-items: center; justify-content: flex-start;' +
+            ' font-family: "Courier New", Courier, "Lucida Console", monospace; font-size: 13.5px; font-weight: 600; line-height: 1.28; }' +
+            '.inventory-ticket { width: 100%; max-width: ' + maxMm + '; margin: 0 auto; padding: 4mm 2mm 8mm 2mm; }' +
+            '.inventory-ticket div { white-space: pre-wrap; word-break: break-word; font-family: inherit; }' +
+            '@media print {' +
+            '  body { width: 100%; margin: 0; padding: 0; display: block; }' +
+            '  .inventory-ticket { margin: 0 auto; width: 100%; max-width: ' + maxMm + '; padding: 2mm 1mm 6mm 1mm; }' +
+            '}' +
             '</style></head><body>' +
+            '<div class="inventory-ticket">' +
             H.opsToHtml(buildInventoryOps(settings), settings) +
+            '</div>' +
             '<script>window.onload=function(){window.print();setTimeout(function(){window.close();},300);};<\/script>' +
             '</body></html>'
         );
