@@ -644,6 +644,7 @@ window.ThermalPrinter = (function () {
         push(...logoRasterEscPos.header);
         push(...logoRasterEscPos.data);
         push(LF);
+        align = 'center';
         return;
       }
       if (o.align !== align) {
@@ -703,30 +704,23 @@ window.ThermalPrinter = (function () {
 
     return ops.map(o => {
       if (o.isLogo) {
-        return `<div class="thermal-logo-box" style="text-align:center; padding: 4px 0;"><img src="${escapeHtml(logoTicketUrl)}" alt="Logo" style="max-width: 140px; max-height: 40px; object-fit: contain; margin: 0 auto; display: block; filter: grayscale(1) contrast(1.3);"><span style="display:none;">${escapeHtml(o.text || 'MASTERDRINKS')}</span></div>`;
+        return `<div class="thermal-logo-box" style="text-align:center; padding: 6px 0; margin-bottom: 4px;"><img src="${escapeHtml(logoTicketUrl)}" alt="Logo" style="max-width: 170px; max-height: 50px; object-fit: contain; margin: 0 auto; display: block; filter: grayscale(1) contrast(1.3);"><span style="display:none;">${escapeHtml(o.text || 'MASTERDRINKS')}</span></div>`;
       }
-      // Alto y ancho se estiran por separado, nunca con font-size.
-      //
-      // La impresora dobla SÓLO la dimensión que se le pide: 'tall' es doble
-      // alto con el mismo ancho de carácter, y 'wide' al revés. Con font-size
-      // crecían las dos a la vez, así que una línea de doble alto ocupaba
-      // también un 50 % más de ancho: los dos tickets salían de anchos
-      // distintos y la cabecera a doble ancho se desbordaba del papel.
       const escalaX = o.wide ? 2 : 1;
       const escalaY = o.tall ? 2 : 1;
 
       const style = [
+        'white-space:pre-wrap',
+        'word-break:break-word',
         o.align === 'center' ? 'text-align:center' : 'text-align:left',
         o.bold ? 'font-weight:bold' : '',
-        // El renglón necesita sitio para el texto estirado; si no, las líneas
-        // de doble alto se pisan entre ellas.
-        o.tall ? 'line-height:2.1' : ''
+        o.tall ? 'line-height:1.9' : ''
       ].filter(Boolean).join(';');
 
       const text = escapeHtml(foldForDisplay(o.text, settings.encoding)) || '&nbsp;';
+      const origin = o.align === 'center' ? 'center center' : 'left center';
       const cuerpo = (escalaX > 1 || escalaY > 1)
-        ? `<span style="display:inline-block;transform:scale(${escalaX},${escalaY});` +
-          `transform-origin:center">${text}</span>`
+        ? `<span style="display:inline-block;transform:scale(${escalaX},${escalaY});transform-origin:${origin}">${text}</span>`
         : text;
       return `<div style="${style}">${cuerpo}</div>`;
     }).join('');
@@ -912,7 +906,7 @@ window.ThermalPrinter = (function () {
   function printViaBrowser(model, settings) {
     settings = settings || getSettings();
     const tickets = buildTickets(model, settings);
-    const mm = settings.width >= 48 ? '72mm' : '48mm';
+    const maxMm = settings.width >= 48 ? '78mm' : '58mm';
 
     const win = window.open('', '_blank');
     if (!win) {
@@ -922,11 +916,19 @@ window.ThermalPrinter = (function () {
 
     win.document.write(
       '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Comanda #' + model.id + '</title><style>' +
-      '@page { size: auto; margin: 0; }' +
-      'body { margin: 0; padding: 4mm; background: #fff; color: #000;' +
-      ' font-family: "Courier New", monospace; font-size: 12px; line-height: 1.25; width: ' + mm + '; }' +
-      '.ticket { page-break-after: always; }' +
+      '@page { size: auto; margin: 0mm; }' +
+      '* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }' +
+      'html, body { margin: 0; padding: 0; background: #fff; color: #000; width: 100%; }' +
+      'body { display: flex; flex-direction: column; align-items: center; justify-content: flex-start;' +
+      ' font-family: "Courier New", Courier, "Lucida Console", monospace; font-size: 13.5px; font-weight: 600; line-height: 1.28; }' +
+      '.ticket { width: 100%; max-width: ' + maxMm + '; margin: 0 auto; padding: 4mm 2mm 8mm 2mm;' +
+      ' page-break-after: always; page-break-inside: avoid; }' +
       '.ticket:last-child { page-break-after: auto; }' +
+      '.ticket div { white-space: pre-wrap; word-break: break-word; font-family: inherit; }' +
+      '@media print {' +
+      '  body { width: 100%; margin: 0; padding: 0; display: block; }' +
+      '  .ticket { margin: 0 auto; width: 100%; max-width: ' + maxMm + '; padding: 2mm 1mm 6mm 1mm; }' +
+      '}' +
       '</style></head><body>' +
       '<div class="ticket">' + opsToHtml(tickets.cajero, settings) + '</div>' +
       '<div class="ticket">' + opsToHtml(tickets.mesero, settings) + '</div>' +

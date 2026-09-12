@@ -3043,12 +3043,14 @@ select option {
 }
 
 /* Cuerpo del ticket: texto monoespaciado tal cual saldrá por la impresora.
-   `white-space: pre` conserva el relleno de espacios que alinea las columnas. */
+   `white-space: pre-wrap` conserva el relleno de espacios y distribuye el ancho adecuadamente. */
 .ticket-body {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.35;
-    white-space: pre;
+    font-family: var(--font-mono, 'Courier New', monospace);
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.32;
+    white-space: pre-wrap;
+    word-break: break-word;
     overflow-x: auto;
     letter-spacing: 0;
 }
@@ -9857,5 +9859,113 @@ select option {
     background: #3b82f6;
     color: #ffffff;
 }
+
+/* ==========================================================================
+ * ESTILOS DE IMPRESIÓN DIRECTA (@media print)
+ * ========================================================================== */
+@media print {
+    @page {
+        size: auto;
+        margin: 0mm;
+    }
+
+    * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+
+    html, body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        height: auto !important;
+        overflow: visible !important;
+    }
+
+    /* Ocultar elementos de interfaz innecesarios al imprimir */
+    header,
+    nav,
+    .top-bar,
+    .app-header,
+    .modal-close-btn,
+    .print-actions,
+    .print-status,
+    .toast-stack,
+    #login-view,
+    #pos-view,
+    #waiter-lock-modal,
+    #void-confirm-modal,
+    #payment-modal,
+    #inventory-modal {
+        display: none !important;
+    }
+
+    /* Modal de impresión activo */
+    #print-modal:not(.hide),
+    #traspaso-modal:not(.hide) {
+        position: static !important;
+        display: block !important;
+        background: transparent !important;
+        backdrop-filter: none !important;
+        padding: 0 !important;
+        margin: 0 auto !important;
+        width: 100% !important;
+    }
+
+    .print-container {
+        max-width: 100% !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        gap: 0 !important;
+    }
+
+    .print-header {
+        display: none !important;
+    }
+
+    .tickets-row {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 100% !important;
+        gap: 0 !important;
+        filter: none !important;
+    }
+
+    .thermal-ticket {
+        background: #ffffff !important;
+        color: #000000 !important;
+        width: 100% !important;
+        max-width: 78mm !important;
+        margin: 0 auto !important;
+        padding: 3mm 1mm 6mm 1mm !important;
+        mask: none !important;
+        -webkit-mask: none !important;
+        border: none !important;
+        page-break-after: always !important;
+        page-break-inside: avoid !important;
+    }
+
+    .thermal-ticket:last-child {
+        page-break-after: auto !important;
+    }
+
+    .ticket-body {
+        font-family: 'Courier New', Courier, 'Lucida Console', monospace !important;
+        font-size: 13.5px !important;
+        font-weight: 600 !important;
+        line-height: 1.28 !important;
+        color: #000000 !important;
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
+        overflow: visible !important;
+    }
+}
+
 
 
