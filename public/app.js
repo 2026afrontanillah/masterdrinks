@@ -3355,17 +3355,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (fromAdmin) {
             currentTicket.reimpresion = true;
             currentTicket.numeroCopia = 2;
+            renderTicketPreview(currentTicket);
+            setPrintStatus('');
+
+            const printModal = document.getElementById('print-modal');
+            if (printModal) {
+                printModal.classList.remove('hide');
+            }
+            sendToPrinter();
+        } else {
+            // Venta normal en POS: impresión automática sin modal de previsualización
+            renderTicketPreview(currentTicket);
+            sendToPrinter();
+            volverAlBloqueoDeMesero();
         }
-
-        renderTicketPreview(currentTicket);
-        setPrintStatus('');
-
-        const printModal = document.getElementById('print-modal');
-        if (printModal) {
-            printModal.classList.remove('hide');
-        }
-
-        sendToPrinter();
     }
 
     function cerrarVistaPreviaTicket() {

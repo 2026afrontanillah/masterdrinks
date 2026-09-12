@@ -197,19 +197,13 @@ async function abrirTablet() {
   check('Los importes suman exactamente el total', Math.abs(sumado - total) < 0.005,
     sumado + ' de ' + total);
 
-  // ---- Tras cobrar: vista previa de comandas y botón Continuar ----
-  check('Se abre la ventana de vista previa de comandas',
-    !t.id('print-modal').classList.contains('hide'), 'modal de vista previa visible');
-  check('La previsualización de las dos comandas está presente',
-    !!t.id('ticket-cajero-body') && !!t.id('ticket-mesero-body'),
-    'cajero y mesero');
+  // ---- Tras cobrar: impresión automática sin modal de vista previa ----
+  check('No se abre la ventana de vista previa (impresión automática)',
+    t.id('print-modal').classList.contains('hide'), 'modal de vista previa oculto');
 
-  t.click(t.id('dismiss-print-btn'));
-  await esperar(100);
-
-  check('La tablet vuelve a la pantalla del PIN al continuar',
+  check('La tablet vuelve directamente a la pantalla del PIN',
     !t.id('waiter-lock-modal').classList.contains('hide'),
-    'sin que nadie pulse Continuar');
+    'automático sin botón Continuar');
   check('Y el carrito queda vacío para la siguiente venta',
     t.$$('.cart-item').length === 0,
     t.$$('.cart-item').length + ' líneas en el carrito');
