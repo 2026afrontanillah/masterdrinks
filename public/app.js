@@ -3328,10 +3328,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function sendToPrinter() {
         if (!currentTicket) return;
-        const esCopia = currentTicket.reimpresion;
+        const esCopia = Boolean(currentTicket.reimpresion);
 
-        // El registro va ANTES de mandar el papel, y fuera del try.
-        logPrint(currentTicket.id);
+        // El registro de reimpresión solo se hace si es una copia extra (reimpresión).
+        // La copia original (#1) ya queda registrada en el backend al crear la comanda.
+        if (esCopia) {
+            logPrint(currentTicket.id);
+        }
 
         try {
             ThermalPrinter.printToRawBT(currentTicket);
@@ -3355,17 +3358,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (fromAdmin) {
             currentTicket.reimpresion = true;
             currentTicket.numeroCopia = 2;
+            renderTicketPreview(currentTicket);
+            setPrintStatus('');
+
+            const printModal = document.getElementById('print-modal');
+            if (printModal) {
+                printModal.classList.remove('hide');
+            }
+            sendToPrinter();
+        } else {
+            // Venta normal en POS: impresión automática sin modal de previsualización
+            renderTicketPreview(currentTicket);
+            sendToPrinter();
+            volverAlBloqueoDeMesero();
         }
-
-        renderTicketPreview(currentTicket);
-        setPrintStatus('');
-
-        const printModal = document.getElementById('print-modal');
-        if (printModal) {
-            printModal.classList.remove('hide');
-        }
-
-        sendToPrinter();
     }
 
     function cerrarVistaPreviaTicket() {
@@ -3405,8 +3411,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (printBrowserBtn) {
         printBrowserBtn.addEventListener('click', () => {
             if (!currentTicket) return;
+            if (currentTicket.reimpresion) {
+                logPrint(currentTicket.id);
+            }
             ThermalPrinter.printViaBrowser(currentTicket);
-            logPrint(currentTicket.id);
             marcarSiguienteComoReimpresion();
         });
     }
@@ -3787,7 +3795,23 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadDashboardData() {
         try {
             const response = await fetch('/api/admin/comandas');
-            const comandas = await response.json();
+            const todasComandas = await response.json();
+            
+            // Los eventos nocturnos abarcan de un día para el otro (ayer y hoy)
+            const hoy = new Date();
+            const ayer = new Date(hoy);
+            ayer.setDate(hoy.getDate() - 1);
+            const fIso = d => d.getFullYear() + '-' +
+                String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                String(d.getDate()).padStart(2, '0');
+            const fechaMin = fIso(ayer);
+            const fechaMax = fIso(hoy);
+
+            const comandas = (Array.isArray(todasComandas) ? todasComandas : []).filter(c => {
+                if (!c.fecha_hora) return true;
+                const f = String(c.fecha_hora).slice(0, 10);
+                return f >= fechaMin && f <= fechaMax;
+            });
             
             const activeComandas = comandas.filter(c => c.estado_pago !== 'ANULADO');
             const voidedComandas = comandas.filter(c => c.estado_pago === 'ANULADO');
@@ -4513,21 +4537,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
-    document.getElementById('rep-hoy-btn').addEventListener('click', () => {
+    function obtenerRangoJornadaShow() {
         const hoy = new Date();
-        const iso = hoy.getFullYear() + '-' +
-            String(hoy.getMonth() + 1).padStart(2, '0') + '-' +
-            String(hoy.getDate()).padStart(2, '0');
-        document.getElementById('rep-desde').value = iso;
-        document.getElementById('rep-hasta').value = iso;
-        notify('Rango puesto en hoy.', 'info');
-    });
+        const ayer = new Date(hoy);
+        ayer.setDate(hoy.getDate() - 1);
+        const fIso = d => d.getFullYear() + '-' +
+            String(d.getMonth() + 1).padStart(2, '0') + '-' +
+            String(d.getDate()).padStart(2, '0');
+        return { desde: fIso(ayer), hasta: fIso(hoy) };
+    }
 
-    document.getElementById('rep-todo-btn').addEventListener('click', () => {
-        document.getElementById('rep-desde').value = '';
-        document.getElementById('rep-hasta').value = '';
-        notify('Rango puesto en todo el evento.', 'info');
-    });
+    // Inicializar campos con la jornada del show (ayer a hoy)
+    const rInicial = obtenerRangoJornadaShow();
+    const inputDesde = document.getElementById('rep-desde');
+    const inputHasta = document.getElementById('rep-hasta');
+    if (inputDesde && !inputDesde.value) inputDesde.value = rInicial.desde;
+    if (inputHasta && !inputHasta.value) inputHasta.value = rInicial.hasta;
+
+    const repHoyBtn = document.getElementById('rep-hoy-btn');
+    if (repHoyBtn) {
+        repHoyBtn.addEventListener('click', () => {
+            const r = obtenerRangoJornadaShow();
+            if (inputDesde) inputDesde.value = r.desde;
+            if (inputHasta) inputHasta.value = r.hasta;
+            notify('Rango puesto en ayer y hoy (jornada del show).', 'info');
+        });
+    }
 
     // Resumen en pantalla antes de descargar: evita generar el PDF para
     // descubrir que el rango elegido no tiene ventas.

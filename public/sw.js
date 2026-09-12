@@ -2,18 +2,25 @@
  * MasterDrinks POS — Service Worker (PWA)
  * ========================================================================== */
 
-const CACHE_NAME = 'masterdrinks-pos-v114';
+const CACHE_NAME = 'masterdrinks-pos-v119';
 
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/style.css?v=114',
-  '/app.js?v=114',
-  '/rawbt.js?v=114',
+  '/fonts.css?v=116',
+  '/style.css?v=116',
+  '/app.js?v=119',
+  '/rawbt.js?v=116',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/logo_euphoria.png'
+  '/logo_euphoria.png',
+  '/fonts/font-1.woff2',
+  '/fonts/font-2.woff2',
+  '/fonts/font-3.woff2',
+  '/fonts/font-4.woff2',
+  '/fonts/font-5.woff2',
+  '/fonts/font-6.woff2'
 ];
 
 // 1. Install: Pre-cache core app shell

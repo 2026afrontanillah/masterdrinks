@@ -37,7 +37,7 @@ window.ThermalPrinter = (function () {
       img.crossOrigin = 'anonymous';
       img.onload = function () {
         try {
-          const targetWidth = 336;
+          const targetWidth = 190;
           const targetHeight = Math.max(16, Math.round((img.naturalHeight / img.naturalWidth) * targetWidth));
           const canvas = document.createElement('canvas');
           canvas.width = targetWidth;
@@ -121,16 +121,20 @@ window.ThermalPrinter = (function () {
     mode: 'rawbt',      // 'rawbt' (rawbt:base64,…) | 'intent' (intent://…)
     singleJob: true,    // los dos tickets en un solo trabajo de impresión
     cut: true,          // enviar corte de papel al final de cada ticket
-    feed: 3,            // líneas en blanco antes del corte
-    // La comanda sale por el papel en cuanto se cobra, sin que nadie pulse
-    // nada. En una barra con cola, esperar a que el cajero se acuerde de pulsar
-    // Imprimir es una comanda que no llega a la cocina.
+    feed: 1,            // corte ajustado sin desperdicio de papel
     autoPrint: true
   };
 
   function getSettings() {
     try {
-      return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
+      const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      const settings = Object.assign({}, DEFAULTS, stored);
+      // Forzar 48 columnas (80 mm) por defecto en todo el sistema
+      if (!settings.width || Number(settings.width) < 40) {
+        settings.width = 48;
+        try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (err) {}
+      }
+      return settings;
     } catch (e) {
       return Object.assign({}, DEFAULTS);
     }
@@ -355,46 +359,25 @@ window.ThermalPrinter = (function () {
 
   /**
    * Cabecera común.
-   *
-   * El orden va de lo que menos cambia a lo que más: marca, barra, evento y
-   * por último el número de comanda, que es el dato que se busca. El número va
-   * a doble tamaño y solo en su bloque porque es lo que el mesero canta en voz
-   * alta y lo que el cliente rastrea entre varios tickets en el bolsillo.
-   *
-   * Los bloques se separan con líneas en blanco, no con más filas de "=". El
-   * papel térmico barato emborrona los caracteres repetidos, y un ticket con
-   * cuatro reglas gruesas se lee peor que uno con aire.
    */
   function buildHeaderOps(model, settings, subtitulo) {
     const w = settings.width;
     const ops = [];
 
-    ops.push(op(rule(w)));
-    ops.push(op(model.marca || 'MASTERDRINKS', { align: 'center', bold: true, tall: true, wide: true, isLogo: true }));
-    if (model.barra) ops.push(op(model.barra, { align: 'center', bold: true }));
-    // El evento sólo si lo hay: en el montaje de prueba está vacío y una línea
-    // en blanco en la cabecera parece un fallo de impresión.
-    if (model.evento) {
-      wrap(model.evento, w).forEach(l => ops.push(op(l, { align: 'center' })));
+    ops.push(op(model.marca || 'MASTERDRINKS', { align: 'center', bold: true, tall: true, isLogo: true }));
+    if (model.barra || model.evento) {
+      const lineaEvento = [model.barra, model.evento].filter(Boolean).join(' · ');
+      wrap(lineaEvento, w).forEach(l => ops.push(op(l, { align: 'center' })));
     }
-    ops.push(op(rule(w)));
-    ops.push(op(''));
-    ops.push(op('COMANDA ' + (model.ref || model.id),
-      { align: 'center', bold: true, tall: true, wide: true }));
-    ops.push(op(subtitulo, { align: 'center' }));
+    ops.push(op(divider(w)));
+    ops.push(op('COMANDA ' + (model.ref || model.id) + '   (' + subtitulo + ')',
+      { align: 'center', bold: true, tall: true }));
 
-    // Un ticket reimpreso que sale idéntico al original vale para cobrar la
-    // misma venta otra vez. Va en grande y encima de los precios: quien lo
-    // recibe tiene que verlo sin buscarlo, aunque lea el papel de lejos.
     if (model.reimpresion) {
-      ops.push(op(''));
-      ops.push(op('*** REIMPRESION ***',
-        { align: 'center', bold: true, tall: true }));
-      ops.push(op('copia ' + (model.numeroCopia || 2) + ' - no es un cobro nuevo',
-        { align: 'center' }));
+      ops.push(op('*** REIMPRESION (' + (model.numeroCopia || 2) + ') ***',
+        { align: 'center', bold: true }));
     }
-
-    ops.push(op(''));
+    ops.push(op(divider(w)));
 
     return ops;
   }
@@ -403,10 +386,8 @@ window.ThermalPrinter = (function () {
     const w = settings.width;
     const ops = [];
 
-    ops.push(op(''));
-    ops.push(op(rule(w)));
+    ops.push(op(divider(w)));
     cierre.forEach(linea => ops.push(op(linea.text, { align: 'center', bold: !!linea.bold })));
-    ops.push(op(rule(w)));
 
     return ops;
   }
@@ -436,23 +417,17 @@ window.ThermalPrinter = (function () {
     const w = settings.width;
     const ops = buildHeaderOps(model, settings, 'COPIA CAJERO');
 
-    // Fecha y hora en la misma línea, cada una en su punta: son dos datos
-    // cortos y gastar dos renglones en ellos alarga el ticket sin motivo.
     if (model.fechaDia && model.hora) {
-      ops.push(op(padPair(model.fechaDia, model.hora, w)));
+      ops.push(op(padPair(model.fechaDia + ' ' + model.hora, 'Caj: ' + (model.cajero || ''), w)));
     } else {
-      kv('Fecha', model.fecha, w).forEach(l => ops.push(op(l)));
+      ops.push(op(padPair(model.fecha || '', 'Caj: ' + (model.cajero || ''), w)));
     }
-    kv('Cajero', model.cajero, w).forEach(l => ops.push(op(l)));
-    kv('Mesero', model.mesero, w).forEach(l => ops.push(op(l)));
+    if (model.mesero) {
+      ops.push(op(padPair('Mesero: ' + model.mesero, '', w)));
+    }
 
-    ops.push(op(''));
     ops.push(op(sectionTitle('DETALLE', w), { bold: true }));
 
-    // Los paquetes primero y como una sola cosa: su nombre, su precio cerrado
-    // y debajo lo que lleva dentro, sin importes. El precio del paquete se
-    // reparte entre sus productos para que cuadre el cierre, pero eso es
-    // contabilidad interna: en el papel, un combo de 60 vale 60.
     (model.promociones || []).forEach(pr => {
       wrap(pr.nombre, w).forEach(l => ops.push(op(l, { bold: true })));
       ops.push(op(padPair(
@@ -466,9 +441,6 @@ window.ThermalPrinter = (function () {
       });
     });
 
-    // Dos líneas por producto: el nombre entero arriba y debajo, sangrado,
-    // "cantidad x precio ....... importe". Así el nombre nunca compite por el
-    // sitio con las cifras y se ve el precio unitario.
     model.items.forEach(item => {
       wrap(item.nombre, w).forEach(l => ops.push(op(l)));
       const unitario = item.precio_unitario != null
@@ -476,23 +448,11 @@ window.ThermalPrinter = (function () {
         : money(Number(item.subtotal || 0) / Math.max(1, Number(item.cantidad || 1)));
       ops.push(op(padPair('   ' + item.cantidad + ' x ' + unitario, money(item.subtotal), w)));
 
-      // El acompañante, sangrado bajo su botella y SIN importe. Sin precio a la
-      // derecha no hay forma de leerlo como un cargo: se entiende que va
-      // dentro. Con un 0.00 al lado, el cliente pregunta qué es ese cero.
-      // Los acompañantes cuelgan como ramas de la línea de arriba: la esquina
-      // dice que van DENTRO de esa botella, no que son otros productos.
-      //
-      // La sangría se pone a mano porque wrapIndent sólo sangra las líneas de
-      // continuación, y aquí lo que tiene que verse metido es justo la primera.
       (item.acompanantes || []).forEach(a => {
         const cabeza = '   └ ' + a.cantidad + ' ';
-        // 9 = "incluido" (8) + el espacio que lo separa. Con 10 se partía
-        // "Coca-Cola 500 ml" por un solo carácter.
         const trozos = wrap(a.nombre, w - cabeza.length - 9);
         trozos.forEach((l, i) => {
           if (i === trozos.length - 1) {
-            // "incluido" a la derecha, en la misma línea: gasta un renglón
-            // menos y se lee de un golpe con el nombre.
             ops.push(op(padPair((i === 0 ? cabeza : ' '.repeat(cabeza.length)) + l, 'incluido', w)));
           } else {
             ops.push(op((i === 0 ? cabeza : ' '.repeat(cabeza.length)) + l));
@@ -508,50 +468,31 @@ window.ThermalPrinter = (function () {
       cuenta.lineas + (cuenta.lineas === 1 ? ' producto' : ' productos'),
       cuenta.unidades + (cuenta.unidades === 1 ? ' unidad' : ' unidades'), w)));
 
-    // El total, centrado y a doble tamaño en su propio bloque. Es la cifra que
-    // el cliente comprueba antes de pagar y la que se discute si algo no
-    // cuadra: tiene que verse antes que ninguna otra cosa del ticket.
-    ops.push(op(''));
     ops.push(op(rule(w)));
-    ops.push(op('TOTAL A PAGAR', { align: 'center' }));
-    ops.push(op(money(model.total) + ' Bs.',
-      { align: 'center', bold: true, tall: true, wide: true }));
+    ops.push(op(padPair('  TOTAL A PAGAR', money(model.total) + ' Bs.', w),
+      { bold: true, tall: true }));
     ops.push(op(rule(w)));
-    ops.push(op(''));
 
-    ops.push(op(sectionTitle('PAGOS', w), { bold: true }));
     model.pagos.forEach(pago => {
       const etiqueta = pago.etiqueta || pago.nombre_metodo || pago.metodo || 'Pago';
       twoCol(etiqueta, money(pago.monto), w, 2).forEach(l => ops.push(op(l)));
     });
 
-    // El vuelto sólo aparece cuando lo hay: en una comanda pagada justa o con
-    // QR, una línea de "CAMBIO 0.00" sólo añade ruido al ticket.
-    // 'recibido' es el efectivo que entregó el cliente, que puede ser mayor que
-    // lo cobrado; si no viene, se asume que pagó justo.
     const cobrado = round2(model.pagos.reduce((s, p) => s + Number(p.monto || 0), 0));
     const pagado = Number(model.recibido) > cobrado ? round2(model.recibido) : cobrado;
     const cambio = round2(pagado - Number(model.total || 0));
-    if (model.pagos.length > 1 || cambio > 0) {
-      ops.push(op(divider(w)));
-      ops.push(op(padPair('  Recibido', money(pagado), w)));
-    }
     if (cambio > 0) {
       ops.push(op(padPair('  CAMBIO', money(cambio) + ' Bs.', w), { bold: true, tall: true }));
     }
 
-    // Las observaciones también en la copia del cajero: si el cliente reclama
-    // que pidió algo sin hielo, el papel que tiene él en la mano es este.
     const nota = notaDe(model);
     if (nota) {
-      ops.push(op(''));
       ops.push(op(sectionTitle('NOTA', w), { bold: true }));
       wrap(nota, w - 2).forEach(l => ops.push(op('  ' + l)));
     }
 
     return ops.concat(buildFooterOps(model, settings, [
-      { text: 'GRACIAS POR SU COMPRA', bold: true },
-      { text: 'Disfrute del evento' }
+      { text: 'GRACIAS POR SU COMPRA · Disfrute del evento' }
     ]));
   }
 
@@ -560,20 +501,10 @@ window.ThermalPrinter = (function () {
     const w = settings.width;
     const ops = buildHeaderOps(model, settings, 'BARRA');
 
-    // Aquí no interesa la fecha entera ni quién cobró: sólo a qué hora entró la
-    // comanda, para saber cuál lleva más rato esperando.
-    ops.push(op(padPair('Mesero  ' + model.mesero, model.hora || '', w)));
-
-    ops.push(op(''));
+    ops.push(op(padPair('Mesero: ' + model.mesero, model.hora || '', w)));
     ops.push(op(sectionTitle('PREPARAR', w), { bold: true }));
-    ops.push(op(''));
 
-    // Los paquetes, con su nombre encima y sus bebidas debajo, cada una con su
-    // casilla. El bartender no sirve "un combo": sirve un whisky y dos
-    // cervezas, y necesita poder tacharlas de una en una. El nombre va arriba
-    // para que sepa por qué van juntas y no las reparta en dos bandejas.
     (model.promociones || []).forEach((pr, i) => {
-      if (i > 0) ops.push(op(''));
       wrapIndent(pr.cantidad + ' x ' + pr.nombre, w, 4)
         .forEach(l => ops.push(op(l, { bold: true, tall: true })));
       (pr.contenido || []).forEach(c => {
@@ -584,18 +515,10 @@ window.ThermalPrinter = (function () {
       });
     });
 
-    // Cada producto, grande y con su casilla, separado del siguiente por una
-    // línea en blanco. El hueco no es decorativo: es lo que permite tachar con
-    // bolígrafo sin comerse el renglón de abajo, y lo que evita leer dos
-    // productos como uno solo cuando la barra está a media luz.
-    model.items.forEach((item, i) => {
-      if ((model.promociones || []).length > 0 && i === 0) ops.push(op(''));
-      if (i > 0) ops.push(op(''));
+    model.items.forEach(item => {
       wrapIndent('[ ] ' + item.cantidad + ' x ' + item.nombre, w, 4)
         .forEach(l => ops.push(op(l, { bold: true, tall: true })));
 
-      // En la barra los acompañantes hay que servirlos igual, así que cada uno
-      // lleva su casilla: si no, se prepara la botella y el refresco se olvida.
       (item.acompanantes || []).forEach(a => {
         const cabeza = '    [ ] ' + a.cantidad + ' ';
         wrap(a.nombre, w - cabeza.length)
@@ -604,18 +527,14 @@ window.ThermalPrinter = (function () {
       });
     });
 
-    ops.push(op(''));
     ops.push(op(divider(w)));
     const cuenta = contarPedido(model);
     ops.push(op(padPair(
       cuenta.lineas + (cuenta.lineas === 1 ? ' producto' : ' productos'),
       cuenta.unidades + (cuenta.unidades === 1 ? ' unidad' : ' unidades'), w)));
 
-    // Las observaciones sólo salen si las hay, y entonces en grande: son la
-    // causa más común de que un pedido vuelva a la barra.
     const nota = notaDe(model);
     if (nota) {
-      ops.push(op(''));
       ops.push(op(sectionTitle('OJO', w), { bold: true }));
       wrap(nota, w).forEach(l => ops.push(op(l, { bold: true, tall: true })));
     }

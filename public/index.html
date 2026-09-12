@@ -6,12 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Sistema POS y Administrativo Premium para festivales y eventos musicales.">
     <title>MasterDrinks POS | Sistema de Ventas</title>
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&display=swap"
-        rel="stylesheet">
     <!-- PWA Settings -->
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f172a">
@@ -19,11 +13,15 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="MasterDrinks">
-    <link rel="apple-touch-icon" href="icons/icon-192.png">
-    <link rel="icon" type="image/png" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="logo_masterdrinks.jpg">
+    <link rel="icon" type="image/jpeg" href="logo_masterdrinks.jpg">
+    <link rel="shortcut icon" href="logo_masterdrinks.jpg">
+
+    <!-- Local Fonts (100% Offline) -->
+    <link rel="stylesheet" href="fonts.css?v=116">
 
     <!-- Main Stylesheet -->
-    <link rel="stylesheet" href="style.css?v=114">
+    <link rel="stylesheet" href="style.css?v=116">
 </head>
 
 <body>
@@ -42,8 +40,7 @@
 
         <div class="glass-card auth-card">
             <header class="auth-header">
-                <div class="logo-container">🍹</div>
-                <h1 class="gradient-text">MasterDrinks POS</h1>
+                <img src="logo_masterdrinks.jpg" alt="MasterDrinks POS" class="login-brand-logo">
                 <span class="instancia-badge hide"></span>
             </header>
             <form id="login-form" class="auth-form">
@@ -412,7 +409,6 @@
                                 <input type="date" id="rep-hasta">
                             </div>
                             <button type="button" id="rep-hoy-btn" class="secondary-btn">Hoy</button>
-                            <button type="button" id="rep-todo-btn" class="secondary-btn">Todo el evento</button>
                         </div>
 
                         <div id="rep-preview" class="reporte-preview hide"></div>
@@ -1831,9 +1827,9 @@
     <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
     <!-- Impresión térmica (ESC/POS + RawBT) -->
-    <script src="rawbt.js?v=115"></script>
+    <script src="rawbt.js?v=116"></script>
     <!-- Main Client-side logic script -->
-    <script src="app.js?v=115"></script>
+    <script src="app.js?v=119"></script>
 
     <!-- PWA Service Worker Registration -->
     <script>
