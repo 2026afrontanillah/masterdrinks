@@ -7707,10 +7707,10 @@ select option {
     overflow-y: auto !important;
 }
 
-/* --- TAB: PERSONAL (Grid con scroll natural y fluido) --- */
+/* --- TAB: PERSONAL (Grid 2 columnas fijas con scroll vertical) --- */
 #admin-view #tab-crear-personal .personal-grid-2x2 {
     display: grid !important;
-    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)) !important;
+    grid-template-columns: 1fr 1fr !important;
     gap: 14px !important;
     height: auto !important;
     flex: none !important;
@@ -7718,6 +7718,12 @@ select option {
     align-items: stretch !important;
     margin: 0 !important;
     padding-bottom: 30px !important;
+}
+
+@media (max-width: 820px) {
+    #admin-view #tab-crear-personal .personal-grid-2x2 {
+        grid-template-columns: 1fr !important;
+    }
 }
 
 #admin-view #tab-crear-personal .glass-card {
