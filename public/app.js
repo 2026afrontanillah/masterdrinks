@@ -6230,18 +6230,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // ---- Personal -----------------------------------------------------------
-    // ---- Personal: Cajeros & Meseros ----------------------------------------
-    let personalAdmin = { cajeros: [], meseros: [] };
+    // ---- Personal: Cajeros, Meseros & Encargados ----------------------------
+    let personalAdmin = { cajeros: [], meseros: [], encargados: [] };
 
     async function cargarPersonalAdmin() {
         try {
             const res = await fetch('/api/admin/personal');
             personalAdmin = await res.json();
         } catch (err) {
-            personalAdmin = { cajeros: [], meseros: [] };
+            personalAdmin = { cajeros: [], meseros: [], encargados: [] };
         }
         pintarCajeros();
         pintarMeseros();
+        pintarEncargados();
     }
 
     async function alternarCajero(c) {
@@ -6471,6 +6472,88 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target === editarMeseroModal) cerrarEditarMesero();
     });
 
+    // ---- Editar Encargado Modal ---------------------------------------------
+    const editarEncargadoModal = document.getElementById('editar-encargado-modal');
+    let encargadoEditando = null;
+
+    function abrirEditarEncargado(enc) {
+        encargadoEditando = enc;
+        const cualEl = document.getElementById('editar-encargado-cual');
+        if (cualEl) cualEl.textContent = `${enc.nombre} (@${enc.usuario})`;
+
+        const nombreInput = document.getElementById('editar-encargado-nombre');
+        if (nombreInput) nombreInput.value = enc.nombre || '';
+        const userInput = document.getElementById('editar-encargado-usuario');
+        if (userInput) userInput.value = enc.usuario || '';
+        const passInput = document.getElementById('editar-encargado-password');
+        if (passInput) passInput.value = '';
+
+        if (editarEncargadoModal) editarEncargadoModal.classList.remove('hide');
+        if (nombreInput) nombreInput.focus();
+    }
+
+    function cerrarEditarEncargado() {
+        if (editarEncargadoModal) editarEncargadoModal.classList.add('hide');
+        encargadoEditando = null;
+    }
+
+    async function guardarEdicionEncargado() {
+        if (!encargadoEditando) return;
+        const idAdmin = encargadoEditando.id_admin;
+        const boton = document.getElementById('editar-encargado-guardar');
+        if (boton) boton.disabled = true;
+
+        const nombre = (document.getElementById('editar-encargado-nombre')?.value || '').trim();
+        const usuario = (document.getElementById('editar-encargado-usuario')?.value || '').trim();
+        const password = (document.getElementById('editar-encargado-password')?.value || '').trim();
+
+        if (!nombre) {
+            notify('El nombre no puede estar vacío.', 'error');
+            if (boton) boton.disabled = false;
+            return;
+        }
+        if (!usuario) {
+            notify('El usuario no puede estar vacío.', 'error');
+            if (boton) boton.disabled = false;
+            return;
+        }
+
+        cerrarEditarEncargado();
+        try {
+            const body = {
+                nombre,
+                usuario,
+                id_admin: currentUser ? currentUser.id_admin : 1
+            };
+            if (password) body.password = password;
+
+            const res = await fetch('/api/admin/encargados/' + idAdmin, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+            if (!res.ok || !data.success) {
+                notify(data.message || 'No se pudo guardar los cambios del encargado.', 'error');
+                return;
+            }
+            notify(data.message || `Encargado "${nombre}" actualizado.`, 'ok');
+            await cargarPersonalAdmin();
+        } catch (err) {
+            console.error('Error al editar encargado:', err);
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        } finally {
+            if (boton) boton.disabled = false;
+        }
+    }
+
+    document.getElementById('editar-encargado-cerrar')?.addEventListener('click', cerrarEditarEncargado);
+    document.getElementById('editar-encargado-guardar')?.addEventListener('click', guardarEdicionEncargado);
+    editarEncargadoModal?.addEventListener('click', e => {
+        if (e.target === editarEncargadoModal) cerrarEditarEncargado();
+    });
+
     function pintarCajeros() {
         const cont = document.getElementById('lista-cajeros');
         if (!cont) return;
@@ -6558,10 +6641,51 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function pintarEncargados() {
+        const cont = document.getElementById('lista-encargados');
+        if (!cont) return;
+        const inputBuscar = document.getElementById('buscar-encargado');
+        const filtro = (inputBuscar ? inputBuscar.value : '').trim().toLowerCase();
+        const todos = (personalAdmin.encargados || []).filter(e => e.activo !== 0);
+        const lista = filtro
+            ? todos.filter(e => (e.nombre || '').toLowerCase().includes(filtro) ||
+                                (e.usuario || '').toLowerCase().includes(filtro))
+            : todos;
+
+        const contEl = document.getElementById('cont-encargados');
+        if (contEl) {
+            contEl.textContent = filtro ? lista.length + ' de ' + todos.length : todos.length;
+        }
+
+        if (!lista.length) {
+            return pintarVacio(cont, filtro ? 'Ningún encargado con ese nombre o usuario.' : 'Todavía no hay encargados.');
+        }
+
+        cont.innerHTML = '';
+        lista.forEach(enc => {
+            const fila = filaLista({
+                titulo: enc.nombre,
+                detalle: '@' + enc.usuario + (enc.movimientos ? ` · ${enc.movimientos} mov. de stock` : ''),
+                insignia: 'INVENTARIO',
+                inactivo: false,
+                onEditar: () => abrirEditarEncargado(enc),
+                onBorrar: () => borrar(
+                    '/api/admin/encargados/' + enc.id_admin,
+                    enc.movimientos > 0
+                        ? enc.nombre + ' ya registró movimientos en inventario.\n\nDejará de poder entrar, pero su historial de stock se conservará. ¿Eliminarlo de la lista?'
+                        : '¿Eliminar al encargado ' + enc.nombre + '?',
+                    () => { cargarPersonalAdmin(); })
+            });
+            cont.appendChild(fila);
+        });
+    }
+
     document.getElementById('buscar-producto-cat').addEventListener('input', pintarProductosAdmin);
     const inputBuscarCajero = document.getElementById('buscar-cajero');
     if (inputBuscarCajero) inputBuscarCajero.addEventListener('input', pintarCajeros);
     document.getElementById('buscar-mesero').addEventListener('input', pintarMeseros);
+    const inputBuscarEncargado = document.getElementById('buscar-encargado');
+    if (inputBuscarEncargado) inputBuscarEncargado.addEventListener('input', pintarEncargados);
 
     // TAB: PERSONAL & BARRAS SETUP
     // `mantenerCajero` conserva el cajero elegido al repintar el desplegable:
@@ -6693,6 +6817,56 @@ document.addEventListener('DOMContentLoaded', () => {
                 notify(data.message || 'No se pudo completar la operación.', 'error');
                 const idx = personalAdmin.meseros.indexOf(tempMesero);
                 if (idx !== -1) { personalAdmin.meseros.splice(idx, 1); pintarMeseros(); }
+            }
+        } catch (err) {
+            notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');
+        }
+    });
+
+    // Form: Create Encargado
+    document.getElementById('form-create-encargado')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const nombre = (document.getElementById('enc-name')?.value || '').trim();
+        const usuario = (document.getElementById('enc-user')?.value || '').trim();
+        const password = (document.getElementById('enc-pass')?.value || '').trim();
+
+        document.getElementById('form-create-encargado').reset();
+
+        const tempEnc = {
+            id_admin: Date.now(),
+            nombre: nombre,
+            usuario: usuario,
+            rol: 'ENCARGADO',
+            movimientos: 0,
+            activo: 1
+        };
+        if (!personalAdmin) personalAdmin = { cajeros: [], meseros: [], encargados: [] };
+        if (!personalAdmin.encargados) personalAdmin.encargados = [];
+        personalAdmin.encargados.push(tempEnc);
+        pintarEncargados();
+
+        try {
+            const response = await fetch('/api/admin/encargados', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nombre,
+                    usuario,
+                    password,
+                    id_admin: currentUser ? currentUser.id_admin : 1,
+                    id_evento: currentUser ? currentUser.id_evento : 1
+                })
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                notify(data.message || 'Encargado registrado.', 'ok');
+                tempEnc.id_admin = data.id_admin;
+                await cargarPersonalAdmin();
+            } else {
+                notify(data.message || 'No se pudo completar la operación.', 'error');
+                const idx = personalAdmin.encargados.indexOf(tempEnc);
+                if (idx !== -1) { personalAdmin.encargados.splice(idx, 1); pintarEncargados(); }
             }
         } catch (err) {
             notify('Sin conexión con el servidor. Revisa el WiFi.', 'error');

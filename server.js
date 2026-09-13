@@ -2682,6 +2682,100 @@ app.delete('/api/admin/meseros/:id', (req, res) => {
       console.error('Error al eliminar mesero:', err);
       res.status(500).json({ success: false, message: 'No se pudo eliminar el mesero.' });
     });
+// ---- Encargado: Editar -----------------------------------------------------
+app.put('/api/admin/encargados/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Encargado no válido.' });
+  }
+
+  withTransaction(async () => {
+    const enc = await dbGet('SELECT * FROM administrador_evento WHERE id_admin = ? AND rol = ?', [id, 'ENCARGADO']);
+    if (!enc) return { estado: 404, cuerpo: { success: false, message: 'Ese encargado ya no existe.' } };
+
+    const nuevoNombre = (req.body.nombre !== undefined ? String(req.body.nombre) : enc.nombre).trim();
+    const nuevoUsuario = (req.body.usuario !== undefined ? String(req.body.usuario) : enc.usuario).trim();
+    const nuevoPass = req.body.password && String(req.body.password).trim() ? String(req.body.password).trim() : enc.password;
+
+    if (!nuevoNombre) return { estado: 400, cuerpo: { success: false, message: 'El nombre no puede estar vacío.' } };
+    if (!nuevoUsuario) return { estado: 400, cuerpo: { success: false, message: 'El usuario no puede estar vacío.' } };
+
+    const dup = await dbGet('SELECT id_admin FROM administrador_evento WHERE usuario = ? AND id_admin != ? AND activo = 1', [nuevoUsuario, id]);
+    if (dup) {
+      return { estado: 400, cuerpo: { success: false, message: 'Ese nombre de usuario ya está en uso.' } };
+    }
+
+    await dbRun(
+      'UPDATE administrador_evento SET nombre = ?, usuario = ?, password = ? WHERE id_admin = ?',
+      [nuevoNombre, nuevoUsuario, nuevoPass, id]
+    );
+
+    return {
+      estado: 200,
+      cuerpo: {
+        success: true,
+        message: `Encargado "${nuevoNombre}" actualizado.`
+      }
+    };
+  })
+    .then(r => {
+      if (r.cuerpo && r.cuerpo.success) {
+        registrarAuditoria(
+          req.body && req.body.id_admin,
+          'EDITAR_ENCARGADO',
+          'encargado',
+          id,
+          r.cuerpo.message
+        );
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al actualizar encargado:', err);
+      res.status(500).json({ success: false, message: 'No se pudo actualizar el encargado.' });
+    });
+});
+
+// ---- Encargado: Eliminar ---------------------------------------------------
+app.delete('/api/admin/encargados/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Encargado no válido.' });
+  }
+
+  withTransaction(async () => {
+    const enc = await dbGet('SELECT id_admin, nombre FROM administrador_evento WHERE id_admin = ? AND rol = ?', [id, 'ENCARGADO']);
+    if (!enc) return { estado: 404, cuerpo: { success: false, message: 'Ese encargado ya no existe.' } };
+
+    const movs = await dbGet('SELECT COUNT(*) AS c FROM movimiento_stock WHERE id_admin = ?', [id]);
+    const tieneMovs = movs && movs.c > 0;
+
+    if (tieneMovs) {
+      await dbRun('UPDATE administrador_evento SET activo = 0, usuario = usuario || ? WHERE id_admin = ?', ['_retirado_' + id + '_' + Date.now(), id]);
+      return {
+        estado: 200,
+        cuerpo: {
+          success: true,
+          retirado: true,
+          message: `${enc.nombre} ya no podrá ingresar. Se conserva porque registró ${movs.c} movimientos de stock.`
+        }
+      };
+    }
+
+    await dbRun('DELETE FROM administrador_evento WHERE id_admin = ?', [id]);
+    return { estado: 200, cuerpo: { success: true, retirado: false, message: `${enc.nombre} se eliminó correctamente.` } };
+  })
+    .then(r => {
+      if (r.cuerpo.success) {
+        registrarAuditoria(req.body && req.body.id_admin, 'ELIMINAR_ENCARGADO', 'encargado', id,
+          r.cuerpo.retirado ? 'Encargado dado de baja' : 'Encargado eliminado');
+      }
+      res.status(r.estado).json(r.cuerpo);
+    })
+    .catch(err => {
+      console.error('Error al eliminar encargado:', err);
+      res.status(500).json({ success: false, message: 'No se pudo eliminar el encargado.' });
+    });
 });
 
 // ---- Personal Completo -----------------------------------------------------
@@ -2697,12 +2791,17 @@ app.get('/api/admin/personal', (req, res) => {
              FROM mesero m
              LEFT JOIN cajero c ON c.id_cajero = m.id_cajero
             WHERE m.activo = 1
-            ORDER BY m.nombre`)
+            ORDER BY m.nombre`),
+    dbAll(`SELECT a.id_admin, a.nombre, a.usuario, a.rol, a.activo,
+                  (SELECT COUNT(*) FROM movimiento_stock ms WHERE ms.id_admin = a.id_admin) AS movimientos
+             FROM administrador_evento a
+            WHERE a.rol = 'ENCARGADO' AND a.activo = 1
+            ORDER BY a.nombre`)
   ])
-    .then(([cajeros, meseros]) => res.json({ cajeros, meseros }))
+    .then(([cajeros, meseros, encargados]) => res.json({ cajeros, meseros, encargados: encargados || [] }))
     .catch(err => {
       console.error('Error al leer el personal:', err);
-      res.status(500).json({ cajeros: [], meseros: [] });
+      res.status(500).json({ cajeros: [], meseros: [], encargados: [] });
     });
 });
 
@@ -3254,6 +3353,42 @@ app.post('/api/admin/meseros', async (req, res) => {
         if (errAudit) console.error(errAudit);
         return res.json({ success: true, id_mesero: newMeseroId });
       });
+    });
+  });
+});
+
+// CREATE ENCARGADO
+app.post('/api/admin/encargados', async (req, res) => {
+  const { nombre, usuario, password, id_admin, id_evento } = req.body;
+  const nomUser = String(usuario || '').trim();
+  const nomEncargado = String(nombre || '').trim();
+  const pass = String(password || '123').trim();
+
+  if (!nomEncargado) return res.status(400).json({ success: false, message: 'El nombre del encargado no puede estar vacío.' });
+  if (!nomUser) return res.status(400).json({ success: false, message: 'El usuario no puede estar vacío.' });
+
+  // Liberar usuario de encargados inactivos
+  try {
+    await dbRun("UPDATE administrador_evento SET usuario = usuario || '_retirado_' || id_admin || '_' || ? WHERE usuario = ? AND activo = 0", [Date.now(), nomUser]);
+  } catch (_) {}
+
+  // Verificar si ya existe usuario activo
+  try {
+    const dup = await dbGet('SELECT id_admin FROM administrador_evento WHERE usuario = ? AND activo = 1', [nomUser]);
+    if (dup) {
+      return res.status(400).json({ success: false, message: 'Ese usuario ya existe. Elige otro nombre de usuario.' });
+    }
+  } catch (_) {}
+
+  const query = `INSERT INTO administrador_evento (id_evento, nombre, usuario, password, rol, activo) VALUES (?, ?, ?, ?, 'ENCARGADO', 1)`;
+  dbQuery(query, [id_evento || 1, nomEncargado, nomUser, pass], (err, result) => {
+    if (err) return res.status(400).json({ success: false, message: friendlyDbError(err, 'encargado') });
+    const newAdminId = result.insertId;
+
+    const queryAudit = `INSERT INTO auditoria_admin (id_admin, id_evento, accion, entidad, id_registro, detalle) VALUES (?, ?, 'CREAR_ENCARGADO', 'encargado', ?, ?)`;
+    dbQuery(queryAudit, [id_admin || 1, id_evento || 1, newAdminId, `Se registró al encargado de inventario ${nomEncargado} con usuario ${nomUser}`], (errAudit) => {
+      if (errAudit) console.error(errAudit);
+      return res.json({ success: true, id_admin: newAdminId, message: `Encargado "${nomEncargado}" registrado correctamente.` });
     });
   });
 });

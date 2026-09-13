@@ -18,10 +18,10 @@
     <link rel="shortcut icon" href="logo_masterdrinks.jpg">
 
     <!-- Local Fonts (100% Offline) -->
-    <link rel="stylesheet" href="fonts.css?v=121">
+    <link rel="stylesheet" href="fonts.css?v=123">
 
     <!-- Main Stylesheet -->
-    <link rel="stylesheet" href="style.css?v=121">
+    <link rel="stylesheet" href="style.css?v=123">
 </head>
 
 <body>
@@ -787,6 +787,46 @@
                             </div>
                             <div id="lista-meseros" class="lista"></div>
                         </div>
+
+                        <!-- Fila 3, Columna 1: Formulario Nuevo Encargado -->
+                        <div class="glass-card form-card">
+                            <h2>Nuevo Encargado</h2>
+                            <form id="form-create-encargado">
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="enc-name">Nombre Completo</label>
+                                        <input type="text" id="enc-name" placeholder="Ej. Carlos Ramos" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="enc-rol">Módulo Asignado</label>
+                                        <input type="text" id="enc-rol" class="campo-fijo" readonly tabindex="-1"
+                                            value="Inventario">
+                                    </div>
+                                </div>
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="enc-user">Usuario de Acceso</label>
+                                        <input type="text" id="enc-user" placeholder="Ej. encargado_1" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="enc-pass">Contraseña</label>
+                                        <input type="password" id="enc-pass" placeholder="••••••••" required>
+                                    </div>
+                                </div>
+                                <button type="submit" class="primary-btn">Registrar Encargado</button>
+                            </form>
+                        </div>
+
+                        <!-- Fila 3, Columna 2: Lista Encargados (Al lado de Registrar Encargado) -->
+                        <div class="glass-card lista-card">
+                            <div class="lista-cabecera">
+                                <h2>Encargados</h2>
+                                <span id="cont-encargados" class="lista-cuenta">0</span>
+                                <input type="search" id="buscar-encargado" class="lista-buscador"
+                                    placeholder="Buscar por nombre o usuario">
+                            </div>
+                            <div id="lista-encargados" class="lista"></div>
+                        </div>
                     </div>
                 </section>
 
@@ -1501,6 +1541,40 @@
         </div>
     </div>
 
+    <!-- Editar Encargado -->
+    <div id="editar-encargado-modal" class="modal-overlay hide">
+        <div class="glass-card modal-card editar-card">
+            <button type="button" id="editar-encargado-cerrar" class="modal-close-btn" title="Cancelar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                    <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+            </button>
+
+            <div class="modal-header">
+                <h2>Editar encargado</h2>
+                <p id="editar-encargado-cual">—</p>
+            </div>
+
+            <div class="form-group">
+                <label for="editar-encargado-nombre">Nombre y apellido</label>
+                <input type="text" id="editar-encargado-nombre" maxlength="100" placeholder="Ej: Carlos Ramos">
+            </div>
+            <div class="form-group">
+                <label for="editar-encargado-usuario">Usuario</label>
+                <input type="text" id="editar-encargado-usuario" maxlength="60" placeholder="Ej: encargado_1" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="editar-encargado-password">Nueva contraseña <small style="font-weight:400;text-transform:none">(dejar vacío para conservar actual)</small></label>
+                <input type="password" id="editar-encargado-password" placeholder="••••••••" autocomplete="new-password">
+            </div>
+
+            <button type="button" id="editar-encargado-guardar" class="primary-btn full-btn">
+                Guardar cambios
+            </button>
+        </div>
+    </div>
+
     <!-- Mover stock a otra barra.
          Tres pasos, uno por pantalla: a dónde va, qué producto y cuántas
          unidades. De uno en uno y no todo en un formulario porque esto se hace
@@ -1826,9 +1900,9 @@
     <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
     <!-- Impresión térmica (ESC/POS + RawBT) -->
-    <script src="rawbt.js?v=121"></script>
+    <script src="rawbt.js?v=123"></script>
     <!-- Main Client-side logic script -->
-    <script src="app.js?v=121"></script>
+    <script src="app.js?v=123"></script>
 
     <!-- PWA Service Worker Registration -->
     <script>
