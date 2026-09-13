@@ -7249,10 +7249,11 @@ select option {
     background: rgba(0, 0, 0, 0.38);
 }
 
-/* Dashboard, Stock, Auditoría y Configuración llevan scroll exterior en el contenedor porque contienen varios bloques largos */
+/* Dashboard, Stock, Auditoría, Configuración y Personal llevan scroll exterior en el contenedor porque contienen varios bloques largos */
 #admin-view #tab-dashboard:not(.hide),
 #admin-view #tab-stock:not(.hide),
-#admin-view #tab-configuracion:not(.hide) {
+#admin-view #tab-configuracion:not(.hide),
+#admin-view #tab-crear-personal:not(.hide) {
     height: 100% !important;
     max-height: 100% !important;
     overflow-y: auto !important;
@@ -7262,6 +7263,7 @@ select option {
     box-sizing: border-box !important;
     display: block !important;
     -webkit-overflow-scrolling: touch !important;
+    scroll-behavior: smooth !important;
 }
 
 #admin-view #tab-auditoria:not(.hide) {
@@ -7279,25 +7281,28 @@ select option {
 #admin-view #tab-dashboard::-webkit-scrollbar,
 #admin-view #tab-stock::-webkit-scrollbar,
 #admin-view #tab-auditoria::-webkit-scrollbar,
-#admin-view #tab-configuracion::-webkit-scrollbar {
+#admin-view #tab-configuracion::-webkit-scrollbar,
+#admin-view #tab-crear-personal::-webkit-scrollbar {
     width: 6px;
 }
 #admin-view #tab-dashboard::-webkit-scrollbar-track,
 #admin-view #tab-stock::-webkit-scrollbar-track,
 #admin-view #tab-auditoria::-webkit-scrollbar-track,
-#admin-view #tab-configuracion::-webkit-scrollbar-track {
+#admin-view #tab-configuracion::-webkit-scrollbar-track,
+#admin-view #tab-crear-personal::-webkit-scrollbar-track {
     background: transparent;
 }
 #admin-view #tab-dashboard::-webkit-scrollbar-thumb,
 #admin-view #tab-stock::-webkit-scrollbar-thumb,
 #admin-view #tab-auditoria::-webkit-scrollbar-thumb,
-#admin-view #tab-configuracion::-webkit-scrollbar-thumb {
+#admin-view #tab-configuracion::-webkit-scrollbar-thumb,
+#admin-view #tab-crear-personal::-webkit-scrollbar-thumb {
     background: rgba(0, 0, 0, 0.2);
     border-radius: 10px;
 }
 
 /* Todos los demás tabs se ajustan al 100% del alto, igual que el sidebar */
-#admin-view .tab-content:not(#tab-dashboard):not(#tab-auditoria):not(#tab-configuracion):not(#tab-stock):not(.hide) {
+#admin-view .tab-content:not(#tab-dashboard):not(#tab-auditoria):not(#tab-configuracion):not(#tab-stock):not(#tab-crear-personal):not(.hide) {
     height: 100% !important;
     max-height: 100% !important;
     display: flex !important;
@@ -7702,23 +7707,24 @@ select option {
     overflow-y: auto !important;
 }
 
-/* --- TAB: PERSONAL (2x2 Grid ajustado al 100% del alto) --- */
+/* --- TAB: PERSONAL (Grid con scroll natural y fluido) --- */
 #admin-view #tab-crear-personal .personal-grid-2x2 {
     display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    grid-template-rows: 1fr 1fr !important;
-    gap: 10px !important;
-    height: 100% !important;
-    flex: 1 1 0 !important;
-    min-height: 0 !important;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)) !important;
+    gap: 14px !important;
+    height: auto !important;
+    flex: none !important;
+    min-height: min-content !important;
     align-items: stretch !important;
     margin: 0 !important;
+    padding-bottom: 30px !important;
 }
 
 #admin-view #tab-crear-personal .glass-card {
-    height: 100% !important;
+    height: auto !important;
+    min-height: 240px !important;
     margin: 0 !important;
-    padding: 8px 12px !important;
+    padding: 12px 14px !important;
     border: 2.5px solid #000000 !important;
     border-radius: 18px !important;
     box-shadow: 3px 3px 0px #000000 !important;
@@ -7731,16 +7737,17 @@ select option {
 #admin-view #tab-crear-personal .form-card h2,
 #admin-view #tab-crear-personal .lista-card h2 {
     font-size: 0.95rem !important;
-    margin: 0 0 4px 0 !important;
+    margin: 0 0 6px 0 !important;
     flex-shrink: 0 !important;
 }
 
 #admin-view #tab-crear-personal .glass-card form {
     display: flex !important;
     flex-direction: column !important;
-    flex: 1 1 0 !important;
+    flex: 1 1 auto !important;
     min-height: 0 !important;
     justify-content: space-between !important;
+    gap: 6px;
 }
 
 #admin-view #tab-crear-personal .form-row-2col {
@@ -7764,32 +7771,39 @@ select option {
 
 #admin-view #tab-crear-personal input,
 #admin-view #tab-crear-personal select {
-    padding: 4px 8px !important;
-    min-height: 32px !important;
+    padding: 6px 10px !important;
+    min-height: 34px !important;
     font-size: 0.82rem !important;
 }
 
 #admin-view #tab-crear-personal .glass-card form button[type="submit"] {
-    margin-top: auto !important;
-    padding: 5px 14px !important;
+    margin-top: 8px !important;
+    padding: 7px 14px !important;
     font-size: 0.82rem !important;
     flex-shrink: 0 !important;
 }
 
+#admin-view #tab-crear-personal .lista-card {
+    height: 100% !important;
+    min-height: 240px !important;
+}
+
 #admin-view #tab-crear-personal .lista-card .lista-cabecera {
     flex-shrink: 0 !important;
-    margin-bottom: 4px !important;
+    margin-bottom: 6px !important;
     min-height: 28px !important;
     display: flex;
     align-items: center;
 }
 
 #admin-view #lista-cajeros,
-#admin-view #lista-meseros {
-    flex: 1 1 0 !important;
-    min-height: 0 !important;
-    max-height: none !important;
+#admin-view #lista-meseros,
+#admin-view #lista-encargados {
+    flex: 1 1 auto !important;
+    min-height: 140px !important;
+    max-height: 200px !important;
     overflow-y: auto !important;
+    padding-right: 4px;
 }
 
 /* --- TAB: PRODUCTOS & CATEGORÍAS (2x2 Grid) --- */
