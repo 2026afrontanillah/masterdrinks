@@ -2682,6 +2682,8 @@ app.delete('/api/admin/meseros/:id', (req, res) => {
       console.error('Error al eliminar mesero:', err);
       res.status(500).json({ success: false, message: 'No se pudo eliminar el mesero.' });
     });
+});
+
 // ---- Encargado: Editar -----------------------------------------------------
 app.put('/api/admin/encargados/:id', (req, res) => {
   const id = Number(req.params.id);
