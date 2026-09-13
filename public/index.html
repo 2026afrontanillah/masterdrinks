@@ -21,7 +21,7 @@
     <link rel="stylesheet" href="fonts.css?v=123">
 
     <!-- Main Stylesheet -->
-    <link rel="stylesheet" href="style.css?v=125">
+    <link rel="stylesheet" href="style.css?v=129">
 </head>
 
 <body>
@@ -360,7 +360,15 @@
                                 <span class="kpi-badge-icon">🧾</span>
                             </div>
                             <strong id="kpi-total-orders">0</strong>
-                            <p class="desc">Pedidos registrados</p>
+                            <p class="desc">Pedidos con cobro</p>
+                        </div>
+                        <div class="kpi-card kpi-cortesias">
+                            <div class="kpi-header">
+                                <h3>Cortesías</h3>
+                                <span class="kpi-badge-icon">👑</span>
+                            </div>
+                            <strong id="kpi-total-cortesias">0.00 Bs.</strong>
+                            <p class="desc" id="kpi-desc-cortesias">0 pedidos valorizados</p>
                         </div>
                         <div class="kpi-card kpi-voids danger">
                             <div class="kpi-header">
@@ -384,6 +392,18 @@
                             <div id="metodos-sales-chart" class="sales-bar-list">
                                 <!-- Rendered dynamically -->
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Detalle de Cortesías entregadas -->
+                    <div class="glass-card dashboard-chart-card cortesias-dashboard-card" style="margin-bottom: 14px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <h2 style="margin:0;">👑 Detalle de Cortesías</h2>
+                            <span id="cortesias-dashboard-count" style="font-size:0.8rem; font-weight:800; background:#fef3c7; color:#92400e; border:1.5px solid #000; border-radius:12px; padding:2px 10px;">0 registradas</span>
+                        </div>
+                        <p class="reporte-hint" style="margin-bottom: 10px;">Comandas entregadas en cortesía (sin cobro en caja), con mesero, desglose de productos y valor de referencia.</p>
+                        <div id="cortesias-dashboard-list" class="sales-bar-list" style="margin-top:0; gap:8px;">
+                            <!-- Rendered dynamically -->
                         </div>
                     </div>
 
@@ -772,6 +792,12 @@
                                         <label for="mes-pass">Contraseña (PIN)</label>
                                         <input type="password" id="mes-pass" placeholder="Ej. 1234" required>
                                     </div>
+                                </div>
+                                <div class="form-group" style="margin-top: 2px;">
+                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; text-transform: none; font-size: 0.78rem; font-weight: 700; color: #d97706;">
+                                        <input type="checkbox" id="mes-cortesia" style="width: 16px; height: 16px; min-height: 16px; accent-color: #d97706; margin: 0; cursor: pointer;">
+                                        <span>👑 Mesero de Cortesías (No cobra / 0 Bs. en reportes)</span>
+                                    </label>
                                 </div>
                                 <button type="submit" class="primary-btn">Registrar Mesero</button>
                             </form>
@@ -1534,6 +1560,12 @@
                 <label for="editar-mesero-pin">PIN de acceso</label>
                 <input type="password" id="editar-mesero-pin" maxlength="10" inputmode="numeric" placeholder="Ej: 1234">
             </div>
+            <div class="form-group" style="margin-top: 4px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none; font-size: 0.85rem; font-weight: 700; color: #d97706;">
+                    <input type="checkbox" id="editar-mesero-cortesia" style="width: 18px; height: 18px; min-height: 18px; accent-color: #d97706; margin: 0; cursor: pointer;">
+                    <span>👑 Mesero de Cortesías (No cobra / 0 Bs. en reportes)</span>
+                </label>
+            </div>
 
             <button type="button" id="editar-mesero-guardar" class="primary-btn full-btn">
                 Guardar cambios
@@ -1716,6 +1748,17 @@
                 <button type="button" class="pay-tab" data-metodo="2">💳<span>Tarjeta</span></button>
                 <button type="button" class="pay-tab" data-metodo="4">🏦<span>Transfer.</span></button>
                 <button type="button" class="pay-tab" data-metodo="mixto">🔀<span>Múltiple</span></button>
+            </div>
+
+            <!-- CORTESÍA: para meseros con perfil de cortesía -->
+            <div id="pay-panel-cortesia" class="pay-panel hide">
+                <div class="cortesia-box" style="text-align: center; padding: 16px 12px; background: #fef3c7; border: 2.5px solid #000; border-radius: 16px; box-shadow: 2px 2px 0px #000; margin-bottom: 12px;">
+                    <div style="font-size: 2rem; margin-bottom: 2px;">👑</div>
+                    <strong style="font-size: 1.05rem; color: #92400e; display: block;">PEDIDO DE CORTESÍA</strong>
+                    <p style="font-size: 0.8rem; color: #78350f; margin: 4px 0 0 0; line-height: 1.35; font-weight: 600;">
+                        No requiere cobro en caja ni se suma a la liquidación. En la base de datos se registra valorizado en <strong id="cortesia-val-monto">0.00 Bs.</strong> y descuenta el stock correctamente.
+                    </p>
+                </div>
             </div>
 
             <!-- EFECTIVO: con cuánto paga el cliente, para calcular el cambio -->
@@ -1902,7 +1945,7 @@
     <!-- Impresión térmica (ESC/POS + RawBT) -->
     <script src="rawbt.js?v=123"></script>
     <!-- Main Client-side logic script -->
-    <script src="app.js?v=123"></script>
+    <script src="app.js?v=129"></script>
 
     <!-- PWA Service Worker Registration -->
     <script>

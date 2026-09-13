@@ -2,15 +2,15 @@
  * MasterDrinks POS — Service Worker (PWA)
  * ========================================================================== */
 
-const CACHE_NAME = 'masterdrinks-pos-v125';
+const CACHE_NAME = 'masterdrinks-pos-v129';
 
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/fonts.css?v=125',
-  '/style.css?v=125',
-  '/app.js?v=125',
-  '/rawbt.js?v=125',
+  '/fonts.css?v=129',
+  '/style.css?v=129',
+  '/app.js?v=129',
+  '/rawbt.js?v=129',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

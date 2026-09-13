@@ -2837,10 +2837,40 @@ document.addEventListener('DOMContentLoaded', () => {
         payRecibidoInput.value = '';
         lineasPago = [];
         mostrarErrorPago('');
-        document.getElementById('pay-total').textContent = `${orderTotal.toFixed(2)} Bs.`;
-        seleccionarMetodo(EFECTIVO);
-        renderCambio();
-        actualizarColorTotalPago();
+
+        const esCortesia = Boolean(currentWaiter && currentWaiter.es_cortesia);
+        const payTabs = document.getElementById('pay-tabs');
+        const payPanelCortesia = document.getElementById('pay-panel-cortesia');
+        const payPanelEf = document.getElementById('pay-panel-efectivo');
+        const payCaption = document.querySelector('#payment-modal .pay-caption');
+        const payConfirmBtn = document.getElementById('pay-confirm-btn');
+        const payTotalEl = document.getElementById('pay-total');
+
+        if (esCortesia) {
+            if (payCaption) payCaption.textContent = 'Pedido de Cortesía';
+            if (payTotalEl) {
+                payTotalEl.innerHTML = `<span style="text-decoration: line-through; opacity: 0.45; font-size: 0.78em; margin-right: 8px;">${orderTotal.toFixed(2)} Bs.</span><span style="color: #10b981; font-weight: 900;">0.00 Bs.</span>`;
+            }
+            if (payTabs) payTabs.classList.add('hide');
+            if (payPanelEf) payPanelEf.classList.add('hide');
+            document.querySelectorAll('.pay-panel').forEach(p => p.classList.add('hide'));
+            if (payPanelCortesia) {
+                payPanelCortesia.classList.remove('hide');
+                const valMonto = document.getElementById('cortesia-val-monto');
+                if (valMonto) valMonto.textContent = `${orderTotal.toFixed(2)} Bs.`;
+            }
+            if (payConfirmBtn) payConfirmBtn.textContent = 'CONFIRMAR CORTESÍA';
+        } else {
+            if (payCaption) payCaption.textContent = 'Total a cobrar';
+            if (payTotalEl) payTotalEl.textContent = `${orderTotal.toFixed(2)} Bs.`;
+            if (payTabs) payTabs.classList.remove('hide');
+            if (payPanelCortesia) payPanelCortesia.classList.add('hide');
+            if (payConfirmBtn) payConfirmBtn.textContent = 'CONFIRMAR PAGO';
+            seleccionarMetodo(EFECTIVO);
+            renderCambio();
+            actualizarColorTotalPago();
+        }
+
         payModal.classList.remove('hide');
     }
 
@@ -2930,8 +2960,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Traduce lo elegido en el modal a la lista de pagos que espera el servidor.
     function construirPagos() {
+        if (currentWaiter && currentWaiter.es_cortesia) {
+            return [{
+                id_metodo_pago: 99,
+                nombre_metodo: 'CORTESIA',
+                monto: round2(orderTotal),
+                referencia: 'CORTESIA'
+            }];
+        }
+
         const referencia = id => {
-            const meta = METODOS[id] || { ref: 'PAGO' };
+            const meta = METODOS[id];
+            if (!meta || !meta.digital) return null;
             const anotada = document.getElementById('pay-referencia').value.trim();
             if (id === QR && anotada) return anotada.slice(0, 40);
             return meta.ref + '-' + Math.floor(100000 + Math.random() * 900000);
@@ -3039,10 +3079,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const boton = document.getElementById('pay-confirm-btn');
         const etiquetaOriginal = boton.textContent;
+        const esCort = Boolean(currentWaiter && currentWaiter.es_cortesia);
         guardandoComanda = true;
         boton.disabled = true;
         boton.classList.add('is-busy');
-        boton.textContent = 'COBRANDO...';
+        boton.textContent = esCort ? 'GUARDANDO CORTESÍA...' : 'COBRANDO...';
 
         const restaurarBoton = () => {
             guardandoComanda = false;
@@ -3854,22 +3895,33 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             
             const activeComandas = comandas.filter(c => c.estado_pago !== 'ANULADO');
+            const activePaidComandas = activeComandas.filter(c => !c.es_cortesia);
+            const cortesiaComandas = activeComandas.filter(c => Boolean(c.es_cortesia));
             const voidedComandas = comandas.filter(c => c.estado_pago === 'ANULADO');
 
-            const totalRecaudado = activeComandas.reduce((sum, c) => sum + parseFloat(c.total || 0), 0);
+            const totalRecaudado = activePaidComandas.reduce((sum, c) => sum + parseFloat(c.total || 0), 0);
+            const totalCortesias = cortesiaComandas.reduce((sum, c) => sum + parseFloat(c.total || 0), 0);
 
             const kpiSales = document.getElementById('kpi-total-sales');
             if (kpiSales) kpiSales.textContent = `${totalRecaudado.toFixed(2)} Bs.`;
             
             const kpiOrders = document.getElementById('kpi-total-orders');
-            if (kpiOrders) kpiOrders.textContent = activeComandas.length;
+            if (kpiOrders) kpiOrders.textContent = activePaidComandas.length;
+
+            const kpiCortesias = document.getElementById('kpi-total-cortesias');
+            if (kpiCortesias) kpiCortesias.textContent = `${totalCortesias.toFixed(2)} Bs.`;
+
+            const kpiDescCortesias = document.getElementById('kpi-desc-cortesias');
+            if (kpiDescCortesias) {
+                kpiDescCortesias.textContent = `${cortesiaComandas.length} ${cortesiaComandas.length === 1 ? 'pedido valorizado' : 'pedidos valorizados'}`;
+            }
 
             const kpiVoids = document.getElementById('kpi-voided-orders');
             if (kpiVoids) kpiVoids.textContent = voidedComandas.length;
 
             // 1. Group sales by cashier for progress list
             const salesByCajero = {};
-            activeComandas.forEach(c => {
+            activePaidComandas.forEach(c => {
                 const cName = (c.nombre_cajero && c.nombre_cajero.trim()) ? c.nombre_cajero : 'Cajero General';
                 salesByCajero[cName] = (salesByCajero[cName] || 0) + parseFloat(c.total || 0);
             });
@@ -3906,7 +3958,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 2. Group sales by payment method
             const salesByMethod = {};
             let totalPagadoMetodos = 0;
-            activeComandas.forEach(c => {
+            activePaidComandas.forEach(c => {
                 if (Array.isArray(c.pagos) && c.pagos.length > 0) {
                     c.pagos.forEach(p => {
                         const mName = (p.nombre_metodo && p.nombre_metodo.trim()) ? p.nombre_metodo : 'Otro';
@@ -3980,6 +4032,55 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         `;
                         methodChartContainer.appendChild(div);
+                    });
+                }
+            }
+
+            // 3. Render list of Cortesías
+            const cortesiasListContainer = document.getElementById('cortesias-dashboard-list');
+            const cortesiasCountBadge = document.getElementById('cortesias-dashboard-count');
+            if (cortesiasCountBadge) {
+                cortesiasCountBadge.textContent = `${cortesiaComandas.length} ${cortesiaComandas.length === 1 ? 'cortesía' : 'cortesías'} (${totalCortesias.toFixed(2)} Bs.)`;
+            }
+            if (cortesiasListContainer) {
+                cortesiasListContainer.innerHTML = '';
+                if (cortesiaComandas.length === 0) {
+                    cortesiasListContainer.innerHTML = '<div style="color: #64748b; font-size: 0.88rem; font-style: italic; padding: 12px; text-align: center;">No hay comandas de cortesía registradas en este turno.</div>';
+                } else {
+                    cortesiaComandas.forEach(c => {
+                        const itemsSummary = (Array.isArray(c.detalles) && c.detalles.length > 0)
+                            ? c.detalles.map(d => `${d.cantidad}x ${escapeHtml(d.nombre_producto || 'Ítem')}`).join(', ')
+                            : 'Sin desglose de productos';
+                        
+                        let horaStr = '';
+                        if (c.fecha_hora) {
+                            const d = new Date(c.fecha_hora);
+                            if (!isNaN(d.getTime())) {
+                                horaStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            }
+                        }
+                        
+                        const montoVal = parseFloat(c.total || 0).toFixed(2);
+                        const meseroName = escapeHtml(c.nombre_mesero || 'Mesero cortesía');
+                        const barraName = c.nombre_barra ? ` · ${escapeHtml(c.nombre_barra)}` : '';
+
+                        const itemDiv = document.createElement('div');
+                        itemDiv.className = 'cortesia-dash-item';
+                        itemDiv.innerHTML = `
+                            <div class="cortesia-dash-main">
+                                <div class="cortesia-dash-title">
+                                    <span class="cortesia-badge">👑 Comanda #${c.id_comanda}</span>
+                                    <span class="cortesia-mesero">👤 ${meseroName}${barraName}</span>
+                                    ${horaStr ? `<span class="cortesia-hora">🕒 ${horaStr}</span>` : ''}
+                                </div>
+                                <div class="cortesia-dash-prods">📦 ${itemsSummary}</div>
+                            </div>
+                            <div class="cortesia-dash-monto">
+                                <strong>${montoVal} Bs.</strong>
+                                <span>Valor comercial</span>
+                            </div>
+                        `;
+                        cortesiasListContainer.appendChild(itemDiv);
                     });
                 }
             }
@@ -4840,6 +4941,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return `<li class="comanda-item-line ${isAnulado ? 'tachado' : ''}">• ${d.cantidad}x ${escapeHtml(d.nombre_producto)} ${subt}</li>`;
             }).join('');
 
+            const isCortesia = !isAnulado && Boolean(c.es_cortesia);
             const card = document.createElement('div');
             card.className = cardClass;
             card.setAttribute('data-id', c.id_comanda.toString());
@@ -4851,11 +4953,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div>
                             <div class="comanda-tags-row">
                                 <span class="comanda-pill">Comanda #${escapeHtml(refComanda(c.id_comanda))}</span>
-                                <span class="comanda-pill comanda-status-pill ${isAnulado ? 'badge-anulado' : 'badge-pagado'}">
-                                    ${isAnulado ? '✖ Anulada' : '✔ Vendida'}
+                                <span class="comanda-pill comanda-status-pill ${isAnulado ? 'badge-anulado' : (isCortesia ? 'badge-cortesia' : 'badge-pagado')}">
+                                    ${isAnulado ? '✖ Anulada' : (isCortesia ? '👑 Cortesía' : '✔ Vendida')}
                                 </span>
                             </div>
-                            <div class="comanda-client-name">${escapeHtml(c.nombre_mesero || 'Mesero')}</div>
+                            <div class="comanda-client-name">${escapeHtml(c.nombre_mesero || 'Mesero')}${isCortesia ? ' <span style="font-size:0.75rem; color:#d97706; font-weight:800;">[CORTESÍA]</span>' : ''}</div>
                             <ul class="comanda-products-list">
                                 ${detailsHtml}
                             </ul>
@@ -4866,7 +4968,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="comanda-timestamp">${fechaStr}</div>
                             <div class="comanda-price-wrap">
                                 <span class="comanda-price-capsule ${isAnulado ? 'tachado' : ''}">
-                                    Bs ${formatearMonto(c.total)}
+                                    ${isCortesia ? `Bs 0.00 <small style="font-size:0.62rem; font-weight:600; opacity:0.85;">(Val. ${formatearMonto(c.total)})</small>` : `Bs ${formatearMonto(c.total)}`}
                                 </span>
                             </div>
                         </div>
@@ -6406,6 +6508,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (nombreInput) nombreInput.value = m.nombre || '';
         const pinInput = document.getElementById('editar-mesero-pin');
         if (pinInput) pinInput.value = m.pin || m.password || '';
+        const cortesiaInput = document.getElementById('editar-mesero-cortesia');
+        if (cortesiaInput) cortesiaInput.checked = Boolean(m.es_cortesia);
 
         if (editarMeseroModal) editarMeseroModal.classList.remove('hide');
         if (nombreInput) nombreInput.focus();
@@ -6425,6 +6529,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const id_cajero = document.getElementById('editar-mesero-cajero')?.value;
         const nombre = (document.getElementById('editar-mesero-nombre')?.value || '').trim();
         const pin = (document.getElementById('editar-mesero-pin')?.value || '').trim();
+        const es_cortesia = document.getElementById('editar-mesero-cortesia')?.checked ? 1 : 0;
 
         if (!nombre) {
             notify('El nombre no puede estar vacío.', 'error');
@@ -6447,6 +6552,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     nombre,
                     pin,
                     password: pin,
+                    es_cortesia,
                     id_admin: currentUser ? currentUser.id_admin : 1
                 })
             });
@@ -6622,10 +6728,14 @@ document.addEventListener('DOMContentLoaded', () => {
         agrupar(lista, m => m.cajero).forEach((meseros, cajero) => {
             cont.appendChild(cabeceraGrupo(cajero, meseros.length));
             meseros.forEach(m => {
+                const badgeCort = m.es_cortesia ? '👑 CORTESÍA' : '';
+                const badgeCom = m.comandas > 0 ? `${m.comandas} ${m.comandas === 1 ? 'comanda' : 'comandas'}` : '';
+                const insigniaTexto = [badgeCort, badgeCom].filter(Boolean).join(' · ');
+
                 const fila = filaLista({
                     titulo: m.nombre,
                     detalle: 'PIN ' + (m.pin || m.password || '••••'),
-                    insignia: m.comandas > 0 ? m.comandas + (m.comandas === 1 ? ' comanda' : ' comandas') : '',
+                    insignia: insigniaTexto,
                     inactivo: false,
                     onEditar: () => abrirEditarMesero(m),
                     onBorrar: () => borrar(
@@ -6776,11 +6886,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const nombre = document.getElementById('mes-name').value;
         const usuario = document.getElementById('mes-user').value;
         const password = document.getElementById('mes-pass').value;
+        const es_cortesia = document.getElementById('mes-cortesia')?.checked ? 1 : 0;
 
         ['mes-name', 'mes-user', 'mes-pass'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
+        const cortCheck = document.getElementById('mes-cortesia');
+        if (cortCheck) cortCheck.checked = false;
+
         const nameEl = document.getElementById('mes-name');
         if (nameEl) nameEl.focus();
 
@@ -6793,6 +6907,7 @@ document.addEventListener('DOMContentLoaded', () => {
             nombre: nombre,
             usuario: usuario,
             pin: password,
+            es_cortesia,
             comandas: 0,
             activo: 1
         };
@@ -6805,7 +6920,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/admin/meseros', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id_cajero, nombre, usuario, password, id_admin: currentUser ? currentUser.id_admin : 1, id_evento: currentUser ? currentUser.id_evento : 1 })
+                body: JSON.stringify({ id_cajero, nombre, usuario, password, es_cortesia, id_admin: currentUser ? currentUser.id_admin : 1, id_evento: currentUser ? currentUser.id_evento : 1 })
             });
             const data = await response.json();
 

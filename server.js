@@ -619,9 +619,7 @@ const mockDb = {
     { id_cajero: 9, id_barra: 1, nombre: 'Valeria Quiroga', usuario: 'cajero_general_3', password: 'demo123', activo: 1 }
   ],
   administrador_evento: [
-    { id_admin: 1, id_evento: 1, nombre: 'Administrador Principal', usuario: 'admin', password: '123', rol: 'ADMINISTRADOR', activo: 1 },
-    { id_admin: 2, id_evento: 1, nombre: 'Supervisor Operativo', usuario: 'supervisor_evento', password: 'demo123', rol: 'SUPERVISOR', activo: 1 },
-    { id_admin: 3, id_evento: 1, nombre: 'Encargado de Inventario', usuario: 'encargado', password: '123', rol: 'ENCARGADO', activo: 1 }
+    { id_admin: 1, id_evento: 1, nombre: 'Administrador Principal', usuario: 'admin', password: 'admin*12345', rol: 'ADMINISTRADOR', activo: 1 }
   ],
   mesero: [],
   categoria_producto: [
@@ -989,6 +987,9 @@ function initializeDatabase() {
       logo_ticket TEXT
     )`);
     db.run(`ALTER TABLE configuracion ADD COLUMN logo_ticket TEXT`, () => {});
+    db.run(`ALTER TABLE mesero ADD COLUMN es_cortesia INTEGER DEFAULT 0`, () => {});
+    db.run(`ALTER TABLE comanda ADD COLUMN es_cortesia INTEGER DEFAULT 0`, () => {});
+    db.run(`INSERT OR IGNORE INTO metodo_pago (nombre, descripcion, activo) VALUES ('CORTESIA', 'Consumo por cortesía sin cobro en caja', 1)`, () => {});
 
     db.get('SELECT COUNT(*) AS n FROM configuracion', (errCfg, filaCfg) => {
       if (errCfg || (filaCfg && filaCfg.n > 0)) return;
@@ -1108,23 +1109,11 @@ function initializeDatabase() {
         console.log("💾 SQLite database already exists with data. Seeding skipped.");
       }
 
-      // Asegurar credenciales actualizadas del administrador principal (usuario: admin, password: 123)
+      // Asegurar credenciales actualizadas del administrador principal (usuario: admin, password: admin*12345)
       try {
-        db.run(`UPDATE administrador_evento SET usuario = 'admin', password = '123' WHERE id_admin = 1 OR usuario = 'admin_evento'`);
+        db.run(`UPDATE administrador_evento SET usuario = 'admin', password = 'admin*12345' WHERE id_admin = 1 OR usuario = 'admin' OR usuario = 'admin_evento'`);
       } catch (e) {
         // Ignorar si la tabla aún no existe en paso previo
-      }
-
-      // Asegurar existencia del usuario Encargado de Inventario (rol: ENCARGADO)
-      try {
-        const enc = db.prepare("SELECT id_admin FROM administrador_evento WHERE rol = 'ENCARGADO' OR usuario = 'encargado'").get();
-        if (!enc) {
-          db.run(
-            `INSERT INTO administrador_evento (id_evento, nombre, usuario, password, rol, activo) VALUES (1, 'Encargado de Inventario', 'encargado', '123', 'ENCARGADO', 1)`
-          );
-        }
-      } catch (e) {
-        // Ignorar
       }
     });
   });
@@ -1190,7 +1179,7 @@ app.post('/api/login/mesero', (req, res) => {
   const { password, id_cajero, id_evento } = req.body;
 
   let query = `
-    SELECT m.id_mesero, m.nombre, m.id_cajero, c.id_barra
+    SELECT m.id_mesero, m.nombre, m.id_cajero, c.id_barra, COALESCE(m.es_cortesia, 0) AS es_cortesia
     FROM mesero m
     JOIN cajero c ON m.id_cajero = c.id_cajero
     WHERE m.password = ? AND m.activo = 1
@@ -1719,37 +1708,63 @@ app.post('/api/comanda', (req, res) => {
       }
     }
 
+    let esCortesiaComanda = 0;
+    if (id_mesero) {
+      const mesRow = await dbGet('SELECT es_cortesia FROM mesero WHERE id_mesero = ?', [id_mesero]);
+      if (mesRow && mesRow.es_cortesia === 1) {
+        esCortesiaComanda = 1;
+      }
+    }
+    if (req.body && req.body.es_cortesia) {
+      esCortesiaComanda = 1;
+    }
+
     const metodosDb = await dbAll('SELECT id_metodo_pago, nombre FROM metodo_pago WHERE activo = 1');
     const metodoMap = new Map(metodosDb.map(m => [m.id_metodo_pago, m.nombre]));
 
     let totalPagos = 0;
-    const pagosValidados = [];
-    for (const pago of metodos_pago) {
-      const idMetodo = parseInt(pago && pago.id_metodo_pago, 10);
-      const monto = Number(pago && pago.monto);
-      if (!metodoMap.has(idMetodo)) throw new BusinessError('Forma de pago desconocida en la comanda.');
-      if (!Number.isFinite(monto) || monto <= 0) throw new BusinessError('Hay un monto de pago inválido en la comanda.');
+    let pagosValidados = [];
 
-      totalPagos = round2(totalPagos + monto);
-      pagosValidados.push({
-        id_metodo_pago: idMetodo,
-        monto: round2(monto),
-        referencia: String(pago.referencia || '').trim().slice(0, 80)
-      });
-    }
+    if (esCortesiaComanda === 1) {
+      let metodoCortesia = await dbGet("SELECT id_metodo_pago FROM metodo_pago WHERE UPPER(nombre) = 'CORTESIA'");
+      if (!metodoCortesia) {
+        const resMp = await dbRun("INSERT INTO metodo_pago (nombre, descripcion, activo) VALUES ('CORTESIA', 'Consumo por cortesía sin cobro en caja', 1)");
+        metodoCortesia = { id_metodo_pago: resMp.insertId };
+      }
+      pagosValidados = [{
+        id_metodo_pago: metodoCortesia.id_metodo_pago,
+        monto: round2(totalCalculado),
+        referencia: 'CORTESIA'
+      }];
+      totalPagos = totalCalculado;
+    } else {
+      for (const pago of metodos_pago) {
+        const idMetodo = parseInt(pago && pago.id_metodo_pago, 10);
+        const monto = Number(pago && pago.monto);
+        if (!metodoMap.has(idMetodo)) throw new BusinessError('Forma de pago desconocida en la comanda.');
+        if (!Number.isFinite(monto) || monto <= 0) throw new BusinessError('Hay un monto de pago inválido en la comanda.');
 
-    if (totalPagos < totalCalculado) {
-      throw new BusinessError(
-        `Los pagos (${totalPagos.toFixed(2)}) no cubren el total de la comanda (${totalCalculado.toFixed(2)}).`
-      );
+        totalPagos = round2(totalPagos + monto);
+        pagosValidados.push({
+          id_metodo_pago: idMetodo,
+          monto: round2(monto),
+          referencia: String(pago.referencia || '').trim().slice(0, 80)
+        });
+      }
+
+      if (totalPagos < totalCalculado) {
+        throw new BusinessError(
+          `Los pagos (${totalPagos.toFixed(2)}) no cubren el total de la comanda (${totalCalculado.toFixed(2)}).`
+        );
+      }
     }
 
     const nowStr = nowSql();
     const comandaRes = await dbRun(
-      `INSERT INTO comanda (id_evento, id_barra, id_cajero, id_mesero, fecha_hora, total, estado_pago, estatus, observaciones, clave_idempotencia)
-       VALUES (?, ?, ?, ?, ?, ?, 'PAGADO', 'COMPLETADO', ?, ?)`,
+      `INSERT INTO comanda (id_evento, id_barra, id_cajero, id_mesero, fecha_hora, total, estado_pago, estatus, observaciones, clave_idempotencia, es_cortesia)
+       VALUES (?, ?, ?, ?, ?, ?, 'PAGADO', 'COMPLETADO', ?, ?, ?)`,
       [id_evento || 1, id_barra, id_cajero, id_mesero, nowStr, totalCalculado,
-       String(observaciones || '').trim().slice(0, 250), clave || null]
+       String(observaciones || '').trim().slice(0, 250), clave || null, esCortesiaComanda]
     );
     const idComanda = comandaRes.insertId;
 
@@ -2527,6 +2542,7 @@ app.put('/api/admin/meseros/:id', (req, res) => {
       : (req.body.pin && String(req.body.pin).trim() ? String(req.body.pin).trim() : mes.password);
     const nuevoCajero = req.body.id_cajero !== undefined ? Number(req.body.id_cajero) : mes.id_cajero;
     const nuevoActivo = req.body.activo !== undefined ? (req.body.activo ? 1 : 0) : mes.activo;
+    const nuevoCortesia = req.body.es_cortesia !== undefined ? (req.body.es_cortesia ? 1 : 0) : (mes.es_cortesia || 0);
 
     if (!nuevoNombre) return { estado: 400, cuerpo: { success: false, message: 'El nombre no puede estar vacío.' } };
     if (!nuevoPin) return { estado: 400, cuerpo: { success: false, message: 'El PIN no puede estar vacío.' } };
@@ -2545,8 +2561,8 @@ app.put('/api/admin/meseros/:id', (req, res) => {
     }
 
     await dbRun(
-      'UPDATE mesero SET nombre = ?, usuario = ?, password = ?, id_cajero = ?, activo = ? WHERE id_mesero = ?',
-      [nuevoNombre, nuevoUsuario, nuevoPin, nuevoCajero, nuevoActivo, id]
+      'UPDATE mesero SET nombre = ?, usuario = ?, password = ?, id_cajero = ?, activo = ?, es_cortesia = ? WHERE id_mesero = ?',
+      [nuevoNombre, nuevoUsuario, nuevoPin, nuevoCajero, nuevoActivo, nuevoCortesia, id]
     );
 
     const cambioEstado = mes.activo !== nuevoActivo;
@@ -2788,6 +2804,7 @@ app.get('/api/admin/personal', (req, res) => {
                   (SELECT COUNT(*) FROM comanda k WHERE k.id_cajero = c.id_cajero) AS comandas
              FROM cajero c WHERE c.activo = 1 ORDER BY c.nombre`),
     dbAll(`SELECT m.id_mesero, m.nombre, m.usuario, m.password AS pin, m.activo, m.id_cajero,
+                  COALESCE(m.es_cortesia, 0) AS es_cortesia,
                   c.nombre AS cajero,
                   (SELECT COUNT(*) FROM comanda k WHERE k.id_mesero = m.id_mesero) AS comandas
              FROM mesero m
@@ -3104,8 +3121,10 @@ app.put('/api/admin/productos/:id/foto', (req, res) => {
 app.get('/api/admin/comandas', (req, res) => {
   const query = `
     SELECT c.*,
+           COALESCE(c.es_cortesia, 0) AS es_cortesia,
            COALESCE(cj.nombre, 'Cajero eliminado')  AS nombre_cajero,
            COALESCE(m.nombre,  'Mesero eliminado')  AS nombre_mesero,
+           COALESCE(m.es_cortesia, 0) AS mesero_es_cortesia,
            COALESCE(b.nombre_barra, 'Barra eliminada') AS nombre_barra
     FROM comanda c
     LEFT JOIN cajero cj ON c.id_cajero = cj.id_cajero
@@ -3314,9 +3333,10 @@ app.post('/api/admin/cajeros', async (req, res) => {
 
 // CREATE MESERO
 app.post('/api/admin/meseros', async (req, res) => {
-  const { id_evento, id_cajero, nombre, usuario, password, id_admin } = req.body;
+  const { id_evento, id_cajero, nombre, usuario, password, id_admin, es_cortesia } = req.body;
   const nomMesero = String(nombre || '').trim();
   const nomUser = String(usuario || '').trim() || (`mesero_${Date.now()}`);
+  const esCort = es_cortesia ? 1 : 0;
 
   if (!nomMesero) return res.status(400).json({ success: false, message: 'El nombre del mesero no puede estar vacío.' });
   if (!id_cajero) return res.status(400).json({ success: false, message: 'Debes asignar un cajero al mesero.' });
@@ -3345,13 +3365,13 @@ app.post('/api/admin/meseros', async (req, res) => {
       });
     }
 
-    const query = `INSERT INTO mesero (id_evento, id_cajero, nombre, usuario, password) VALUES (?, ?, ?, ?, ?)`;
-    dbQuery(query, [id_evento || 1, id_cajero, nomMesero, nomUser, password], (err, result) => {
+    const query = `INSERT INTO mesero (id_evento, id_cajero, nombre, usuario, password, es_cortesia) VALUES (?, ?, ?, ?, ?, ?)`;
+    dbQuery(query, [id_evento || 1, id_cajero, nomMesero, nomUser, password, esCort], (err, result) => {
       if (err) return res.status(400).json({ success: false, message: friendlyDbError(err, 'mesero') });
       const newMeseroId = result.insertId;
 
       const queryAudit = `INSERT INTO auditoria_admin (id_admin, id_evento, accion, entidad, id_registro, detalle) VALUES (?, ?, 'CREAR_MESERO', 'mesero', ?, ?)`;
-      dbQuery(queryAudit, [id_admin, id_evento || 1, newMeseroId, `Se registró al mesero ${nomMesero} asignado al cajero ID ${id_cajero}`], (errAudit) => {
+      dbQuery(queryAudit, [id_admin, id_evento || 1, newMeseroId, `Se registró al mesero ${nomMesero}${esCort ? ' (Cortesías)' : ''} asignado al cajero ID ${id_cajero}`], (errAudit) => {
         if (errAudit) console.error(errAudit);
         return res.json({ success: true, id_mesero: newMeseroId });
       });
@@ -3518,10 +3538,12 @@ async function construirReporte(query) {
   const resumen = await dbGet(`
     SELECT
       COUNT(*)                                                     AS comandas,
-      COALESCE(SUM(CASE WHEN estado_pago != 'ANULADO' THEN total END), 0)      AS recaudado,
+      COALESCE(SUM(CASE WHEN estado_pago != 'ANULADO' AND COALESCE(es_cortesia, 0) = 0 THEN total END), 0)      AS recaudado,
       SUM(CASE WHEN estado_pago != 'ANULADO' THEN 1 ELSE 0 END)    AS validas,
       SUM(CASE WHEN estado_pago  = 'ANULADO' THEN 1 ELSE 0 END)    AS anuladas,
-      COALESCE(SUM(CASE WHEN estado_pago  = 'ANULADO' THEN total END), 0)      AS importe_anulado
+      COALESCE(SUM(CASE WHEN estado_pago  = 'ANULADO' THEN total END), 0)      AS importe_anulado,
+      SUM(CASE WHEN estado_pago != 'ANULADO' AND COALESCE(es_cortesia, 0) = 1 THEN 1 ELSE 0 END) AS cortesias,
+      COALESCE(SUM(CASE WHEN estado_pago != 'ANULADO' AND COALESCE(es_cortesia, 0) = 1 THEN total END), 0) AS importe_cortesia
     FROM comanda WHERE fecha_hora BETWEEN ? AND ?
   `, P);
 
@@ -3536,12 +3558,13 @@ async function construirReporte(query) {
     FROM pago_comanda p
     JOIN comanda c    ON c.id_comanda = p.id_comanda
     JOIN metodo_pago mp ON mp.id_metodo_pago = p.id_metodo_pago
-    WHERE p.estado = 'APROBADO' AND c.estado_pago != 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
+    WHERE p.estado = 'APROBADO' AND c.estado_pago != 'ANULADO' AND COALESCE(c.es_cortesia, 0) = 0 AND UPPER(mp.nombre) != 'CORTESIA' AND c.fecha_hora BETWEEN ? AND ?
     GROUP BY mp.id_metodo_pago ORDER BY importe DESC
   `, P);
 
   const porBarra = await dbAll(`
-    SELECT b.nombre_barra AS barra, COUNT(*) AS comandas, COALESCE(SUM(c.total), 0) AS importe
+    SELECT b.nombre_barra AS barra, COUNT(*) AS comandas,
+           COALESCE(SUM(CASE WHEN COALESCE(c.es_cortesia, 0) = 0 THEN c.total ELSE 0 END), 0) AS importe
     FROM comanda c JOIN barra b ON b.id_barra = c.id_barra
     WHERE c.estado_pago != 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
     GROUP BY b.id_barra ORDER BY importe DESC
@@ -3549,7 +3572,8 @@ async function construirReporte(query) {
 
   const porCajero = await dbAll(`
     SELECT cj.nombre AS cajero, b.nombre_barra AS barra,
-           COUNT(*) AS comandas, COALESCE(SUM(c.total), 0) AS importe
+           COUNT(*) AS comandas,
+           COALESCE(SUM(CASE WHEN COALESCE(c.es_cortesia, 0) = 0 THEN c.total ELSE 0 END), 0) AS importe
     FROM comanda c
     JOIN cajero cj ON cj.id_cajero = c.id_cajero
     JOIN barra b   ON b.id_barra   = cj.id_barra
@@ -3558,7 +3582,9 @@ async function construirReporte(query) {
   `, P);
 
   const porMesero = await dbAll(`
-    SELECT m.nombre AS mesero, COUNT(*) AS comandas, COALESCE(SUM(c.total), 0) AS importe
+    SELECT m.nombre AS mesero, COALESCE(m.es_cortesia, 0) AS es_cortesia,
+           COUNT(*) AS comandas,
+           COALESCE(SUM(CASE WHEN COALESCE(c.es_cortesia, 0) = 0 THEN c.total ELSE 0 END), 0) AS importe
     FROM comanda c JOIN mesero m ON m.id_mesero = c.id_mesero
     WHERE c.estado_pago != 'ANULADO' AND c.fecha_hora BETWEEN ? AND ?
     GROUP BY m.id_mesero ORDER BY importe DESC
@@ -3614,8 +3640,10 @@ async function construirReporte(query) {
       comandas: Number(resumen.comandas) || 0,
       validas,
       anuladas: Number(resumen.anuladas) || 0,
+      cortesias: Number(resumen.cortesias) || 0,
       recaudado: round2(resumen.recaudado),
       importe_anulado: round2(resumen.importe_anulado),
+      importe_cortesia: round2(resumen.importe_cortesia),
       unidades: Number(unidades.n) || 0,
       ticket_medio: validas > 0 ? round2(Number(resumen.recaudado) / validas) : 0
     },
